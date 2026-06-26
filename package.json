@@ -1,0 +1,14 @@
+{
+  "name": "recrutamento-bot",
+  "version": "1.0.0",
+  "description": "Robô de atendimento de recrutamento no WhatsApp — serviço separado que conversa com o sistema Nova Gestão RH por API.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test:conversa": "node src/teste-conversa.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
