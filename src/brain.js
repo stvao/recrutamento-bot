@@ -1,10 +1,11 @@
 /**
- * Cérebro do robô de recrutamento (mesmo desenho híbrido do sistema RH, em JS
- * puro, sem banco). Funções puras: `iniciar()` e `responder(estado, msg)`.
- * A criação da candidatura é feita pelo chamador via rh-client (API do RH).
+ * Cérebro do robô de recrutamento (desenho híbrido). Funções puras: `iniciar()`
+ * e `responder(estado, msg)`. A criação da candidatura é feita pelo chamador
+ * (rh-client), após a conclusão. Esta é a FONTE DA VERDADE do robô.
  *
- * Esta é a FONTE DA VERDADE do robô em produção. Edite a base de conhecimento
- * abaixo conforme as vagas/políticas mudarem.
+ * Melhorias: seleção por número, opção "Outros" (função fora da lista),
+ * comando "recomeçar", e confirmação de envio tratada pelo servidor (só diz
+ * "registrada" depois de salvar de verdade).
  */
 
 // ─── Base de conhecimento ────────────────────────────────────────────────────
@@ -41,7 +42,16 @@ function temAlguma(msg, termos) {
   const m = norm(msg)
   return termos.some(t => m.includes(norm(t)))
 }
+/** Se a mensagem é só um número (ex.: "2", "2)", "2."), devolve o índice (1..len). */
+function indiceEscolhido(msg, len) {
+  const m = (msg || '').trim().match(/^(\d{1,2})[).\s-]*$/)
+  if (!m) return null
+  const n = parseInt(m[1], 10)
+  return n >= 1 && n <= len ? n : null
+}
 function matchVaga(msg) {
+  const i = indiceEscolhido(msg, VAGAS.length)
+  if (i) return VAGAS[i - 1]
   const m = norm(msg)
   const sin = {
     'servente': 'Servente', 'ajudante': 'Servente', 'auxiliar': 'Servente',
@@ -58,6 +68,8 @@ function matchVaga(msg) {
   return null
 }
 function matchCidade(msg) {
+  const i = indiceEscolhido(msg, CIDADES.length)
+  if (i) return CIDADES[i - 1]
   const m = norm(msg)
   return CIDADES.find(c => m.includes(norm(c.nome))) || null
 }
@@ -70,11 +82,18 @@ function ehNao(msg) {
 function ehPergunta(msg) {
   return /\?/.test(msg) || temAlguma(msg, ['quanto', 'qual', 'quais', 'quando', 'como', 'onde', 'porque', 'por que', ' tem ', 'possui', 'pode', 'posso', 'sera', 'voces'])
 }
+function ehReset(msg) {
+  return temAlguma(msg, ['recomecar', 'reiniciar', 'comecar de novo', 'comecar denovo', 'voltar ao inicio', 'cancelar tudo', 'menu inicial'])
+}
+function querOutros(msg) {
+  return temAlguma(msg, ['outro', 'outra', 'nao tem na lista', 'nenhuma dessas', 'nenhuma destas', 'fora da lista', 'minha funcao', 'minha area', 'nao achei'])
+}
 function listaVagasTexto() {
-  return VAGAS.map(v => `• ${v.nome}${v.salario ? ` — ${fmtMoeda(v.salario)}` : ' — a combinar'}`).join('\n')
+  return VAGAS.map((v, i) => `${i + 1}. ${v.nome}${v.salario ? ` — ${fmtMoeda(v.salario)}` : ' — a combinar'}`).join('\n') +
+    `\n${VAGAS.length + 1}. Outra função (não está na lista)`
 }
 function listaCidadesTexto() {
-  return CIDADES.map(c => `• ${c.nome}`).join('\n')
+  return CIDADES.map((c, i) => `${i + 1}. ${c.nome}`).join('\n')
 }
 
 // ─── FAQ ──────────────────────────────────────────────────────────────────────
@@ -86,7 +105,7 @@ function responderFAQ(msg, estado) {
   if (temAlguma(msg, ['salario', 'quanto ganha', 'quanto paga', 'quanto e', 'remuneracao', 'pagamento'])) {
     const v = estado.vaga ? VAGAS.find(x => x.nome === estado.vaga) : null
     if (v) return { texto: v.salario ? `O salário de ${v.nome} é ${fmtMoeda(v.salario)}.` : `Para ${v.nome} o salário é a combinar, conforme a sua experiência.` }
-    return { texto: `Os salários:\n${listaVagasTexto()}\n\nAs vagas "a combinar" dependem da experiência.` }
+    return { texto: `Os salários:\n${VAGAS.map(v => `• ${v.nome}: ${v.salario ? fmtMoeda(v.salario) : 'a combinar'}`).join('\n')}` }
   }
   if (temAlguma(msg, ['horario', 'que horas', 'dias', 'jornada', 'expediente', 'turno'])) {
     return { texto: `A jornada é: ${JORNADA}` }
@@ -126,15 +145,17 @@ export function iniciar(whatsapp) {
     estado: { etapa: 'vaga', whatsapp },
     resposta:
       'Olá! 👷 Que bom seu interesse em fazer parte da nossa equipe!\n\n' +
-      'Vou te ajudar com a candidatura, é rapidinho. Para qual vaga você quer se candidatar?\n\n' +
+      'Vou te ajudar com a candidatura, é rapidinho. Para qual vaga você quer se candidatar?\n' +
+      '(responda o número ou o nome)\n\n' +
       listaVagasTexto(),
   }
 }
 
 function promptAtual(estado) {
   switch (estado.etapa) {
-    case 'vaga':        return `Para qual vaga você quer se candidatar?\n\n${listaVagasTexto()}`
-    case 'cidade':      return `Em qual cidade você quer trabalhar?\n\n${listaCidadesTexto()}`
+    case 'vaga':        return `Para qual vaga você quer se candidatar? (número ou nome)\n\n${listaVagasTexto()}`
+    case 'vagaOutros':  return 'Qual é a função que você procura? Pode escrever.'
+    case 'cidade':      return `Em qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto()}`
     case 'experiencia': return `Você tem experiência na função de ${estado.vaga}?`
     case 'registro':    return 'Você já tem (ou já teve) registro em carteira nessa função?'
     case 'nome':        return 'Para finalizar, qual é o seu nome completo?'
@@ -145,6 +166,7 @@ function promptAtual(estado) {
 function respostaSatisfazEtapa(estado, msg) {
   switch (estado.etapa) {
     case 'vaga':        return !!matchVaga(msg) && !ehPergunta(msg)
+    case 'vagaOutros':  return msg.trim().length >= 2 && !ehPergunta(msg)
     case 'cidade':      return !!matchCidade(msg) && !ehPergunta(msg)
     case 'experiencia':
     case 'registro':    return ehSim(msg) || ehNao(msg)
@@ -154,29 +176,52 @@ function respostaSatisfazEtapa(estado, msg) {
 }
 
 export function responder(estado, mensagem) {
+  // Comando de recomeçar a qualquer momento
+  if (ehReset(mensagem)) return iniciar(estado.whatsapp)
+  // 1) Responde à etapa atual?
   if (respostaSatisfazEtapa(estado, mensagem)) return avancar(estado, mensagem)
+  // 2) Dúvida conhecida → responde e repete a etapa
   const faq = responderFAQ(mensagem, estado)
   if (faq) return { estado, resposta: `${faq.texto}\n\n${promptAtual(estado)}`, escalarHumano: faq.escalar }
+  // 3) Não entendi → valida/repergunta
   return avancar(estado, mensagem)
 }
 
 function avancar(estado, mensagem) {
   switch (estado.etapa) {
     case 'vaga': {
+      // "Outras" = item N+1 da lista, ou pedido explícito
+      const idxOutros = indiceEscolhido(mensagem, VAGAS.length + 1)
+      if (querOutros(mensagem) || idxOutros === VAGAS.length + 1) {
+        return { estado: { ...estado, etapa: 'vagaOutros' }, resposta: 'Sem problema! Qual é a função que você procura? Pode escrever.' }
+      }
       const v = matchVaga(mensagem)
-      if (!v) return { estado, resposta: `Não consegui identificar a vaga. Pode me dizer qual destas?\n\n${listaVagasTexto()}` }
+      if (!v) {
+        const tent = (estado.tentativasVaga || 0) + 1
+        const dica = tent >= 2 ? `\n\nSe a sua função não está na lista, escreva *${VAGAS.length + 1}* ou "outra".` : ''
+        return { estado: { ...estado, tentativasVaga: tent }, resposta: `Não consegui identificar a vaga. Pode me dizer o número ou o nome?\n\n${listaVagasTexto()}${dica}` }
+      }
       return {
-        estado: { ...estado, etapa: 'cidade', vaga: v.nome, vagaProfissional: v.profissional },
-        resposta: `Boa escolha! Vaga de *${v.nome}*${v.salario ? ` (${fmtMoeda(v.salario)})` : ' (salário a combinar)'}.\n\nEm qual cidade você quer trabalhar?\n\n${listaCidadesTexto()}`,
+        estado: { ...estado, etapa: 'cidade', vaga: v.nome, vagaProfissional: v.profissional, tentativasVaga: 0 },
+        resposta: `Boa escolha! Vaga de *${v.nome}*${v.salario ? ` (${fmtMoeda(v.salario)})` : ' (salário a combinar)'}.\n\nEm qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto()}`,
+      }
+    }
+    case 'vagaOutros': {
+      const funcao = mensagem.trim()
+      if (funcao.length < 2) return { estado, resposta: 'Pode escrever a função que você procura?' }
+      // Função fora da lista → tratada como profissional (perguntamos experiência/registro)
+      return {
+        estado: { ...estado, etapa: 'cidade', vaga: `Outros: ${funcao}`, vagaProfissional: true },
+        resposta: `Anotado: *${funcao}*. Vou registrar e o RH avalia. 👍\n\nEm qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto()}`,
       }
     }
     case 'cidade': {
       const c = matchCidade(mensagem)
-      if (!c) return { estado, resposta: `Não encontrei essa cidade nas nossas obras. As cidades com vaga hoje são:\n\n${listaCidadesTexto()}` }
+      if (!c) return { estado, resposta: `Não encontrei essa cidade. Responda o número ou o nome:\n\n${listaCidadesTexto()}` }
       if (estado.vagaProfissional) {
         return {
           estado: { ...estado, etapa: 'experiencia', cidade: c.nome },
-          resposta: `Perfeito, ${c.nome}.${c.alojamento ? ' (Temos alojamento aí. 🏠)' : ''}\n\nVocê tem experiência na função de ${estado.vaga}?`,
+          resposta: `Perfeito, ${c.nome}.${c.alojamento ? ' (Temos alojamento aí. 🏠)' : ''}\n\nVocê tem experiência na função de ${estado.vaga}? (sim ou não)`,
         }
       }
       return {
@@ -190,8 +235,8 @@ function avancar(estado, mensagem) {
       return {
         estado: { ...estado, etapa: 'registro', temExperiencia: sim },
         resposta: sim
-          ? `Ótimo! E você já tem (ou já teve) registro em carteira nessa função de ${estado.vaga}?`
-          : `Entendi. Para ${estado.vaga} normalmente é preciso ter experiência, mas vou registrar mesmo assim e o RH avalia. Você já teve registro em carteira nessa função?`,
+          ? `Ótimo! E você já tem (ou já teve) registro em carteira nessa função? (sim ou não)`
+          : `Entendi. Para ${estado.vaga} normalmente é preciso experiência, mas vou registrar e o RH avalia. Você já teve registro em carteira nessa função? (sim ou não)`,
       }
     }
     case 'registro': {
@@ -214,13 +259,15 @@ function avancar(estado, mensagem) {
           : 'Candidatura via WhatsApp.',
         transcricao: estadoFinal,
       }
+      // A confirmação de sucesso é enviada pelo SERVIDOR só depois de salvar.
       return {
         estado: estadoFinal,
         acao: { tipo: 'criar_candidatura', dados },
         resposta: `Prontinho, ${nome.split(' ')[0]}! ✅ Sua candidatura para *${estado.vaga}* em *${estado.cidade}* foi registrada.\n\nO nosso RH vai analisar e entrar em contato por aqui. Qualquer dúvida (salário, horário, alojamento), pode perguntar! 🙂`,
+        respostaFalha: `${nome.split(' ')[0]}, recebi todos os seus dados! Tive um probleminha técnico para registrar agora, mas já anotei tudo e o RH vai te procurar. 🙏`,
       }
     }
     default:
-      return { estado, resposta: 'Sua candidatura já está com o nosso RH. 🙌 Se tiver mais alguma dúvida, é só perguntar!' }
+      return { estado, resposta: 'Sua candidatura já está com o nosso RH. 🙌 Se tiver mais alguma dúvida, é só perguntar! (ou escreva "recomeçar" para uma nova candidatura)' }
   }
 }

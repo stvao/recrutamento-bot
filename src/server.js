@@ -48,11 +48,14 @@ app.post('/simular', async (req, res) => {
   if (!estado) return res.json(iniciar(whatsapp))
   const r = responder(estado, mensagem || '')
   let protocolo = null
+  let registroOk = null
   if (persistir && r.acao?.tipo === 'criar_candidatura') {
     const env = await enviarCandidatura(r.acao.dados)
+    registroOk = env.ok
     protocolo = env.protocolo || null
+    if (!env.ok && r.respostaFalha) r.resposta = r.respostaFalha
   }
-  res.json({ ...r, protocolo })
+  res.json({ ...r, protocolo, registroOk })
 })
 
 /** Conduz a conversa de um número e devolve o texto de resposta. */
@@ -65,14 +68,19 @@ async function processar(from, text) {
   }
   const r = responder(estado, text)
   setEstado(from, r.estado)
-  if (r.acao?.tipo === 'criar_candidatura') {
-    const env = await enviarCandidatura(r.acao.dados)
-    if (env.ok) limpar(from) // conversa concluída
-    else console.warn('[processar] candidatura não registrada:', env)
-  }
   if (r.escalarHumano) {
     console.log(`[ATENDIMENTO HUMANO] ${from} precisa de atendente: "${text}"`)
     // TODO: notificar um humano (ex.: avisar um número do RH / criar tarefa)
+  }
+  if (r.acao?.tipo === 'criar_candidatura') {
+    const env = await enviarCandidatura(r.acao.dados)
+    if (env.ok) {
+      limpar(from) // conversa concluída com sucesso
+      return r.resposta // confirmação só agora, depois de salvar
+    }
+    console.warn('[processar] candidatura não registrada:', env)
+    // mantém o estado p/ permitir nova tentativa; resposta honesta de falha
+    return r.respostaFalha || r.resposta
   }
   return r.resposta
 }
