@@ -25,7 +25,6 @@ export const CIDADES = [
   { nome: 'Bastos',        alojamento: true },
   { nome: 'Caraguatatuba', alojamento: true },
   { nome: 'Praia Grande',  alojamento: true },
-  { nome: 'Bertioga',      alojamento: true },
   { nome: 'Peruíbe',       alojamento: true },
   { nome: 'Itapevi',       alojamento: false },
 ]
