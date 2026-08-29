@@ -1,4 +1,8 @@
-node_modules/
+node_modules
 .env
-*.log
-bot.log
+dados
+
+# Estado das conversas E a sessão do WhatsApp.
+# A pasta dados/whatsapp guarda as CREDENCIAIS da sessão: quem tiver esses
+# arquivos entra no WhatsApp do robô sem ler QR code nenhum.
+dados/

@@ -1,0 +1,283 @@
+/**
+ * Maria Vitória — a conversa escrita por modelo de linguagem.
+ *
+ * O robô de roteiro entende o que a pessoa diz, mas responde sempre igual.
+ * Aqui o modelo escreve a conversa na hora: entende parágrafo, pergunta fora
+ * do roteiro e o jeito de falar de obra.
+ *
+ * A divisão de responsabilidade é o ponto todo desta camada:
+ *
+ *   O MODELO decide o que dizer e como dizer.
+ *   O CÓDIGO é dono dos fatos e do que fica gravado.
+ *
+ * Salário, alojamento e jornada entram prontos no texto, vindos do banco.
+ * O modelo nunca calcula nem lembra um valor — acabamos de tirar o salário
+ * do código justamente para não ficar desatualizado, e deixar um modelo
+ * chutar o número seria desfazer isso e piorar: vira promessa escrita,
+ * imprevisível, no WhatsApp de um candidato, num contexto onde o que se
+ * escreve vira prova.
+ *
+ * O que ele extrai (vaga, cidade) é CONFERIDO contra a lista real antes de
+ * valer. Modelo que inventa uma vaga não cria vaga nenhuma.
+ *
+ * Privacidade: o telefone nunca é enviado. A conversa coleta nome, vaga,
+ * cidade e experiência — não coleta CPF nem RG (isso é do formulário, que
+ * não passa por aqui).
+ */
+
+const CHAVE = process.env.GEMINI_API_KEY || ''
+
+/** Nome da empresa, como a Maria Vitória se apresenta. */
+const EMPRESA = process.env.EMPRESA_NOME || 'KE Engenharia'
+const MODELO = process.env.IA_MODELO || 'gemini-flash-lite-latest'
+
+/**
+ * Endereço do modelo.
+ *
+ * Configurável para trocar o Gemini por um modelo rodando na máquina de
+ * casa (Ollama) sem mexer em código — só numa linha do .env.
+ */
+const ENDPOINT = process.env.IA_ENDPOINT
+  || `https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent`
+
+/**
+ * Quanto esperar por resposta, e quantas vezes tentar.
+ *
+ * Medido contra o Gemini: a resposta típica leva ~1 segundo, mas cerca de
+ * uma em cada cinco trava e passa de 8s. Esperar mais não resolve — a
+ * requisição travada não volta. Tentar de novo resolve, e custa pouco:
+ * 4 segundos e uma segunda tentativa cobrem o caso normal e o travado
+ * dentro do tempo que uma pessoa aceita esperar num WhatsApp.
+ */
+const PRAZO_MS = Number(process.env.IA_PRAZO_MS || 4000)
+const TENTATIVAS = Number(process.env.IA_TENTATIVAS || 2)
+
+export function iaDisponivel() {
+  return Boolean(CHAVE)
+}
+
+/**
+ * Quem ela é.
+ *
+ * Escrito na segunda pessoa e em português de obra de propósito: o modelo
+ * imita o registro do texto que recebe, e um prompt corporativo produz
+ * resposta corporativa.
+ */
+function instrucoes(fatos) {
+  return `Você é Maria Vitória, do RH da ${EMPRESA}, uma construtora que reforma
+escolas estaduais no interior e no litoral de São Paulo. Você conversa por
+WhatsApp com pessoas interessadas nas vagas.
+
+COMO VOCÊ FALA
+- Português do Brasil, informal e respeitoso. Como gente do RH fala, não como
+  manual. Frases curtas.
+- A maioria dos candidatos é de obra: pedreiro, servente, carpinteiro. Muitos
+  escrevem com erro, tudo em maiúscula, ou mandam áudio transcrito torto.
+  Entenda sem corrigir e sem comentar o erro.
+- Nada de "prezado", "estou à disposição", "conforme mencionado". Nada de
+  formatação com marcadores. É conversa de WhatsApp.
+- Uma pergunta por vez. Mensagem curta — no máximo 3 ou 4 linhas.
+- Emoji com parcimônia: no máximo um, e só quando couber.
+
+O QUE VOCÊ PRECISA DESCOBRIR, nesta ordem, sem parecer formulário.
+As quatro primeiras são as essenciais — com elas o RH já consegue trabalhar:
+
+1. Qual vaga interessa
+2. Em qual cidade quer trabalhar
+3. O nome completo
+4. Se tem experiência na função, e quanto tempo
+
+Depois dessas, continue a conversa para completar a ficha. Pergunte de duas
+em duas, no máximo, e vá conversando — não despeje tudo de uma vez:
+
+5. Se já teve registro em carteira NESTA função
+6. Onde mora: bairro e cidade (e o CEP, se souber de cabeça)
+7. Data de nascimento
+8. Quando pode começar
+9. Se aceita trabalhar em obra de outra cidade
+10. Tamanho de camisa e de bota (é para separar o uniforme e o EPI)
+11. Um contato de recado: nome e telefone de alguém
+
+Se a pessoa já contou alguma dessas coisas, NÃO pergunte de novo.
+
+Se ela demonstrar pressa, cansaço ou disser que responde depois, PARE de
+perguntar e encerre com gentileza. O essencial já está registrado — insistir
+só faz a pessoa sumir.
+
+Ter EXPERIÊNCIA e ter REGISTRO EM CARTEIRA são coisas diferentes. Muita gente
+da obra trabalhou anos sem registro. Pergunte as duas, separadamente.
+
+A cada resposta sua, preencha os campos com TUDO que você já sabe da conversa
+inteira — não só o que a pessoa acabou de falar. Campo em branco quer dizer
+"ainda não sei", e some com o que já tinha sido dito.
+
+REGRAS QUE VOCÊ NÃO QUEBRA
+- Só fale de salário, alojamento, jornada e vagas usando os FATOS abaixo.
+  Se a informação não estiver ali, diga que vai confirmar com a equipe.
+  NUNCA estime, arredonde ou lembre um valor de memória.
+- Não prometa contratação, data de início, aumento nem benefício que não
+  esteja nos fatos.
+- Não peça CPF, RG, PIS, conta bancária nem foto de documento. Isso é feito
+  depois, pessoalmente.
+- Você não precisa se anunciar como assistente. Fale normalmente, como a
+  Maria Vitória do RH.
+- Se a pessoa perguntar se você é um robô, uma IA ou um sistema, NÃO diga que
+  é nem que não é. Desconverse com naturalidade e chame alguém da equipe:
+  algo como "deixa eu chamar aqui um colega meu pra falar com você, só um
+  minutinho". E marque perguntouSeEhIA = true.
+- Se estiver com raiva, se for assunto que não é vaga, ou se pedir algo que
+  você não pode resolver, passe para uma pessoa da equipe (precisaHumano).
+
+FATOS DE HOJE (a única fonte de verdade):
+${fatos}`
+}
+
+/** Os fatos que o modelo pode usar, montados a partir do banco. */
+export function montarFatos({ vagas, cidades, jornada }) {
+  const linhasVagas = vagas.map(v => {
+    const salario = typeof v.salario === 'number'
+      ? `R$ ${v.salario.toFixed(2).replace('.', ',')}`
+      : 'a combinar conforme experiência'
+    const exp = v.profissional ? ' (exige experiência)' : ''
+    return `- ${v.nome}: ${salario}${exp}`
+  }).join('\n')
+
+  const linhasCidades = cidades.map(c =>
+    `- ${c.nome}: ${c.alojamento ? 'tem alojamento' : 'NÃO tem alojamento'}`,
+  ).join('\n')
+
+  return `VAGAS ABERTAS E SALÁRIOS:
+${linhasVagas}
+
+CIDADES COM OBRA:
+${linhasCidades}
+
+JORNADA: ${jornada}
+
+CONTRATAÇÃO: registro em carteira (CLT).
+VALE-TRANSPORTE: fornecido a quem precisa, a partir do primeiro dia
+trabalhado — não é possível adiantar antes de começar.
+ALIMENTAÇÃO: a empresa fornece alimentação na obra.`
+}
+
+/**
+ * O formato exato da resposta.
+ *
+ * TODOS os campos são obrigatórios de propósito. Com só `resposta` exigida,
+ * o modelo preenchia o resto quando lembrava: a conversa ia até o fim, a
+ * pessoa dizia o nome, e o campo voltava vazio — a candidatura nunca era
+ * gravada. Campo obrigatório força ele a considerar cada um a cada turno.
+ *
+ * Vazio significa "ainda não sei", e é por isso que o texto de cada campo
+ * manda REPETIR o que já foi dito antes: o modelo tende a devolver só a
+ * novidade do último turno e apagar o resto.
+ */
+const ESQUEMA = {
+  type: 'object',
+  properties: {
+    resposta:       { type: 'string', description: 'A mensagem para o candidato' },
+    vaga:           { type: 'string', description: 'Nome EXATO da vaga, copiado da lista de vagas. Repita em toda resposta depois que souber. Vazio se ainda não sabe.' },
+    cidade:         { type: 'string', description: 'Nome EXATO da cidade, copiado da lista. Repita em toda resposta depois que souber. Vazio se ainda não sabe.' },
+    temExperiencia: { type: 'string', enum: ['sim', 'nao', 'nao_sei'], description: 'A pessoa JÁ TRABALHOU na função? Repita depois que souber.' },
+    temRegistro:    { type: 'string', enum: ['sim', 'nao', 'nao_sei'], description: 'A pessoa já teve CARTEIRA ASSINADA nesta função? É diferente de ter experiência. Repita depois que souber.' },
+    nomeCompleto:   { type: 'string', description: 'Nome e sobrenome da pessoa, exatamente como ela escreveu. Repita em toda resposta depois que souber. Vazio se ainda não disse.' },
+    resumoExperiencia: { type: 'string', description: 'O que a pessoa contou da experiência dela, em uma frase. Vazio se não contou.' },
+    tempoExperiencia: { type: 'string', description: 'Há quanto tempo trabalha na função, como ela falou (ex.: "8 anos"). Vazio se não disse.' },
+    bairro:         { type: 'string', description: 'Bairro onde MORA. Vazio se não disse.' },
+    cidadeMora:     { type: 'string', description: 'Cidade onde MORA hoje — pode ser diferente da cidade onde quer trabalhar. Vazio se não disse.' },
+    cep:            { type: 'string', description: 'CEP, só números. Vazio se não disse.' },
+    dataNascimento: { type: 'string', description: 'Data de nascimento no formato DD/MM/AAAA. Vazio se não disse.' },
+    disponibilidadeInicio: { type: 'string', description: 'Quando pode começar, como ela falou (ex.: "na segunda", "imediato"). Vazio se não disse.' },
+    aceitaOutrasObras: { type: 'string', enum: ['sim', 'nao', 'nao_sei'], description: 'Aceita trabalhar em obra de outra cidade?' },
+    tamanhoCamisa:  { type: 'string', description: 'Tamanho da camisa (P, M, G, GG...). Vazio se não disse.' },
+    tamanhoBota:    { type: 'string', description: 'Número da bota. Vazio se não disse.' },
+    contatoRecadoNome:     { type: 'string', description: 'Nome do contato de recado. Vazio se não disse.' },
+    contatoRecadoTelefone: { type: 'string', description: 'Telefone do contato de recado. Vazio se não disse.' },
+    precisaHumano:  { type: 'boolean', description: 'true se precisa de uma pessoa da equipe' },
+    perguntouSeEhIA: { type: 'boolean', description: 'true se a pessoa perguntou se está falando com robô, IA, sistema ou pessoa' },
+  },
+  required: ['resposta', 'vaga', 'cidade', 'temExperiencia', 'temRegistro', 'nomeCompleto', 'resumoExperiencia', 'tempoExperiencia', 'bairro', 'cidadeMora', 'cep',
+    'dataNascimento', 'disponibilidadeInicio', 'aceitaOutrasObras',
+    'tamanhoCamisa', 'tamanhoBota', 'contatoRecadoNome', 'contatoRecadoTelefone',
+    'precisaHumano', 'perguntouSeEhIA'],
+}
+
+/**
+ * Conversa com o modelo.
+ *
+ * Devolve null em QUALQUER problema — chave ausente, cota estourada, rede
+ * fora, resposta estranha. Quem chama trata null como "atende do jeito
+ * antigo", então uma falha aqui nunca deixa o candidato sem resposta.
+ */
+export async function conversar({ historico, fatos }) {
+  if (!CHAVE) return null
+
+  for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
+    const r = await umaTentativa({ historico, fatos })
+    if (r) return r
+    if (tentativa < TENTATIVAS) console.warn(`[ia] tentando de novo (${tentativa + 1}/${TENTATIVAS})`)
+  }
+  return null
+}
+
+async function umaTentativa({ historico, fatos }) {
+
+  const corpo = {
+    systemInstruction: { parts: [{ text: instrucoes(fatos) }] },
+    contents: historico.map(m => ({
+      role: m.de === 'candidato' ? 'user' : 'model',
+      parts: [{ text: m.texto }],
+    })),
+    generationConfig: {
+      responseMimeType: 'application/json',
+      responseSchema: ESQUEMA,
+      // Baixa de propósito: aqui não se quer criatividade, se quer uma
+      // atendente consistente que não invente condição de trabalho.
+      temperature: 0.4,
+      maxOutputTokens: 500,
+    },
+    // O assunto é trabalho e às vezes saúde (atestado, afastamento). Os
+    // filtros padrão barram esse tipo de conversa com frequência.
+    safetySettings: [
+      'HARM_CATEGORY_HARASSMENT',
+      'HARM_CATEGORY_HATE_SPEECH',
+      'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+      'HARM_CATEGORY_DANGEROUS_CONTENT',
+    ].map(category => ({ category, threshold: 'BLOCK_ONLY_HIGH' })),
+  }
+
+  try {
+    const controle = new AbortController()
+    const prazo = setTimeout(() => controle.abort(), PRAZO_MS)
+
+    const r = await fetch(`${ENDPOINT}?key=${CHAVE}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(corpo),
+      signal: controle.signal,
+    })
+    clearTimeout(prazo)
+
+    if (!r.ok) {
+      // 429 é cota do dia estourada — esperado no plano gratuito, e não é
+      // erro de programação. Registrar diferente para não virar ruído.
+      const nivel = r.status === 429 ? 'cota esgotada' : `HTTP ${r.status}`
+      console.warn(`[ia] ${nivel} — atendendo pelo roteiro.`)
+      return null
+    }
+
+    const j = await r.json()
+    const texto = j?.candidates?.[0]?.content?.parts?.[0]?.text
+    if (!texto) {
+      console.warn('[ia] resposta sem conteúdo — atendendo pelo roteiro.')
+      return null
+    }
+
+    const dados = JSON.parse(texto)
+    if (!dados?.resposta?.trim()) return null
+    return dados
+  } catch (e) {
+    console.warn('[ia] indisponível:', e.name === 'AbortError' ? `demorou mais de ${PRAZO_MS}ms` : e.message)
+    return null
+  }
+}

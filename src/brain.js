@@ -8,16 +8,12 @@
  * "registrada" depois de salvar de verdade).
  */
 
+import { norm, melhorMatch, contemAlgum } from './texto.js'
+import { vagasAtuais, termosDasVagas } from './catalogo.js'
+
 // ─── Base de conhecimento ────────────────────────────────────────────────────
-export const VAGAS = [
-  { nome: 'Servente',                                       salario: 2302.75, profissional: false },
-  { nome: 'Pedreiro',                                       salario: 2801.98, profissional: true },
-  { nome: 'Estagiário de Arquitetura ou Engenharia Civil', salario: null,    profissional: false },
-  { nome: 'Serralheiro',                                    salario: null,    profissional: true },
-  { nome: 'Armador',                                        salario: null,    profissional: true },
-  { nome: 'Carpinteiro',                                    salario: null,    profissional: true },
-  { nome: 'Eletricista',                                    salario: null,    profissional: true },
-]
+// As vagas vêm do RH (ver vagas.js). Antes moravam aqui, com salário escrito
+// à mão — e o robô informa o valor por escrito, no WhatsApp do candidato.
 
 export const CIDADES = [
   { nome: 'Buritama',      alojamento: true },
@@ -32,15 +28,19 @@ export const CIDADES = [
 export const JORNADA = 'Segunda a quinta das 7h às 17h, e sexta das 7h às 16h.'
 
 // ─── Helpers de texto ────────────────────────────────────────────────────────
-function norm(s) {
-  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
-}
+// norm() agora vem de texto.js — mesma ideia, mas também tira pontuação.
 function fmtMoeda(v) {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
+/**
+ * O termo aparece na mensagem, ainda que escrito errado?
+ *
+ * Era comparação exata: "salrio" e "alojamneto" não casavam, e a pessoa
+ * ouvia "não entendi" por ter errado uma letra. Trocando só esta função,
+ * todo o robô — FAQ, sim/não, comandos — passa a tolerar erro de escrita.
+ */
 function temAlguma(msg, termos) {
-  const m = norm(msg)
-  return termos.some(t => m.includes(norm(t)))
+  return contemAlgum(msg, termos)
 }
 /** Se a mensagem é só um número (ex.: "2", "2)", "2."), devolve o índice (1..len). */
 function indiceEscolhido(msg, len) {
@@ -49,29 +49,33 @@ function indiceEscolhido(msg, len) {
   const n = parseInt(m[1], 10)
   return n >= 1 && n <= len ? n : null
 }
+/**
+ * Como cada vaga pode ser chamada.
+ *
+ * Inclui o jeito que se fala na obra, não só o nome do cargo: "meio
+ * oficial" é servente, "ferreiro" é armador, "soldador" é serralheiro.
+ */
+
 function matchVaga(msg) {
-  const i = indiceEscolhido(msg, VAGAS.length)
-  if (i) return VAGAS[i - 1]
-  const m = norm(msg)
-  const sin = {
-    'servente': 'Servente', 'ajudante': 'Servente', 'auxiliar': 'Servente',
-    'pedreiro': 'Pedreiro',
-    'estagi': 'Estagiário de Arquitetura ou Engenharia Civil', 'estagio': 'Estagiário de Arquitetura ou Engenharia Civil',
-    'serralheiro': 'Serralheiro', 'soldador': 'Serralheiro',
-    'armador': 'Armador', 'ferreiro': 'Armador',
-    'carpinteiro': 'Carpinteiro',
-    'eletricista': 'Eletricista',
-  }
-  for (const chave of Object.keys(sin)) {
-    if (m.includes(chave)) return VAGAS.find(v => v.nome === sin[chave]) || null
-  }
-  return null
+  const i = indiceEscolhido(msg, vagasAtuais().length)
+  if (i) return vagasAtuais()[i - 1]
+  const nome = melhorMatch(msg, termosDasVagas(vagasAtuais()))
+  return nome ? vagasAtuais().find(v => v.nome === nome) || null : null
 }
+/** Apelidos que a gente da região usa. */
+const APELIDOS_CIDADE = {
+  'Caraguatatuba': ['caragua'],
+  'Praia Grande': ['pg'],
+}
+
 function matchCidade(msg) {
   const i = indiceEscolhido(msg, CIDADES.length)
   if (i) return CIDADES[i - 1]
-  const m = norm(msg)
-  return CIDADES.find(c => m.includes(norm(c.nome))) || null
+  const nome = melhorMatch(msg, CIDADES.map(c => ({
+    valor: c.nome,
+    termos: [c.nome, ...(APELIDOS_CIDADE[c.nome] ?? [])],
+  })))
+  return nome ? CIDADES.find(c => c.nome === nome) || null : null
 }
 function ehSim(msg) {
   return temAlguma(msg, ['sim', 'tenho', 'ja tenho', 'ja', 'possuo', 'claro', 'positivo', 'isso', 'com certeza'])
@@ -85,12 +89,38 @@ function ehPergunta(msg) {
 function ehReset(msg) {
   return temAlguma(msg, ['recomecar', 'reiniciar', 'comecar de novo', 'comecar denovo', 'voltar ao inicio', 'cancelar tudo', 'menu inicial'])
 }
+/**
+ * Isto parece um nome completo?
+ *
+ * Bastava ter 3 letras, então "valeu" e "ok" viravam o nome do candidato e
+ * chegavam assim ao RH. Agora exige nome E sobrenome — que é o que a
+ * pergunta pede e o que o registro em carteira precisa — e recusa as
+ * palavras de conversa que não são nome de ninguém.
+ */
+const NAO_SAO_NOMES = new Set([
+  'valeu', 'obrigado', 'obrigada', 'ok', 'sim', 'nao', 'blz', 'beleza',
+  'bom dia', 'boa tarde', 'boa noite', 'oi', 'ola', 'tudo bem', 'quero',
+  'vaga', 'trabalho', 'emprego', 'nome', 'meu nome',
+])
+
+function pareceNome(msg) {
+  const limpo = (msg || '').trim()
+  if (ehPergunta(limpo)) return false
+  const n = norm(limpo)
+  if (!n || NAO_SAO_NOMES.has(n)) return false
+  // Só letras e espaço: número ou símbolo no meio não é nome.
+  if (!/^[a-zÀ-ÿ ]+$/i.test(limpo.normalize('NFC'))) return false
+  // Nome e sobrenome, cada um com 2 letras no mínimo.
+  const partes = n.split(' ').filter(p => p.length >= 2)
+  return partes.length >= 2
+}
+
 function querOutros(msg) {
   return temAlguma(msg, ['outro', 'outra', 'nao tem na lista', 'nenhuma dessas', 'nenhuma destas', 'fora da lista', 'minha funcao', 'minha area', 'nao achei'])
 }
 function listaVagasTexto() {
-  return VAGAS.map((v, i) => `${i + 1}. ${v.nome}${v.salario ? ` — ${fmtMoeda(v.salario)}` : ' — a combinar'}`).join('\n') +
-    `\n${VAGAS.length + 1}. Outra função (não está na lista)`
+  return vagasAtuais().map((v, i) => `${i + 1}. ${v.nome}${v.salario ? ` — ${fmtMoeda(v.salario)}` : ' — a combinar'}`).join('\n') +
+    `\n${vagasAtuais().length + 1}. Outra função (não está na lista)`
 }
 function listaCidadesTexto() {
   return CIDADES.map((c, i) => `${i + 1}. ${c.nome}`).join('\n')
@@ -103,9 +133,11 @@ function responderFAQ(msg, estado) {
     return { texto: 'Sobre o vale-transporte: ele é fornecido para quem precisa. Só não conseguimos enviar antes de você começar — assim que estiver trabalhando, o RH envia o vale. 🙂', escalar: pedeAgora }
   }
   if (temAlguma(msg, ['salario', 'quanto ganha', 'quanto paga', 'quanto e', 'remuneracao', 'pagamento'])) {
-    const v = estado.vaga ? VAGAS.find(x => x.nome === estado.vaga) : null
+    // A vaga citada na pergunta vem antes da já escolhida: quem pergunta
+    // "e o do pedreiro?" quer o do pedreiro, não a lista dos sete.
+    const v = matchVaga(msg) || (estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null)
     if (v) return { texto: v.salario ? `O salário de ${v.nome} é ${fmtMoeda(v.salario)}.` : `Para ${v.nome} o salário é a combinar, conforme a sua experiência.` }
-    return { texto: `Os salários:\n${VAGAS.map(v => `• ${v.nome}: ${v.salario ? fmtMoeda(v.salario) : 'a combinar'}`).join('\n')}` }
+    return { texto: `Os salários:\n${vagasAtuais().map(v => `• ${v.nome}: ${v.salario ? fmtMoeda(v.salario) : 'a combinar'}`).join('\n')}` }
   }
   if (temAlguma(msg, ['horario', 'que horas', 'dias', 'jornada', 'expediente', 'turno'])) {
     return { texto: `A jornada é: ${JORNADA}` }
@@ -126,7 +158,7 @@ function responderFAQ(msg, estado) {
     return { texto: 'A contratação é registrada (CLT). Se você recebe algum benefício e não pode ser registrado agora, no momento da contratação verificamos essa possibilidade com você.' }
   }
   if (temAlguma(msg, ['experiencia', 'precisa saber', 'sou iniciante', 'nunca trabalhei'])) {
-    const v = estado.vaga ? VAGAS.find(x => x.nome === estado.vaga) : null
+    const v = estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null
     if (v && !v.profissional) return { texto: `Para ${v.nome} não é preciso experiência. 🙂` }
     if (v && v.profissional) return { texto: `Para ${v.nome} é necessário ter experiência na função.` }
     return { texto: 'Para Servente e Estágio não precisa de experiência. Para as demais funções é necessário ter experiência.' }
@@ -170,7 +202,7 @@ function respostaSatisfazEtapa(estado, msg) {
     case 'cidade':      return !!matchCidade(msg) && !ehPergunta(msg)
     case 'experiencia':
     case 'registro':    return ehSim(msg) || ehNao(msg)
-    case 'nome':        return msg.trim().length >= 3 && !ehPergunta(msg)
+    case 'nome':        return pareceNome(msg)
     default:            return false
   }
 }
@@ -191,14 +223,14 @@ function avancar(estado, mensagem) {
   switch (estado.etapa) {
     case 'vaga': {
       // "Outras" = item N+1 da lista, ou pedido explícito
-      const idxOutros = indiceEscolhido(mensagem, VAGAS.length + 1)
-      if (querOutros(mensagem) || idxOutros === VAGAS.length + 1) {
+      const idxOutros = indiceEscolhido(mensagem, vagasAtuais().length + 1)
+      if (querOutros(mensagem) || idxOutros === vagasAtuais().length + 1) {
         return { estado: { ...estado, etapa: 'vagaOutros' }, resposta: 'Sem problema! Qual é a função que você procura? Pode escrever.' }
       }
       const v = matchVaga(mensagem)
       if (!v) {
         const tent = (estado.tentativasVaga || 0) + 1
-        const dica = tent >= 2 ? `\n\nSe a sua função não está na lista, escreva *${VAGAS.length + 1}* ou "outra".` : ''
+        const dica = tent >= 2 ? `\n\nSe a sua função não está na lista, escreva *${vagasAtuais().length + 1}* ou "outra".` : ''
         return { estado: { ...estado, tentativasVaga: tent }, resposta: `Não consegui identificar a vaga. Pode me dizer o número ou o nome?\n\n${listaVagasTexto()}${dica}` }
       }
       return {
@@ -246,7 +278,9 @@ function avancar(estado, mensagem) {
     }
     case 'nome': {
       const nome = mensagem.trim()
-      if (nome.length < 3 || !/[a-zA-ZÀ-ÿ]/.test(nome)) return { estado, resposta: 'Pode me mandar seu nome completo, por favor?' }
+      if (!pareceNome(nome)) {
+        return { estado, resposta: 'Preciso do seu *nome completo* (nome e sobrenome), para o registro. 🙂' }
+      }
       const estadoFinal = { ...estado, etapa: 'fim', nome }
       const dados = {
         nomeCompleto: nome,

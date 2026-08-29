@@ -43,3 +43,34 @@ export async function enviarCandidatura(dados) {
   }
   return { ok: false, motivo: 'desconhecido' }
 }
+
+/**
+ * Avisa o RH que uma conversa precisa de gente.
+ *
+ * Cai no sino de notificações que o RH já usa. Antes isso era só uma linha
+ * de log no servidor — alerta que exige alguém lembrar de ir procurar não é
+ * alerta, e a pessoa do outro lado fica esperando.
+ *
+ * Nunca lança: falhar em avisar não pode derrubar o atendimento em curso.
+ */
+export async function avisarRH({ whatsapp, motivo, trecho }) {
+  if (!RH_API_URL || !RH_API_TOKEN) {
+    console.warn('[rh-client] RH não configurado — alerta NÃO enviado.')
+    return { ok: false }
+  }
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/alerta`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RH_API_TOKEN}` },
+      body: JSON.stringify({ whatsapp, motivo, trecho }),
+    })
+    if (!r.ok) {
+      console.warn(`[rh-client] alerta recusado pelo RH: ${r.status}`)
+      return { ok: false }
+    }
+    return { ok: true }
+  } catch (e) {
+    console.warn('[rh-client] não consegui avisar o RH:', e.message)
+    return { ok: false }
+  }
+}

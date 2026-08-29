@@ -5,10 +5,18 @@
   "type": "module",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "test:conversa": "node src/teste-conversa.js"
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "test:conversa": "node src/teste-conversa.js",
+    "dev": "node --env-file-if-exists=.env --watch src/server.js",
+    "test:texto": "node src/teste-texto.js",
+    "test:vagas": "node src/teste-vagas.js",
+    "test:atendimento": "node src/teste-atendimento.js",
+    "test": "npm run test:texto && npm run test:vagas && npm run test:atendimento && npm run test:conversa"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "express": "^4.19.2",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0"
   }
 }

@@ -10,15 +10,60 @@
  *   POST /simular    — testar a conversa sem WhatsApp (usado pelo simulador do RH)
  */
 import express from 'express'
-import { iniciar, responder } from './brain.js'
-import { getEstado, setEstado, limpar } from './store.js'
+import { iniciarAtendimento as iniciar, atender } from './atendimento.js'
+import { iaDisponivel } from './ia.js'
+import {
+  getEstado, setEstado, limpar, getAbandonada,
+  marcarConcluida, marcarEscalada, metricas,
+} from './store.js'
+import { getVagas, origemDaLista, intervaloDeAtualizacao } from './catalogo.js'
 import { enviarMensagem, parseWebhook } from './connectors.js'
-import { enviarCandidatura } from './rh-client.js'
+import { enviarCandidatura, avisarRH } from './rh-client.js'
 
 const app = express()
 app.use(express.json({ limit: '1mb' }))
 
 app.get('/health', (_req, res) => res.json({ ok: true, servico: 'recrutamento-bot' }))
+
+/**
+ * Números da operação.
+ *
+ * A taxa de conclusão é o indicador que diz se o roteiro está funcionando,
+ * e `abandonaramNaEtapa` diz ONDE as pessoas desistem — que é o que aponta
+ * qual pergunta rever.
+ */
+app.get('/metricas', (_req, res) => res.json({
+  ...metricas(),
+  vagas: origemDaLista(),
+  atendente: iaDisponivel() ? 'Maria Vitória (IA)' : 'roteiro',
+}))
+
+/**
+ * Mantém a lista de vagas fresca em segundo plano.
+ *
+ * O cérebro lê a lista de forma síncrona, a cada mensagem — buscar no RH ali
+ * acrescentaria a latência da rede a toda frase da conversa. Então a busca
+ * acontece aqui: uma vez ao subir, e de tempos em tempos depois.
+ *
+ * Falha não derruba nada: getVagas() nunca lança, e na pior hipótese o robô
+ * atende com a lista de reserva (que não tem salário, de propósito).
+ */
+let ultimaOrigem = null
+async function atualizarVagas() {
+  await getVagas()
+  const origem = origemDaLista()
+  // Só registra quando MUDA: insistindo de minuto em minuto, repetir a mesma
+  // linha encheria o log e esconderia o que importa.
+  if (origem !== ultimaOrigem) {
+    console.log(`[vagas] lista carregada de: ${origem}`)
+    ultimaOrigem = origem
+  }
+  setTimeout(atualizarVagas, intervaloDeAtualizacao()).unref?.()
+}
+atualizarVagas()
+console.log(iaDisponivel()
+  ? '[atendimento] Maria Vitória no ar (com queda para o roteiro)'
+  : '[atendimento] sem GEMINI_API_KEY — atendendo pelo roteiro')
 
 // Verificação do webhook (WhatsApp Cloud API oficial)
 app.get('/webhook', (req, res) => {
@@ -29,9 +74,33 @@ app.get('/webhook', (req, res) => {
   return res.sendStatus(403)
 })
 
-// Mensagens recebidas do WhatsApp
-app.post('/webhook', async (req, res) => {
+/**
+ * Segredo do webhook.
+ *
+ * O endereço fica aberto na internet, e a Z-API não assina as requisições
+ * que envia — não há como distinguir uma mensagem dela de uma forjada. Sem
+ * proteção, quem descobrisse a URL criaria candidaturas falsas em nome de
+ * qualquer número, e o RH ligaria para gente que nunca se candidatou.
+ *
+ * A proteção possível para um provedor que não assina é um segredo na
+ * própria URL: o painel da Z-API aceita qualquer endereço, então cadastra-se
+ * .../webhook/<segredo>. Quem não sabe o segredo não passa.
+ */
+const WEBHOOK_SEGREDO = process.env.WEBHOOK_SEGREDO || ''
+
+if (!WEBHOOK_SEGREDO) {
+  console.warn(
+    '[webhook] SEM WEBHOOK_SEGREDO: qualquer um que descobrir a URL pode '
+    + 'criar candidatura falsa. Defina antes de expor o serviço na internet.',
+  )
+}
+
+async function tratarWebhook(req, res) {
+  if (WEBHOOK_SEGREDO && req.params.segredo !== WEBHOOK_SEGREDO) {
+    return res.sendStatus(404)   // 404, e não 403: não confirma que existe
+  }
   res.sendStatus(200) // responde rápido; processa em seguida
+
   const msg = parseWebhook(req.body)
   if (!msg) return
   try {
@@ -40,13 +109,18 @@ app.post('/webhook', async (req, res) => {
   } catch (e) {
     console.error('[webhook] erro:', e.message)
   }
-})
+}
+
+// Mensagens recebidas do WhatsApp
+app.post('/webhook/:segredo', tratarWebhook)
+// Sem segredo — só funciona quando WEBHOOK_SEGREDO não está definido.
+app.post('/webhook', tratarWebhook)
 
 // Simulador (sem WhatsApp) — mesma lógica, retorna o texto na resposta HTTP
 app.post('/simular', async (req, res) => {
   const { estado, mensagem, whatsapp, persistir } = req.body || {}
   if (!estado) return res.json(iniciar(whatsapp))
-  const r = responder(estado, mensagem || '')
+  const r = await atender(estado, mensagem || '')
   let protocolo = null
   let registroOk = null
   if (persistir && r.acao?.tipo === 'criar_candidatura') {
@@ -58,25 +132,67 @@ app.post('/simular', async (req, res) => {
   res.json({ ...r, protocolo, registroOk })
 })
 
+/** "há 3 horas", "há 2 dias" — para a mensagem de retomada soar natural. */
+function tempoDecorrido(ms) {
+  const horas = Math.round(ms / 3600000)
+  if (horas < 24) return `há ${horas} hora${horas === 1 ? '' : 's'}`
+  const dias = Math.round(horas / 24)
+  return `há ${dias} dia${dias === 1 ? '' : 's'}`
+}
+
 /** Conduz a conversa de um número e devolve o texto de resposta. */
 async function processar(from, text) {
   let estado = getEstado(from)
+
   if (!estado) {
+    // Quem parou no meio e voltou continua de onde estava.
+    //
+    // Recomeçar do zero é a razão mais comum de desistência na segunda
+    // tentativa: a pessoa já respondeu vaga e cidade, some por um dia, e o
+    // robô pergunta tudo outra vez. Aqui ela só responde o que falta.
+    const pendente = getAbandonada(from)
+    if (pendente) {
+      setEstado(from, pendente.estado)
+      const r = await atender(pendente.estado, text)
+      setEstado(from, r.estado)
+      return `Oi de novo! 👋 Vi que você começou uma candidatura ${tempoDecorrido(pendente.paradoHa)} `
+        + `e parou no meio — dá para continuar de onde estava.\n`
+        + `(se preferir começar de novo, é só escrever *recomeçar*)\n\n`
+        + r.resposta
+    }
+
     const ini = iniciar(from)
     setEstado(from, ini.estado)
     return ini.resposta
   }
-  const r = responder(estado, text)
+
+  const r = await atender(estado, text)
   setEstado(from, r.estado)
+
   if (r.escalarHumano) {
-    console.log(`[ATENDIMENTO HUMANO] ${from} precisa de atendente: "${text}"`)
-    // TODO: notificar um humano (ex.: avisar um número do RH / criar tarefa)
+    marcarEscalada(from)
+    console.log(`[ATENDIMENTO HUMANO] ${from}: ${r.motivoEscalada ?? 'pediu atendimento'} — "${text}"`)
+    // Sem await: o candidato não espera o RH ser avisado para receber a
+    // resposta dele. Se o aviso falhar, avisarRH() registra e segue.
+    avisarRH({ whatsapp: from, motivo: r.motivoEscalada, trecho: text })
   }
+
   if (r.acao?.tipo === 'criar_candidatura') {
     const env = await enviarCandidatura(r.acao.dados)
     if (env.ok) {
-      limpar(from) // conversa concluída com sucesso
-      return r.resposta // confirmação só agora, depois de salvar
+      // A conversa NÃO é encerrada aqui.
+      //
+      // A candidatura é gravada assim que há nome, vaga e cidade, e a Maria
+      // Vitória segue perguntando o resto da ficha — endereço, disponibilidade,
+      // tamanho de bota. Limpar no primeiro registro descartaria tudo que
+      // viesse depois, que é justamente a parte que o RH usa para decidir.
+      // Cada dado novo reenvia, e o RH atualiza a mesma candidatura.
+      //
+      // Marcar a conclusão na PRIMEIRA gravação é o que diferencia "concluiu"
+      // de "abandonou" nas métricas; sem isso, toda conclusão viraria abandono
+      // quando a conversa expirasse sozinha.
+      if (r.acao.primeiraVez) marcarConcluida(from)
+      return r.resposta
     }
     console.warn('[processar] candidatura não registrada:', env)
     // mantém o estado p/ permitir nova tentativa; resposta honesta de falha
@@ -85,5 +201,45 @@ async function processar(from, text) {
   return r.resposta
 }
 
+/**
+ * Conexão com o WhatsApp pelo Baileys.
+ *
+ * Só sobe quando CONNECTOR=baileys. Sem isso o serviço continua atendendo
+ * pelo simulador, como até agora — quem não configurou não é surpreendido
+ * por um QR code aparecendo no terminal.
+ */
+if (process.env.CONNECTOR === 'baileys') {
+  const { conectar } = await import('./baileys.js')
+  conectar(async (numero, texto) => processar(numero, texto))
+    .catch(e => console.error('[whatsapp] não consegui conectar:', e.message))
+}
+
 const PORT = process.env.PORT || 3100
-app.listen(PORT, () => console.log(`🤖 recrutamento-bot ouvindo na porta ${PORT} (connector=${process.env.CONNECTOR || 'none'})`))
+
+const servidor = app.listen(PORT, () =>
+  console.log(`🤖 recrutamento-bot ouvindo na porta ${PORT} (connector=${process.env.CONNECTOR || 'none'})`))
+
+/**
+ * Porta ocupada é o erro mais comum aqui — acontece toda vez que se esquece
+ * uma janela antiga aberta. O rastro de pilha do Node não ajuda ninguém a
+ * resolver; o comando que mata o processo, sim.
+ */
+servidor.on('error', (e) => {
+  if (e.code !== 'EADDRINUSE') throw e
+
+  const comoMatar = process.platform === 'win32'
+    ? `Get-NetTCPConnection -LocalPort ${PORT} -State Listen | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }`
+    : `kill $(lsof -ti:${PORT})`
+
+  console.error([
+    '',
+    `❌ A porta ${PORT} já está em uso — provavelmente outra janela com o robô rodando.`,
+    '',
+    '   Para encerrar o que está lá:',
+    `   ${comoMatar}`,
+    '',
+    `   Ou suba numa porta diferente:  PORT=${Number(PORT) + 1} npm start`,
+    '',
+  ].join('\n'))
+  process.exit(1)
+})

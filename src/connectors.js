@@ -10,6 +10,10 @@ const CONNECTOR = process.env.CONNECTOR || 'none'
 /** Envia uma mensagem de texto para um número. Best-effort. */
 export async function enviarMensagem(para, texto) {
   try {
+    if (CONNECTOR === 'baileys') {
+      const { enviarPorBaileys } = await import('./baileys.js')
+      return await enviarPorBaileys(para, texto)
+    }
     if (CONNECTOR === 'zapi') return await enviarZapi(para, texto)
     if (CONNECTOR === 'cloud') return await enviarCloud(para, texto)
     // none: apenas loga (modo teste/simulador)
