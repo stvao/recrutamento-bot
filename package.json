@@ -9,9 +9,9 @@
     "test:conversa": "node src/teste-conversa.js",
     "dev": "node --env-file-if-exists=.env --watch src/server.js",
     "test:texto": "node src/teste-texto.js",
-    "test:vagas": "node src/teste-vagas.js",
+    "test:catalogo": "node src/teste-catalogo.js",
     "test:atendimento": "node src/teste-atendimento.js",
-    "test": "npm run test:texto && npm run test:vagas && npm run test:atendimento && npm run test:conversa"
+    "test": "npm run test:texto && npm run test:catalogo && npm run test:atendimento && npm run test:conversa"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",
