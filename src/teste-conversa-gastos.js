@@ -25,6 +25,16 @@ function ok(desc, cond) {
   if (!cond) falhas++
 }
 
+/**
+ * As obras, como elas são de verdade: nome oficial da escola, e a cidade só
+ * no endereço. Duas em Bastos, de propósito — é o caso ambíguo.
+ */
+const OBRAS = [
+  { nome: 'EE PROFA TSUYA OHNO KIMURA', endereco: 'Rua das Flores 100, Bastos - SP' },
+  { nome: 'EE OSWALDO LUIZ SANCHES TOSCHI', endereco: 'Rua Sete 45, Bastos - SP' },
+  { nome: 'EE/ETEC AGUIA DE HAIA', endereco: 'Av Aguia de Haia 500, Sao Paulo - SP' },
+]
+
 /** Sistema de obras de mentira. */
 const chamadas = []
 const srv = createServer((req, res) => {
@@ -35,13 +45,18 @@ const srv = createServer((req, res) => {
 
     if (req.url.endsWith('/comprovantes/obras')) {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      return res.end(JSON.stringify({ obras: ['Bastos Haia', 'Bastos Tsuya', 'Peruibe'] }))
+      // Nomes e endereços REAIS em forma: o nome da obra é o da escola, e a
+      // cidade só existe no endereço.
+      return res.end(JSON.stringify({
+        obras: OBRAS.map(o => o.nome),
+        detalhes: OBRAS,
+      }))
     }
     if (req.url.endsWith('/comprovantes/lancar')) {
       const obra = /name="obra"\r?\n\r?\n([^\r]*)/.exec(corpo)?.[1] ?? ''
-      if (!/bastos|peruibe/i.test(obra)) {
+      if (!OBRAS.some(o => o.nome === obra.trim())) {
         res.writeHead(422, { 'Content-Type': 'application/json' })
-        return res.end(JSON.stringify({ message: 'não achei', obras: ['Bastos Haia', 'Peruibe'] }))
+        return res.end(JSON.stringify({ message: 'não achei', obras: OBRAS.map(o => o.nome) }))
       }
       res.writeHead(201, { 'Content-Type': 'application/json' })
       return res.end(JSON.stringify({ ok: true, id: 'g1', obra: obra.trim(), mensagem: `Lançado em ${obra.trim()}, aguardando sua aprovação.` }))
@@ -85,9 +100,9 @@ const rota = () => chamadas.map(c => c.url.replace(/^.*\/comprovantes\//, '')).f
 // ── 1. Legenda completa: lança direto ─────────────────────────────────────
 {
   const p = novo('5511900000001')
-  const r = await p.foto('bastos haia, tijolos e areia, material, 2500,00')
+  const r = await p.foto('haia, tijolos e areia, material, 2500,00')
   ok('lança direto quando não falta nada', r.includes('aguardando sua aprovação'))
-  ok('e diz em qual obra', r.includes('Bastos Haia'))
+  ok('e diz em qual obra', r.includes('AGUIA DE HAIA'))
   ok('e repete o valor entendido', r.includes('R$ 2.500,00'))
   ok('foi para /lancar, não para a caixa', rota().includes('lancar') && !rota().includes('receber'))
 }
@@ -95,15 +110,15 @@ const rota = () => chamadas.map(c => c.url.replace(/^.*\/comprovantes\//, '')).f
 // ── 2. Falta o valor: PERGUNTA ────────────────────────────────────────────
 {
   const p = novo('5511900000002')
-  const r = await p.foto('bastos haia tijolos e areia')
+  const r = await p.foto('haia tijolos e areia')
   ok('pergunta o valor quando falta', /valor/i.test(r))
-  ok('mostra o que já entendeu antes de perguntar', r.includes('Bastos Haia'))
+  ok('mostra o que já entendeu antes de perguntar', r.includes('AGUIA DE HAIA'))
   ok('e ainda NÃO enviou nada', rota().length === 0)
 
   const r2 = await p.diz('2500,00')
   ok('responder o valor faz lançar', r2.includes('aguardando sua aprovação'))
   ok('com o valor respondido', r2.includes('R$ 2.500,00'))
-  ok('e a obra da legenda não se perdeu', r2.includes('Bastos Haia'))
+  ok('e a obra da legenda não se perdeu', r2.includes('AGUIA DE HAIA'))
 }
 
 // ── 3. Falta a obra: pergunta e oferece a lista ───────────────────────────
@@ -111,9 +126,9 @@ const rota = () => chamadas.map(c => c.url.replace(/^.*\/comprovantes\//, '')).f
   const p = novo('5511900000003')
   const r = await p.foto('tijolos e areia 2500,00')
   ok('pergunta a obra quando falta', /obra/i.test(r))
-  ok('oferece os nomes das obras do sistema', r.includes('Bastos Haia'))
+  ok('oferece os nomes das obras do sistema', r.includes('AGUIA DE HAIA'))
 
-  const r2 = await p.diz('bastos haia')
+  const r2 = await p.diz('haia')
   ok('responder a obra faz lançar', r2.includes('aguardando sua aprovação'))
   ok('e o valor da legenda não se perdeu', r2.includes('R$ 2.500,00'))
 }
@@ -124,9 +139,9 @@ const rota = () => chamadas.map(c => c.url.replace(/^.*\/comprovantes\//, '')).f
   const r = await p.foto('nota do fornecedor')
   ok('pergunta os dois de uma vez', /obra/i.test(r) && /valor/i.test(r))
 
-  const r2 = await p.diz('peruibe 890')
+  const r2 = await p.diz('toschi 890')
   ok('uma resposta só resolve os dois', r2.includes('aguardando sua aprovação'))
-  ok('acha a obra na resposta', r2.includes('Peruibe'))
+  ok('acha a obra na resposta', r2.includes('TOSCHI'))
   ok('acha o valor na resposta', r2.includes('R$ 890,00'))
 }
 
@@ -173,10 +188,42 @@ const rota = () => chamadas.map(c => c.url.replace(/^.*\/comprovantes\//, '')).f
 {
   const p = novo('5511900000009')
   await p.foto('nota A')                       // fica perguntando
-  const r = await p.foto('bastos haia cimento 300', 'm-B')
+  const r = await p.foto('haia cimento 300', 'm-B')
   ok('a foto nova é processada normalmente', r.includes('aguardando sua aprovação'))
   await espera(120)
   ok('e a anterior foi resolvida, não esquecida', rota().includes('receber'))
+}
+
+// ── 10. Cidade com DUAS obras: pergunta entre elas ────────────────────────
+// "bastos" é a cidade, e tem duas escolas. Chutar uma lançaria o custo na
+// errada, calado. Perguntar entre as duas é curto e mostra que ele entendeu.
+{
+  const p = novo('5511900000010')
+  const r = await p.foto('bastos cimento 500')
+  ok('cidade ambígua vira pergunta', /qual delas/i.test(r))
+  ok('lista a primeira candidata', r.includes('TSUYA'))
+  ok('lista a segunda candidata', r.includes('TOSCHI'))
+  ok('numera as opções', /1\)/.test(r) && /2\)/.test(r))
+  ok('NÃO lista as obras de outra cidade', !r.includes('AGUIA'))
+
+  const r2 = await p.diz('2')
+  ok('responder o NÚMERO escolhe a obra', r2.includes('TOSCHI'))
+  ok('e o valor da legenda não virou o número', r2.includes('R$ 500,00'))
+}
+
+// Responder pelo nome também vale, não só pelo número.
+{
+  const p = novo('5511900000011')
+  await p.foto('bastos cimento 500')
+  const r = await p.diz('tsuya')
+  ok('responder pelo nome também escolhe', r.includes('TSUYA'))
+}
+
+// A cidade sem ambiguidade resolve sozinha.
+{
+  const p = novo('5511900000012')
+  const r = await p.foto('sao paulo tinta 300')
+  ok('cidade de uma obra só resolve direto', r.includes('AGUIA DE HAIA'))
 }
 
 srv.close()

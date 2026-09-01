@@ -204,9 +204,15 @@ function toleranciaDe(nome) {
  * seriam casadas por qualquer coisa e apontariam para a obra errada.
  */
 const GENERICAS = new Set([
+  // Nome de escola
   'ee', 'etec', 'em', 'emef', 'emei', 'escola', 'colegio', 'obra', 'obras',
   'prof', 'profa', 'professor', 'professora', 'dr', 'dra', 'doutor', 'ver',
   'vereador', 'de', 'da', 'do', 'das', 'dos', 'e', 'reforma', 'ampliacao',
+  // Endereço — entra na busca junto do nome, e traz muita palavra que não
+  // identifica nada. "Rua" está em todo endereço; "centro", em quase todos.
+  'rua', 'av', 'avenida', 'travessa', 'estrada', 'rodovia', 'alameda', 'praca',
+  'numero', 'num', 'sn', 'bairro', 'centro', 'jardim', 'jd', 'vila', 'parque',
+  'cep', 'sp', 'brasil', 'lote', 'quadra', 'km',
 ])
 
 /**
@@ -226,22 +232,41 @@ const GENERICAS = new Set([
  * manutenção: obra nova entra no sistema e o apelido dela sai daí sozinho.
  */
 export function apelidosDe(obras) {
-  const emQuantas = new Map()   // palavra -> quantas obras a contêm
-  const donaDe = new Map()      // palavra -> nome da obra
+  const donasDe = new Map()   // palavra -> [obras que a contêm]
 
-  for (const obra of obras) {
-    const palavras = new Set(norm(obra).split(' ').filter(p => p.length >= 3 && !GENERICAS.has(p)))
+  for (const o of obras) {
+    // Aceita tanto "Nome da obra" quanto { nome, endereco } — o endereço
+    // entra na busca porque ninguém chama a obra pelo nome cadastrado: para
+    // quem trabalha nela, ela é "a de Bastos", e a cidade não aparece em
+    // nome nenhum.
+    const nome = typeof o === 'string' ? o : o.nome
+    const texto = typeof o === 'string' ? o : `${o.nome} ${o.endereco ?? ''}`
+
+    const palavras = new Set(norm(texto).split(' ').filter(p => p.length >= 3 && !GENERICAS.has(p)))
     for (const p of palavras) {
-      emQuantas.set(p, (emQuantas.get(p) ?? 0) + 1)
-      donaDe.set(p, obra)
+      const donas = donasDe.get(p) ?? []
+      if (!donas.includes(nome)) donas.push(nome)
+      donasDe.set(p, donas)
     }
   }
 
-  const apelidos = new Map()
-  for (const [palavra, quantas] of emQuantas) {
-    if (quantas === 1) apelidos.set(palavra, donaDe.get(palavra))
+  const apelidos = new Map()    // palavra -> a obra, quando só há uma
+  const ambiguos = new Map()    // palavra -> as obras, quando há várias
+  for (const [palavra, donas] of donasDe) {
+    if (donas.length === 1) apelidos.set(palavra, donas[0])
+    else ambiguos.set(palavra, donas)
   }
+
+  // Devolve um Map, como antes, com os ambíguos pendurados. Quem só quer os
+  // apelidos continua usando igual; quem precisa perguntar tem a lista de
+  // candidatos sem uma segunda chamada.
+  apelidos.ambiguos = ambiguos
   return apelidos
+}
+
+/** Só os nomes, venha a lista como texto ou como { nome, endereco }. */
+export function nomesDe(obras) {
+  return (obras ?? []).map(o => (typeof o === 'string' ? o : o?.nome)).filter(Boolean)
 }
 
 /**
@@ -253,16 +278,35 @@ export function apelidosDe(obras) {
  * quem digita "tsuia" quis dizer "tsuya".
  */
 export function acharObra(texto, obras) {
-  const porNome = acharNaFrase(texto, obras)
+  const nomes = nomesDe(obras)
+
+  const porNome = acharNaFrase(texto, nomes)
   if (porNome.achado) return porNome
 
   const apelidos = apelidosDe(obras)
-  if (!apelidos.size) return { achado: null, resto: texto ?? '' }
 
-  const porApelido = acharNaFrase(texto, [...apelidos.keys()])
-  if (!porApelido.achado) return { achado: null, resto: texto ?? '' }
+  const porApelido = apelidos.size ? acharNaFrase(texto, [...apelidos.keys()]) : { achado: null }
+  if (porApelido.achado) {
+    return { achado: apelidos.get(porApelido.achado), resto: porApelido.resto }
+  }
 
-  return { achado: apelidos.get(porApelido.achado), resto: porApelido.resto }
+  /*
+    Nada casou sozinho. Mas a pessoa pode ter escrito a CIDADE, e a cidade
+    ter duas obras — "bastos" é exatamente esse caso.
+
+    Aí não se chuta: devolve-se os candidatos para quem chama perguntar
+    entre eles. Perguntar "é a Tsuya ou a Águia de Haia?" é uma pergunta boa;
+    escolher uma das duas ao acaso lançaria o custo na errada, calado.
+  */
+  const ambiguos = apelidos.ambiguos ?? new Map()
+  if (ambiguos.size) {
+    const achado = acharNaFrase(texto, [...ambiguos.keys()])
+    if (achado.achado) {
+      return { achado: null, resto: achado.resto, candidatos: ambiguos.get(achado.achado) }
+    }
+  }
+
+  return { achado: null, resto: texto ?? '' }
 }
 
 /**
@@ -315,7 +359,7 @@ function limparBordas(t) {
  * certo já vale, e quem aprova completa o que faltar.
  */
 export function interpretar(texto, obras = []) {
-  const vazio = { obra: null, descricao: null, tipo: null, valor: null, textoOriginal: texto ?? null }
+  const vazio = { obra: null, descricao: null, tipo: null, valor: null, candidatos: null, textoOriginal: texto ?? null }
   if (!texto?.trim()) return vazio
 
   const { valor, resto } = acharValor(texto)
@@ -335,6 +379,8 @@ export function interpretar(texto, obras = []) {
   const porNome = acharObra(resto, obras)
   let obra = porNome.achado
   let sobra = porNome.resto
+  // Cidade com mais de uma obra: quem chama pergunta entre estas.
+  const candidatos = porNome.candidatos ?? null
 
   // 2) O TIPO, quando a pessoa o ESCREVEU ("material", "locação").
   //
@@ -370,7 +416,7 @@ export function interpretar(texto, obras = []) {
   //    areia" → MATERIAL). É palpite, e por isso só depois de tudo falhar.
   if (!tipo) tipo = acharTipo(descricao ?? '')
 
-  return { obra, descricao, tipo, valor, textoOriginal: texto }
+  return { obra, descricao, tipo, valor, candidatos, textoOriginal: texto }
 }
 
 /**
@@ -385,6 +431,9 @@ export function interpretar(texto, obras = []) {
 export function combinar(escrito, lido) {
   return {
     obra: escrito?.obra ?? null,
+    // As obras entre as quais perguntar, quando a pessoa escreveu algo que
+    // serve para mais de uma (a cidade, tipicamente).
+    candidatos: escrito?.candidatos ?? null,
     descricao: escrito?.descricao ?? lido?.estabelecimento ?? null,
     tipo: escrito?.tipo ?? lido?.categoria ?? null,
     valor: escrito?.valor ?? lido?.valor ?? null,

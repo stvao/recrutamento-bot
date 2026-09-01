@@ -32,7 +32,7 @@ import { lerComprovante, visaoDisponivel } from './ia-visao.js'
 import {
   enviarComprovante, lancarGasto, obrasDoSistema, obrasConfigurado,
 } from './obras-client.js'
-import { interpretar, combinar } from './lancamento.js'
+import { interpretar, combinar, nomesDe } from './lancamento.js'
 import { norm } from './texto.js'
 
 /**
@@ -367,6 +367,20 @@ function responderPendencia(de, texto) {
     // tinha escrito antes.
     pendente.respostas = [...(pendente.respostas ?? []), texto.trim()]
 
+    // "1" ou "2" respondendo a uma lista numerada.
+    //
+    // É o que a pessoa faz quando o robô acabou de listar as opções, e sem
+    // isto o número seria lido como VALOR — "1" viraria R$ 1,00 e o gasto
+    // entraria errado.
+    const so = texto.trim().replace(/[).\s]+$/, '')
+    if (/^\d{1,2}$/.test(so) && pendente.opcoes?.length) {
+      const i = Number(so) - 1
+      if (i >= 0 && i < pendente.opcoes.length) {
+        pendente.respostas = pendente.respostas.slice(0, -1)
+        pendente.obraEscolhida = pendente.opcoes[i]
+      }
+    }
+
     // Aqui a confirmação sai como resposta a ESTA mensagem, e não à foto:
     // a pessoa acabou de responder e é para ela que se está falando.
     return processar(pendente)
@@ -405,6 +419,11 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
   }
 
   const dados = combinar(escrito, pendente.lido)
+
+  // Obra escolhida pelo número da lista manda em tudo: foi a pessoa que
+  // apontou, e não há leitura de texto que valha mais que isso.
+  if (pendente.obraEscolhida) dados.obra = pendente.obraEscolhida
+
   pendente.dados = dados
 
   // Faltando obra ou valor, PERGUNTA — desde que ainda dê para perguntar.
@@ -437,7 +456,19 @@ function perguntar(pendente, falta, obras) {
   ].filter(Boolean)
   if (sabido.length) linhas.push(`Anotei: ${sabido.join(' · ')}`)
 
-  if (falta.includes('obra') && falta.includes('valor')) {
+  /*
+    A pessoa escreveu algo que serve para MAIS DE UMA obra — a cidade,
+    tipicamente, quando há duas obras nela. Aí a pergunta é entre essas
+    duas, e não entre todas: é mais curta, e mostra que ele entendeu o que
+    foi dito em vez de ignorar.
+  */
+  const candidatos = d?.candidatos ?? null
+
+  if (candidatos?.length) {
+    linhas.push(`Aí tem mais de uma obra. É qual delas?`)
+    candidatos.forEach((o, i) => linhas.push(`${i + 1}) ${o}`))
+    if (falta.includes('valor')) linhas.push('E qual foi o *valor*?')
+  } else if (falta.includes('obra') && falta.includes('valor')) {
     linhas.push('Só faltou a *obra* e o *valor*. Me manda os dois?')
   } else if (falta.includes('obra')) {
     linhas.push('De qual *obra* é esse gasto?')
@@ -447,9 +478,14 @@ function perguntar(pendente, falta, obras) {
 
   // Oferece as obras quando são poucas: escolher de uma lista é mais rápido
   // e erra menos que lembrar o nome exato.
-  if (falta.includes('obra') && obras.length && obras.length <= 12) {
-    linhas.push(`(${obras.join(' · ')})`)
+  const nomes = nomesDe(obras)
+  if (!candidatos?.length && falta.includes('obra') && nomes.length && nomes.length <= 12) {
+    linhas.push(`(${nomes.join(' · ')})`)
   }
+
+  // Guarda as opções numeradas: responder "1" é o jeito mais rápido, e é o
+  // que a pessoa vai fazer se o robô acabou de listar 1) e 2).
+  pendente.opcoes = candidatos?.length ? candidatos : (nomes.length <= 12 ? nomes : null)
 
   // A pergunta sai AGORA, como resposta à foto. A confirmação virá depois,
   // como resposta ao que a pessoa responder — por isso aqui não se abre

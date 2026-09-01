@@ -183,7 +183,7 @@ let cacheObras = null   // { nomes, buscadoEm }
 
 export async function obrasDoSistema() {
   if (cacheObras && Date.now() - cacheObras.buscadoEm < VALIDADE_OBRAS_MS) {
-    return cacheObras.nomes
+    return cacheObras.lista
   }
   if (!OBRAS_API_TOKEN) return null
 
@@ -199,12 +199,21 @@ export async function obrasDoSistema() {
       return null
     }
     const j = await r.json()
-    const nomes = Array.isArray(j.obras) ? j.obras.filter(Boolean) : []
-    if (!nomes.length) return null
 
-    cacheObras = { nomes, buscadoEm: Date.now() }
-    console.log(`[obras] ${nomes.length} obra(s) carregada(s) do sistema`)
-    return nomes
+    // `detalhes` traz nome e endereço; `obras` traz só os nomes e é o formato
+    // antigo. Aceitar os dois deixa o robô funcionar contra um servidor que
+    // ainda não subiu a versão nova — e é o caso normal logo depois de um
+    // deploy de um lado só.
+    const lista = Array.isArray(j.detalhes) && j.detalhes.length
+      ? j.detalhes.filter(o => o?.nome)
+      : (Array.isArray(j.obras) ? j.obras.filter(Boolean) : [])
+
+    if (!lista.length) return null
+
+    cacheObras = { lista, buscadoEm: Date.now() }
+    const comEndereco = lista.filter(o => typeof o === 'object' && o.endereco).length
+    console.log(`[obras] ${lista.length} obra(s) do sistema${comEndereco ? `, ${comEndereco} com endereço` : ''}`)
+    return lista
   } catch (e) {
     console.warn('[obras] falha ao listar as obras:', e.message)
     return null
