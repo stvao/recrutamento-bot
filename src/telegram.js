@@ -117,6 +117,17 @@ export async function conectar(aoReceber) {
         const msg = u.message ?? u.channel_post
         if (!msg || msg.from?.is_bot) continue
 
+        // Mesmo problema do WhatsApp: ninguém sabe de cabeça o id de um
+        // chat do Telegram, e sem ele não dá para preencher GASTOS_GRUPOS.
+        // Mande um "oi" no grupo com GASTOS_DESCOBRIR_GRUPOS=1, copie a
+        // linha e desligue.
+        if (process.env.GASTOS_DESCOBRIR_GRUPOS === '1') {
+          console.log(
+            `\n[descoberta] chat "${msg.chat.title ?? msg.chat.type}" → GASTOS_GRUPOS=${msg.chat.id}`
+            + `\n             quem falou "${msg.from?.first_name ?? '?'}" → GASTOS_AUTORIZADOS=${msg.from?.id}\n`,
+          )
+        }
+
         const anexo = anexoDaMensagem(msg)
         const texto = msg.caption ?? msg.text ?? null
         if (!anexo && !texto?.trim()) continue

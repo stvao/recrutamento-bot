@@ -87,6 +87,29 @@ function textoDaMensagem(msg) {
     ?? null
 }
 
+/**
+ * Modo descoberta.
+ *
+ * Ninguém sabe de cabeça o identificador de um grupo do WhatsApp, e sem ele
+ * não dá para preencher GASTOS_GRUPOS. Com GASTOS_DESCOBRIR_GRUPOS=1 o robô
+ * imprime o identificador de cada grupo em que vê mensagem — é só mandar um
+ * "oi" no grupo dos comprovantes, copiar a linha e desligar.
+ *
+ * Fica desligado por padrão: é diagnóstico, e ligado o tempo todo encheria o
+ * log com todo grupo de que o número participa.
+ */
+const DESCOBRIR = process.env.GASTOS_DESCOBRIR_GRUPOS === '1'
+const jaMostrados = new Set()
+
+function mostrarGrupo(jid, msg) {
+  if (!DESCOBRIR || jaMostrados.has(jid)) return
+  jaMostrados.add(jid)
+  console.log(
+    `\n[descoberta] grupo "${msg.pushName ?? '?'}" → GASTOS_GRUPOS=${jid}`
+    + `\n             quem falou → GASTOS_AUTORIZADOS=${numeroDoJid(msg.key.participant ?? '')}\n`,
+  )
+}
+
 /** É um grupo que o robô acompanha? */
 function ehGrupoAtendido(msg) {
   const jid = msg.key?.remoteJid ?? ''
@@ -190,7 +213,12 @@ export async function conectar(aoReceber) {
     for (const msg of messages) {
       const pessoal = ehConversaPessoal(msg)
       const grupo = !pessoal && ehGrupoAtendido(msg)
-      if (!pessoal && !grupo) continue
+      if (!pessoal && !grupo) {
+        if (!msg.key?.fromMe && (msg.key?.remoteJid ?? '').endsWith('@g.us')) {
+          mostrarGrupo(msg.key.remoteJid, msg)
+        }
+        continue
+      }
 
       const jid = msg.key.remoteJid
       const texto = textoDaMensagem(msg)
