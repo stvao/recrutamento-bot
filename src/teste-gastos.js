@@ -215,6 +215,21 @@ ok('"*" SEM grupo é RECUSADO', p2.invalido)
 ok('e o módulo fica INATIVO em vez de abrir a porta', !p2.ativo)
 ok('e ninguém lança', !p2.qualquerUm)
 
+// ── 8. Sinal de vida ──────────────────────────────────────────────────────
+// O silêncio com texto solto é o certo na operação, e péssimo na instalação:
+// não dá para distinguir "funcionando" de "nem conectou".
+_limparPendentes()
+const noGrupo = { de: '5511999998888', chat: '120363000000000000@g.us', ehGrupo: true, idMensagem: 'm-ping' }
+
+for (const palavra of ['ping', 'teste', 'robo?', 'status']) {
+  const r = await tratar({ ...noGrupo, texto: palavra })
+  ok(`"${palavra}" responde que está vivo`, typeof r === 'string' && r.includes('Estou aqui'))
+}
+ok('a resposta ensina o formato', (await tratar({ ...noGrupo, texto: 'ping' })).includes('material'))
+ok('"oi" continua sem resposta', (await tratar({ ...noGrupo, texto: 'oi' })) === null)
+ok('conversa normal continua sem resposta', (await tratar({ ...noGrupo, texto: 'bom dia pessoal' })) === null)
+ok('não autorizado não recebe nem o ping', (await tratar({ ...noGrupo, de: '5511900000000', texto: 'ping' })) === null)
+
 _limparPendentes()
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)

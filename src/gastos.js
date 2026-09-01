@@ -153,6 +153,19 @@ export function situacao() {
   }
 }
 
+/**
+ * Palavras que perguntam se ele está vivo.
+ *
+ * Existe porque a primeira coisa que se faz ao ligar o robô é mandar um
+ * "oi" no grupo — e ele fica calado, de propósito, já que só reage a
+ * comprovante. O silêncio é o certo na operação e é péssimo na hora de
+ * instalar: não dá para distinguir "funcionando" de "nem conectou".
+ *
+ * Só responde a quem pode lançar, e só no grupo certo. Para todo o resto
+ * ele continua mudo.
+ */
+const PERGUNTAS_DE_TESTE = /^\s*(ping|teste|testando|robo|robô|status|voce esta ai|você está aí|ta ai|tá aí)\s*[?!.]*\s*$/i
+
 /** "R$ 1.234,50" */
 function moeda(v) {
   return v == null ? null : `R$ ${v.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`
@@ -272,6 +285,9 @@ export async function tratar(msg) {
     return null
   }
 
+  // "ping", "teste", "robo?" — alguém conferindo se ele está no ar.
+  if (!arquivo && PERGUNTAS_DE_TESTE.test(texto ?? '')) return respostaDeTeste()
+
   // Texto solto: pode ser a descrição da foto que acabou de chegar.
   if (!arquivo) return completarDescricao(de, texto)
 
@@ -299,6 +315,30 @@ export async function tratar(msg) {
     prazo.unref?.()
     aguardando.set(de, { pendente, prazo })
   })
+}
+
+/**
+ * O que ele responde a "ping".
+ *
+ * Diz o que está e o que NÃO está pronto. Só "estou aqui" enganaria: o robô
+ * pode estar conectado e ainda assim sem token de obras, e aí o comprovante
+ * some sem ninguém entender.
+ */
+function respostaDeTeste() {
+  const linhas = ['👋 Estou aqui, ouvindo este grupo.']
+
+  if (!obrasConfigurado()) {
+    linhas.push('❌ Mas SEM acesso ao sistema de obras — comprovante não vai chegar lá. Falta o token.')
+  } else if (!visaoDisponivel()) {
+    linhas.push('⚠ Sem leitura automática da imagem. O comprovante chega, mas só com o que você escrever.')
+  } else {
+    linhas.push('✅ Sistema de obras e leitura de imagem prontos.')
+  }
+
+  linhas.push('')
+  linhas.push('Manda o comprovante com uma linha assim:')
+  linhas.push('_bastos tsuya, tijolos e areia, material, 2500,00_')
+  return linhas.join('\n')
 }
 
 /** Texto que chega logo depois de uma foto vira a descrição dela. */
