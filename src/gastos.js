@@ -18,6 +18,7 @@
 import { lerComprovante, visaoDisponivel } from './ia-visao.js'
 import { enviarComprovante, obrasConfigurado } from './obras-client.js'
 import { interpretar, combinar } from './lancamento.js'
+import { norm } from './texto.js'
 
 /**
  * Quem pode lançar.
@@ -31,9 +32,24 @@ import { interpretar, combinar } from './lancamento.js'
  * Lista vazia é tratada como "ninguém": um erro de configuração não pode
  * abrir a porta para todo mundo.
  */
+const BRUTO_AUTORIZADOS = (process.env.GASTOS_AUTORIZADOS || '').split(',').map(x => x.trim()).filter(Boolean)
+
+/**
+ * "*" = qualquer pessoa, mas SÓ de dentro dos grupos cadastrados.
+ *
+ * Faz sentido quando o grupo é fechado e todo mundo nele pode lançar —
+ * evita ter que cadastrar e manter a lista de cada gestor de obra.
+ *
+ * Só vale COM grupo definido, e é por isso que a checagem existe: sem
+ * GASTOS_GRUPOS, o "*" valeria também para quem manda no privado, e aí
+ * qualquer um que descubra o número lança no financeiro. Nesse caso ele é
+ * recusado e o robô avisa alto, em vez de abrir a porta em silêncio.
+ */
+const QUALQUER_UM_DO_GRUPO = BRUTO_AUTORIZADOS.includes('*')
+
 const AUTORIZADOS = new Set(
-  (process.env.GASTOS_AUTORIZADOS || '')
-    .split(',')
+  BRUTO_AUTORIZADOS
+    .filter(n => n !== '*')
     .map(n => n.replace(/\D/g, ''))
     .filter(Boolean),
 )
@@ -51,6 +67,27 @@ const GRUPOS = new Set(
 )
 
 /**
+ * Também pelo NOME do grupo.
+ *
+ * Ninguém sabe de cabeça que o grupo dos comprovantes é
+ * "120363044...@g.us", mas todo mundo sabe que ele se chama "Comprovantes".
+ * Aceitar o nome tira um passo de configuração que só existia por limitação
+ * nossa.
+ *
+ * Comparado sem acento e sem maiúscula, porque ninguém digita o nome do
+ * grupo exatamente como ele foi salvo.
+ */
+const GRUPOS_NORM = new Set([...GRUPOS].map(g => norm(g)))
+
+/**
+ * Perigo do nome: qualquer um pode criar um grupo chamado "Comprovantes",
+ * botar o robô dentro e mandar comprovante. Por isso o nome só vale junto
+ * com a checagem de quem enviou — e é a razão de o coringa "*" exigir que a
+ * pessoa esteja num grupo cadastrado, e não só que o grupo tenha o nome
+ * certo.
+ */
+
+/**
  * Quanto esperar por uma descrição que vem em mensagem separada.
  *
  * Muita gente manda a foto e escreve o "o que é" logo em seguida, em outra
@@ -66,19 +103,40 @@ const ESPERA_DESCRICAO_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 600
 /** telefone -> { pendente, prazo } — foto segurada esperando descrição. */
 const aguardando = new Map()
 
+/** O coringa está pedido mas não pode valer? Situação a gritar, não a ignorar. */
+export function coringaInvalido() {
+  return QUALQUER_UM_DO_GRUPO && GRUPOS.size === 0
+}
+
 export function gastosAtivo() {
-  return AUTORIZADOS.size > 0 && obrasConfigurado()
+  if (coringaInvalido()) return false
+  const temQuem = AUTORIZADOS.size > 0 || QUALQUER_UM_DO_GRUPO
+  return temQuem && obrasConfigurado()
 }
 
-/** Este remetente pode lançar gasto? */
-export function autorizado(de) {
-  return AUTORIZADOS.has((de || '').replace(/\D/g, ''))
+/**
+ * Este remetente pode lançar gasto?
+ *
+ * `deGrupoCadastrado` diz se a mensagem veio de um grupo da lista — é o que
+ * o coringa exige. Sem isso, "*" valeria para quem manda no privado também.
+ */
+export function autorizado(de, deGrupoCadastrado = false) {
+  if (AUTORIZADOS.has((de || '').replace(/\D/g, ''))) return true
+  if (QUALQUER_UM_DO_GRUPO && GRUPOS.size > 0 && deGrupoCadastrado) return true
+  return false
 }
 
-/** A mensagem veio de onde os comprovantes devem vir? */
-export function origemAceita(chat) {
+/**
+ * A mensagem veio de onde os comprovantes devem vir?
+ *
+ * Aceita o identificador técnico do grupo OU o nome dele — quem configura
+ * sabe o nome, não o identificador.
+ */
+export function origemAceita(chat, chatNome) {
   if (GRUPOS.size === 0) return true
-  return GRUPOS.has(String(chat ?? ''))
+  if (GRUPOS.has(String(chat ?? ''))) return true
+  if (chatNome && GRUPOS_NORM.has(norm(chatNome))) return true
+  return false
 }
 
 /** Diagnóstico, para o /metricas. */
@@ -87,6 +145,9 @@ export function situacao() {
     ativo: gastosAtivo(),
     autorizados: AUTORIZADOS.size,
     grupos: GRUPOS.size ? [...GRUPOS] : 'qualquer origem',
+    quemPodeLancar: QUALQUER_UM_DO_GRUPO
+      ? (GRUPOS.size ? 'qualquer um dos grupos cadastrados' : 'RECUSADO: "*" exige GASTOS_GRUPOS')
+      : `${AUTORIZADOS.size} número(s) na lista`,
     leituraPorIA: visaoDisponivel(),
     obras: obrasConfigurado(),
   }
@@ -198,11 +259,13 @@ function montarResposta(dados, envio) {
  * robô que comenta tudo é insuportável.
  */
 export async function tratar(msg) {
-  const { de, chat, arquivo, nomeArquivo, tipo, texto, idMensagem } = msg
+  const { de, chat, chatNome, arquivo, nomeArquivo, tipo, texto, idMensagem } = msg
 
-  if (!origemAceita(chat)) return null
+  const daOrigemCerta = origemAceita(chat, chatNome)
+  if (!daOrigemCerta) return null
 
-  if (!autorizado(de)) {
+  // O coringa só vale vindo de grupo cadastrado — no privado, nunca.
+  if (!autorizado(de, daOrigemCerta && Boolean(msg.ehGrupo))) {
     // Nem responde. Dizer "você não pode" a quem mandou foto num grupo
     // confirma que existe um robô ouvindo e convida a insistir.
     if (arquivo) console.warn(`[gastos] comprovante ignorado: ${de} não está em GASTOS_AUTORIZADOS`)

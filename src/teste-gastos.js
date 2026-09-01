@@ -147,6 +147,74 @@ const soTexto = parseWebhook({
 })
 ok('webhook de texto segue sem mídia', soTexto?.texto === 'quero a vaga' && soTexto?.mediaId === null)
 
+// ── 7. Grupo pelo NOME, e o coringa "*" ───────────────────────────────────
+// Ninguém sabe de cabeça que o grupo é "120363...@g.us", mas todo mundo sabe
+// que ele se chama "Comprovantes".
+{
+  const mod = await import('./gastos.js?porNome=1')
+  // (mesma configuração do topo do arquivo — o módulo já está carregado)
+  ok('grupo pelo identificador continua valendo', mod.origemAceita('120363000000000000@g.us'))
+}
+
+// Um processo separado, porque a configuração é lida uma vez só no import.
+import { execFileSync } from 'node:child_process'
+
+function comAmbiente(env, script) {
+  return execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    env: { ...process.env, ...env },
+    encoding: 'utf8',
+  }).trim()
+}
+
+const porNome = comAmbiente(
+  { GASTOS_GRUPOS: 'Comprovantes', GASTOS_AUTORIZADOS: '5511999998888', OBRAS_API_TOKEN: 'x' },
+  `const g = await import('./src/gastos.js')
+   console.log(JSON.stringify({
+     nomeExato: g.origemAceita('123@g.us', 'Comprovantes'),
+     semAcentoNemCaixa: g.origemAceita('123@g.us', 'COMPROVANTES'),
+     outroNome: g.origemAceita('123@g.us', 'Futebol'),
+     semNome: g.origemAceita('123@g.us', null),
+   }))`,
+)
+const n = JSON.parse(porNome)
+ok('grupo reconhecido pelo NOME', n.nomeExato)
+ok('nome sem ligar para maiúscula/acento', n.semAcentoNemCaixa)
+ok('grupo de outro nome NÃO passa', !n.outroNome)
+ok('sem nome e sem id certo, NÃO passa', !n.semNome)
+
+// O coringa: qualquer um do grupo pode lançar.
+const coringa = comAmbiente(
+  { GASTOS_GRUPOS: 'Comprovantes', GASTOS_AUTORIZADOS: '*', OBRAS_API_TOKEN: 'x' },
+  `const g = await import('./src/gastos.js')
+   console.log(JSON.stringify({
+     ativo: g.gastosAtivo(),
+     invalido: g.coringaInvalido(),
+     doGrupo: g.autorizado('5511900000000', true),
+     doPrivado: g.autorizado('5511900000000', false),
+   }))`,
+)
+const c2 = JSON.parse(coringa)
+ok('com "*" o módulo fica ativo', c2.ativo)
+ok('"*" com grupo definido é válido', !c2.invalido)
+ok('qualquer um DO GRUPO pode lançar', c2.doGrupo)
+ok('mas NÃO no privado', !c2.doPrivado)
+
+// E o caso que importa: "*" SEM grupo definido valeria para o privado também,
+// e aí qualquer um que descobrisse o número lançaria no financeiro.
+const perigo = comAmbiente(
+  { GASTOS_GRUPOS: '', GASTOS_AUTORIZADOS: '*', OBRAS_API_TOKEN: 'x' },
+  `const g = await import('./src/gastos.js')
+   console.log(JSON.stringify({
+     ativo: g.gastosAtivo(),
+     invalido: g.coringaInvalido(),
+     qualquerUm: g.autorizado('5511900000000', true),
+   }))`,
+)
+const p2 = JSON.parse(perigo)
+ok('"*" SEM grupo é RECUSADO', p2.invalido)
+ok('e o módulo fica INATIVO em vez de abrir a porta', !p2.ativo)
+ok('e ninguém lança', !p2.qualquerUm)
+
 _limparPendentes()
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)

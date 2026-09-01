@@ -140,6 +140,7 @@ export async function conectar(aoReceber) {
             // número, e a lista não precisa saber de onde ele veio.
             de: String(msg.from?.id ?? ''),
             chat: String(msg.chat.id),
+            chatNome: msg.chat.title ?? null,
             ehGrupo: msg.chat.type !== 'private',
             texto: texto?.trim() || null,
             arquivo: anexo ? await baixar(anexo) : null,

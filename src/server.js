@@ -163,7 +163,8 @@ function tempoDecorrido(ms) {
  * com um candidato por vez, e não teria o que fazer num grupo de trabalho.
  */
 async function rotear(msg) {
-  const podeLancar = gastos.autorizado(msg.de) && gastos.origemAceita(msg.chat)
+  const daOrigemCerta = gastos.origemAceita(msg.chat, msg.chatNome)
+  const podeLancar = daOrigemCerta && gastos.autorizado(msg.de, daOrigemCerta && Boolean(msg.ehGrupo))
 
   if (podeLancar && (msg.arquivo || msg.ehGrupo)) {
     return gastos.tratar(msg)
@@ -287,7 +288,17 @@ if (process.env.TELEGRAM_TOKEN) {
 
 if (gastos.gastosAtivo()) {
   const s = gastos.situacao()
-  console.log(`[gastos] no ar — ${s.autorizados} autorizado(s), leitura por IA: ${s.leituraPorIA ? 'sim' : 'não'}`)
+  console.log(
+    `[gastos] no ar — quem pode lançar: ${s.quemPodeLancar}`
+    + ` | origem: ${Array.isArray(s.grupos) ? s.grupos.join(', ') : s.grupos}`
+    + ` | leitura por IA: ${s.leituraPorIA ? 'sim' : 'não'}`,
+  )
+} else if (gastos.coringaInvalido()) {
+  console.error(
+    '[gastos] GASTOS_AUTORIZADOS="*" RECUSADO: sem GASTOS_GRUPOS ele valeria também\n'
+    + '         para quem manda no privado, e qualquer um que descobrisse o número\n'
+    + '         lançaria no financeiro. Defina o grupo, ou liste os números.',
+  )
 } else if (process.env.OBRAS_API_TOKEN || process.env.GASTOS_AUTORIZADOS) {
   console.warn('[gastos] configuração incompleta — falta OBRAS_API_TOKEN ou GASTOS_AUTORIZADOS. Comprovantes NÃO serão enviados.')
 }

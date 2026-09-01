@@ -105,17 +105,58 @@ function mostrarGrupo(jid, msg) {
   if (!DESCOBRIR || jaMostrados.has(jid)) return
   jaMostrados.add(jid)
   console.log(
-    `\n[descoberta] grupo "${msg.pushName ?? '?'}" → GASTOS_GRUPOS=${jid}`
+    `\n[descoberta] grupo "${nomeDoGrupo.get(jid) ?? msg.pushName ?? '?'}" → GASTOS_GRUPOS=${jid}`
     + `\n             quem falou → GASTOS_AUTORIZADOS=${numeroDoJid(msg.key.participant ?? '')}\n`,
   )
 }
 
-/** É um grupo que o robô acompanha? */
+/**
+ * Nome de cada grupo, por identificador.
+ *
+ * Carregado quando a conexão abre e mantido pelos eventos do WhatsApp. Serve
+ * para o GASTOS_GRUPOS poder ser escrito como "Comprovantes" em vez de
+ * "120363044...@g.us", que ninguém sabe de cabeça.
+ */
+const nomeDoGrupo = new Map()
+
+/** Sem acento e sem maiúscula, para comparar com o que está no .env. */
+function normalizar(t) {
+  return (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim()
+}
+
+async function carregarGrupos() {
+  try {
+    const todos = await sock.groupFetchAllParticipating()
+    for (const [jid, info] of Object.entries(todos ?? {})) {
+      if (info?.subject) nomeDoGrupo.set(jid, info.subject)
+    }
+    console.log(`[whatsapp] ${nomeDoGrupo.size} grupo(s) conhecido(s)`)
+
+    // Diz de cara se o grupo configurado foi encontrado. Descobrir que o
+    // nome está errado só quando o primeiro comprovante se perde é tarde.
+    for (const alvo of GRUPOS_ATENDIDOS) {
+      const achado = [...nomeDoGrupo.entries()]
+        .find(([jid, nome]) => jid === alvo || normalizar(nome) === normalizar(alvo))
+      console.log(achado
+        ? `[whatsapp] ✅ grupo "${achado[1]}" encontrado (${achado[0]})`
+        : `[whatsapp] ⚠ NÃO achei nenhum grupo chamado "${alvo}" — confira o nome em GASTOS_GRUPOS`)
+    }
+  } catch (e) {
+    console.warn('[whatsapp] não consegui listar os grupos:', e.message)
+  }
+}
+
+/** É um grupo que o robô acompanha? Por identificador OU por nome. */
 function ehGrupoAtendido(msg) {
   const jid = msg.key?.remoteJid ?? ''
   if (msg.key?.fromMe) return false
   if (!jid.endsWith('@g.us')) return false
-  return GRUPOS_ATENDIDOS.has(jid) || GRUPOS_ATENDIDOS.has(jid.split('@')[0])
+  if (GRUPOS_ATENDIDOS.has(jid) || GRUPOS_ATENDIDOS.has(jid.split('@')[0])) return true
+
+  const nome = nomeDoGrupo.get(jid)
+  if (!nome) return false
+  const alvo = normalizar(nome)
+  return [...GRUPOS_ATENDIDOS].some(g => normalizar(g) === alvo)
 }
 
 /**
@@ -170,6 +211,19 @@ export async function conectar(aoReceber) {
 
   sock.ev.on('creds.update', saveCreds)
 
+  // Grupo renomeado, ou o robô adicionado num grupo novo: o nome muda depois
+  // da carga inicial, e sem isto ele pararia de reconhecer o grupo certo.
+  sock.ev.on('groups.update', (novidades) => {
+    for (const g of novidades ?? []) {
+      if (g?.id && g?.subject) nomeDoGrupo.set(g.id, g.subject)
+    }
+  })
+  sock.ev.on('groups.upsert', (novos) => {
+    for (const g of novos ?? []) {
+      if (g?.id && g?.subject) nomeDoGrupo.set(g.id, g.subject)
+    }
+  })
+
   sock.ev.on('connection.update', (u) => {
     const { connection, lastDisconnect, qr } = u
 
@@ -183,6 +237,7 @@ export async function conectar(aoReceber) {
       conectado = true
       const meu = numeroDoJid(sock.user?.id)
       console.log(`\n✅ WhatsApp conectado no número ${meu}. A Maria Vitória está atendendo.\n`)
+      carregarGrupos()
     }
 
     if (connection === 'close') {
@@ -242,6 +297,7 @@ export async function conectar(aoReceber) {
           canal: 'whatsapp',
           de,
           chat: grupo ? jid : de,
+          chatNome: grupo ? (nomeDoGrupo.get(jid) ?? null) : null,
           ehGrupo: grupo,
           texto: texto?.trim() || null,
           arquivo,
