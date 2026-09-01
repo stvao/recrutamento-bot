@@ -65,7 +65,47 @@ function salvar() {
   }
 }
 
+/**
+ * Joga fora o que não serve mais para nada.
+ *
+ * Nada removia sessão: passados os 7 dias de retenção a conversa deixava de
+ * ser retomável, mas continuava no Map e no arquivo — carregada inteira na
+ * memória a cada arranque e reescrita a cada 5 segundos, com até 20
+ * mensagens de histórico cada. Em alguns meses de operação isso vira um
+ * arquivo grande sendo regravado o tempo todo por nada.
+ *
+ * E contaminava as métricas: `iniciadas` contava desde o começo dos tempos,
+ * então a taxa de conclusão deste mês vinha diluída por candidato de meio
+ * ano atrás — justamente o número que deveria dizer se uma pergunta nova
+ * está espantando gente.
+ *
+ * O corte é a RETENÇÃO, não o TTL: enquanto der para retomar, a conversa
+ * fica. Concluída também sai, passado o mesmo prazo — o registro dela já
+ * está no RH, que é onde ele importa.
+ */
+function expirar() {
+  const agora = Date.now()
+  let removidas = 0
+  for (const [telefone, s] of sessoes) {
+    if (agora - s.atualizadoEm > RETENCAO_MS) {
+      sessoes.delete(telefone)
+      removidas++
+    }
+  }
+  if (removidas) {
+    console.log(`[store] ${removidas} conversa(s) antiga(s) descartada(s)`)
+    sujo = true
+  }
+  return removidas
+}
+
 carregar()
+expirar()
+
+// De hora em hora: não é urgente, e varrer o Map a cada mensagem seria
+// trabalho repetido para remover o que só muda de status uma vez por dia.
+const limpeza = setInterval(expirar, 1000 * 60 * 60)
+limpeza.unref?.()
 
 // Grava periodicamente em vez de a cada mensagem: numa conversa ativa são
 // muitas escritas seguidas, e o que importa é sobreviver ao reinício.
@@ -171,6 +211,17 @@ export function metricas() {
       : null,
     abandonaramNaEtapa: pararamEm,
   }
+}
+
+/** Só para teste: finge que a conversa parou há X ms. */
+export function _envelhecer(telefone, ms) {
+  const s = sessoes.get(telefone)
+  if (s) s.atualizadoEm = Date.now() - ms
+}
+
+/** Só para teste: força a varredura das antigas. */
+export function _expirar() {
+  return expirar()
 }
 
 /** Só para teste: esvazia sem tocar no disco. */

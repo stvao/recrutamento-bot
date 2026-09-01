@@ -86,7 +86,7 @@ function ehNao(msg) {
 function ehPergunta(msg) {
   return /\?/.test(msg) || temAlguma(msg, ['quanto', 'qual', 'quais', 'quando', 'como', 'onde', 'porque', 'por que', ' tem ', 'possui', 'pode', 'posso', 'sera', 'voces'])
 }
-function ehReset(msg) {
+export function ehReset(msg) {
   return temAlguma(msg, ['recomecar', 'reiniciar', 'comecar de novo', 'comecar denovo', 'voltar ao inicio', 'cancelar tudo', 'menu inicial'])
 }
 /**

@@ -140,33 +140,17 @@ function tempoDecorrido(ms) {
   return `há ${dias} dia${dias === 1 ? '' : 's'}`
 }
 
-/** Conduz a conversa de um número e devolve o texto de resposta. */
-async function processar(from, text) {
-  let estado = getEstado(from)
-
-  if (!estado) {
-    // Quem parou no meio e voltou continua de onde estava.
-    //
-    // Recomeçar do zero é a razão mais comum de desistência na segunda
-    // tentativa: a pessoa já respondeu vaga e cidade, some por um dia, e o
-    // robô pergunta tudo outra vez. Aqui ela só responde o que falta.
-    const pendente = getAbandonada(from)
-    if (pendente) {
-      setEstado(from, pendente.estado)
-      const r = await atender(pendente.estado, text)
-      setEstado(from, r.estado)
-      return `Oi de novo! 👋 Vi que você começou uma candidatura ${tempoDecorrido(pendente.paradoHa)} `
-        + `e parou no meio — dá para continuar de onde estava.\n`
-        + `(se preferir começar de novo, é só escrever *recomeçar*)\n\n`
-        + r.resposta
-    }
-
-    const ini = iniciar(from)
-    setEstado(from, ini.estado)
-    return ini.resposta
-  }
-
-  const r = await atender(estado, text)
+/**
+ * Trata o resultado de uma mensagem: escalada, registro no RH, resposta.
+ *
+ * Vive separado porque há DOIS caminhos que produzem um resultado — a
+ * conversa normal e a retomada de quem sumiu e voltou. O da retomada só
+ * gravava o estado e devolvia o texto: se a pessoa completasse nome, vaga e
+ * cidade justamente na mensagem de volta, a `acao` era descartada e a
+ * candidatura nunca chegava ao RH. Com um caminho só, não dá para um deles
+ * esquecer o que o outro faz.
+ */
+async function aplicarResultado(from, r, text) {
   setEstado(from, r.estado)
 
   if (r.escalarHumano) {
@@ -199,6 +183,38 @@ async function processar(from, text) {
     return r.respostaFalha || r.resposta
   }
   return r.resposta
+}
+
+/** Conduz a conversa de um número e devolve o texto de resposta. */
+async function processar(from, text) {
+  const estado = getEstado(from)
+
+  if (!estado) {
+    // Quem parou no meio e voltou continua de onde estava.
+    //
+    // Recomeçar do zero é a razão mais comum de desistência na segunda
+    // tentativa: a pessoa já respondeu vaga e cidade, some por um dia, e o
+    // robô pergunta tudo outra vez. Aqui ela só responde o que falta.
+    const pendente = getAbandonada(from)
+    if (pendente) {
+      setEstado(from, pendente.estado)
+      const r = await atender(pendente.estado, text)
+      const resposta = await aplicarResultado(from, r, text)
+      return `Oi de novo! 👋 Vi que você começou uma candidatura ${tempoDecorrido(pendente.paradoHa)} `
+        + `e parou no meio — dá para continuar de onde estava.
+`
+        + `(se preferir começar de novo, é só escrever *recomeçar*)
+
+`
+        + resposta
+    }
+
+    const ini = iniciar(from)
+    setEstado(from, ini.estado)
+    return ini.resposta
+  }
+
+  return aplicarResultado(from, await atender(estado, text), text)
 }
 
 /**

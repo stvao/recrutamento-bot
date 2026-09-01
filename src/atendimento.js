@@ -13,7 +13,7 @@
  * fora —, o roteiro assume na mesma mensagem. O candidato não fica sem
  * resposta por causa de uma dependência externa.
  */
-import { iniciar as iniciarRoteiro, responder as responderRoteiro, JORNADA } from './brain.js'
+import { iniciar as iniciarRoteiro, responder as responderRoteiro, ehReset, JORNADA } from './brain.js'
 import { conversar, montarFatos, iaDisponivel } from './ia.js'
 import { vagasAtuais, cidadesAtuais } from './catalogo.js'
 import { norm } from './texto.js'
@@ -128,6 +128,18 @@ export async function atender(estado, mensagem) {
   if (!iaDisponivel() || estado?.modo !== 'ia') {
     return responderRoteiro(estado, mensagem)
   }
+
+  // "Recomeçar" vale também com a Maria Vitória.
+  //
+  // O comando era tratado só no roteiro, mas quem oferece o comando é a
+  // mensagem de retomada do servidor — que aparece justamente quando a IA
+  // está atendendo, que é o padrão. A pessoa escrevia "recomeçar", a
+  // mensagem ia para o modelo como uma frase qualquer, e nada recomeçava.
+  //
+  // Quem reconhece o pedido é o brain, para o vocabulário aceito ("reiniciar",
+  // "começar de novo", "cancelar tudo") não existir escrito em dois lugares
+  // e passar a divergir.
+  if (ehReset(mensagem)) return iniciarAtendimento(estado?.whatsapp)
 
   const vagas = vagasAtuais()
   const cidades = cidadesAtuais()

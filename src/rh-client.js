@@ -5,21 +5,58 @@
 const RH_API_URL = process.env.RH_API_URL || ''
 const RH_API_TOKEN = process.env.RH_API_TOKEN || ''
 
+/**
+ * Os campos da ficha que vão para o RH.
+ *
+ * É uma lista explícita, e não um repasse cego do objeto inteiro, porque
+ * este arquivo é o contrato entre os dois sistemas: quem lê aqui tem que
+ * conseguir ver o que o RH recebe sem abrir o outro repositório.
+ *
+ * Mas ela precisa acompanhar o que o atendimento coleta. Antes eram sete
+ * campos escritos à mão enquanto o atendimento montava dezesseis, e os nove
+ * que sobravam — bairro, CEP, nascimento, quando pode começar, tamanho de
+ * camisa e de bota, contato de recado — eram montados a cada conversa e
+ * jogados fora aqui na saída. O RH nunca viu nenhum deles.
+ *
+ * Mexeu nesta lista, confira o DTO do lado do RH (/api/integracao/candidatura).
+ */
+const CAMPOS_DA_FICHA = [
+  'nomeCompleto', 'vagaPretendida', 'cidadePreferencia', 'whatsapp',
+  'tempoExperiencia', 'resumoExperiencia',
+  'bairro', 'cidade', 'cep', 'dataNascimento', 'disponibilidadeInicio',
+  'aceitaOutrasObras', 'tamanhoCamisa', 'tamanhoBota',
+  'contatoRecadoNome', 'contatoRecadoTelefone',
+]
+
+/**
+ * Monta o corpo do POST.
+ *
+ * `dadosBrutos` carrega a conversa inteira, e é o que tem valor de prova: o
+ * que a Maria Vitória informou por escrito sobre salário e alojamento fica
+ * registrado junto da ficha. Os dois caminhos de atendimento nomeiam isso
+ * diferente — o roteiro manda `transcricao`, a IA manda `dadosBrutos` — e
+ * aceitar os dois aqui é mais barato que uniformizar os dois lados.
+ */
+function montarCorpo(dados) {
+  const ficha = {}
+  for (const campo of CAMPOS_DA_FICHA) {
+    ficha[campo] = dados[campo] ?? null
+  }
+
+  const bruto = dados.dadosBrutos ?? dados.transcricao ?? {}
+  return JSON.stringify({
+    ...ficha,
+    dadosBrutos: JSON.stringify({ origem: 'whatsapp-bot', ...bruto }),
+  })
+}
+
 export async function enviarCandidatura(dados) {
   if (!RH_API_URL || !RH_API_TOKEN) {
     console.warn('[rh-client] RH_API_URL/RH_API_TOKEN não configurados — candidatura NÃO enviada.')
     return { ok: false, motivo: 'nao-configurado' }
   }
 
-  const body = JSON.stringify({
-    nomeCompleto: dados.nomeCompleto,
-    vagaPretendida: dados.vagaPretendida,
-    cidadePreferencia: dados.cidadePreferencia,
-    whatsapp: dados.whatsapp,
-    tempoExperiencia: dados.tempoExperiencia,
-    resumoExperiencia: dados.resumoExperiencia,
-    dadosBrutos: JSON.stringify({ origem: 'whatsapp-bot', ...dados.transcricao }),
-  })
+  const body = montarCorpo(dados)
 
   // Tenta até 2 vezes (a 2ª só em falha de rede/timeout — não repete em erro 4xx)
   for (let tentativa = 1; tentativa <= 2; tentativa++) {
@@ -73,4 +110,9 @@ export async function avisarRH({ whatsapp, motivo, trecho }) {
     console.warn('[rh-client] não consegui avisar o RH:', e.message)
     return { ok: false }
   }
+}
+
+/** Só para teste: o corpo que sairia daqui, sem enviar nada. */
+export function _corpoDaCandidatura(dados) {
+  return JSON.parse(montarCorpo(dados))
 }
