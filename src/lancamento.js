@@ -373,6 +373,34 @@ function limparBordas(t) {
 }
 
 /**
+ * Acha TODAS as obras citadas, e não só a primeira.
+ *
+ * Existe porque uma compra só costuma servir a mais de uma obra: o caminhão
+ * de areia abastece duas escolas na mesma viagem. Sem isto a pessoa lança
+ * tudo numa e o custo da outra fica errado — e ninguém percebe, porque o
+ * total bate com o comprovante.
+ *
+ * A primeira é a obra do lançamento; as outras entram no rateio. Ordem de
+ * aparição, que é a ordem em que a pessoa pensou.
+ */
+export function acharObras(texto, obras, limite = 6) {
+  const achadas = []
+  let resto = texto ?? ''
+
+  for (let i = 0; i < limite; i++) {
+    const r = acharObra(resto, obras)
+    if (!r.achado) {
+      // Guarda os candidatos da primeira rodada: se nenhuma obra foi achada,
+      // é entre eles que se pergunta.
+      return { obras: achadas, resto, candidatos: achadas.length ? null : (r.candidatos ?? null) }
+    }
+    if (!achadas.includes(r.achado)) achadas.push(r.achado)
+    resto = r.resto
+  }
+  return { obras: achadas, resto, candidatos: null }
+}
+
+/**
  * Interpreta a linha inteira.
  *
  * Devolve sempre um objeto — linha vazia ou incompreensível dá todos os
@@ -381,7 +409,7 @@ function limparBordas(t) {
  * certo já vale, e quem aprova completa o que faltar.
  */
 export function interpretar(texto, obras = []) {
-  const vazio = { obra: null, descricao: null, tipo: null, valor: null, candidatos: null, textoOriginal: texto ?? null }
+  const vazio = { obra: null, rateio: null, descricao: null, tipo: null, valor: null, candidatos: null, textoOriginal: texto ?? null }
   if (!texto?.trim()) return vazio
 
   const { valor, resto } = acharValor(texto)
@@ -398,11 +426,13 @@ export function interpretar(texto, obras = []) {
   //
   // Vem primeiro porque é o campo mais específico: nome de obra é próprio, e
   // deixar para depois faria "Bastos" ser consumido como outra coisa.
-  const porNome = acharObra(resto, obras)
-  let obra = porNome.achado
-  let sobra = porNome.resto
+  const todas = acharObras(resto, obras)
+  let obra = todas.obras[0] ?? null
+  // As demais viram rateio: o mesmo gasto dividido entre elas.
+  const rateio = todas.obras.slice(1)
+  let sobra = todas.resto
   // Cidade com mais de uma obra: quem chama pergunta entre estas.
-  const candidatos = porNome.candidatos ?? null
+  const candidatos = todas.candidatos ?? null
 
   // 2) O TIPO, quando a pessoa o ESCREVEU ("material", "locação").
   //
@@ -438,7 +468,7 @@ export function interpretar(texto, obras = []) {
   //    areia" → MATERIAL). É palpite, e por isso só depois de tudo falhar.
   if (!tipo) tipo = acharTipo(descricao ?? '')
 
-  return { obra, descricao, tipo, valor, candidatos, textoOriginal: texto }
+  return { obra, rateio: rateio.length ? rateio : null, descricao, tipo, valor, candidatos, textoOriginal: texto }
 }
 
 /**
@@ -453,6 +483,8 @@ export function interpretar(texto, obras = []) {
 export function combinar(escrito, lido) {
   return {
     obra: escrito?.obra ?? null,
+    // Outras obras citadas na mesma linha: o gasto é dividido entre elas.
+    rateio: escrito?.rateio ?? null,
     // As obras entre as quais perguntar, quando a pessoa escreveu algo que
     // serve para mais de uma (a cidade, tipicamente).
     candidatos: escrito?.candidatos ?? null,

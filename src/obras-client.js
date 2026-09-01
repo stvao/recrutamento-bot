@@ -233,7 +233,7 @@ export async function obrasDoSistema() {
  * O 422 é resposta esperada, não falha: quer dizer que o sistema não
  * reconheceu a obra, e vem com a lista para o robô PERGUNTAR qual é.
  */
-export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, idMensagem }) {
+export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, rateio, idMensagem }) {
   if (!OBRAS_API_TOKEN) return { ok: false, motivo: 'nao-configurado' }
   if (!arquivo?.byteLength) return { ok: false, motivo: 'arquivo-vazio' }
   if (!obra || valor == null) return { ok: false, motivo: 'faltam-dados' }
@@ -247,6 +247,9 @@ export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, des
   if (data) form.append('data', data)
   if (fornecedor) form.append('fornecedor', fornecedor)
   if (observacao) form.append('observacao', observacao)
+  // Nomes separados por vírgula: em multipart não há array, e exigir JSON
+  // aqui só daria mais chance de erro.
+  if (rateio?.length) form.append('rateio', rateio.join(','))
 
   try {
     const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancar`, {
@@ -262,7 +265,7 @@ export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, des
     let j = {}
     try { j = cru ? JSON.parse(cru) : {} } catch { j = {} }
 
-    if (r.ok) return { ok: true, id: j.id, obra: j.obra, mensagem: j.mensagem }
+    if (r.ok) return { ok: true, id: j.id, obra: j.obra, obras: j.obras, rateio: j.rateio, mensagem: j.mensagem }
 
     if (r.status === 422) {
       // Obra não reconhecida: quem chama pergunta, oferecendo as opções.

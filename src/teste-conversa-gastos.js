@@ -53,13 +53,31 @@ const srv = createServer((req, res) => {
       }))
     }
     if (req.url.endsWith('/comprovantes/lancar')) {
-      const obra = /name="obra"\r?\n\r?\n([^\r]*)/.exec(corpo)?.[1] ?? ''
+      const campo = (n) => new RegExp(`name="${n}"\r?\n\r?\n([^\r]*)`).exec(corpo)?.[1] ?? ''
+      const obra = campo('obra')
+      const valor = Number(campo('valor') || '0')
+      const extras = campo('rateio').split(',').map(x => x.trim()).filter(Boolean)
+
       if (!OBRAS.some(o => o.nome === obra.trim())) {
         res.writeHead(422, { 'Content-Type': 'application/json' })
         return res.end(JSON.stringify({ message: 'não achei', obras: OBRAS.map(o => o.nome) }))
       }
+
+      // Divide como o servidor divide: a sobra de centavo vai para a
+      // primeira, para o total fechar com o comprovante.
+      const todas = [obra.trim(), ...extras]
+      const cent = Math.round(valor * 100)
+      const base = Math.floor(cent / todas.length)
+      const sobra = cent - base * todas.length
+      const partes = todas.map((o, k) => ({ obra: o, valor: (base + (k < sobra ? 1 : 0)) / 100 }))
+
       res.writeHead(201, { 'Content-Type': 'application/json' })
-      return res.end(JSON.stringify({ ok: true, id: 'g1', obra: obra.trim(), mensagem: `Lançado em ${obra.trim()}, aguardando sua aprovação.` }))
+      return res.end(JSON.stringify({
+        ok: true, id: 'g1', obra: todas[0], obras: todas, rateio: partes,
+        mensagem: todas.length === 1
+          ? `Lançado em ${todas[0]}, aguardando sua aprovação.`
+          : `Rateado entre ${todas.length} obras, aguardando sua aprovação.`,
+      }))
     }
     // /receber — a caixa
     res.writeHead(201, { 'Content-Type': 'application/json' })
@@ -184,14 +202,58 @@ const rota = () => chamadas.map(c => c.url.replace(/^.*\/comprovantes\//, '')).f
   ok('obra desconhecida vira pergunta', /obra/i.test(r))
 }
 
-// ── 9. Foto nova não deixa a anterior pendurada ───────────────────────────
+// ── 9. VÁRIAS fotos de uma vez ────────────────────────────────────────────
+// Foi assim que quebrou no uso real: cada foto nova cancelava a anterior, e
+// as respostas não tinham a qual pergunta pertencer. "Acabou que misturou."
+//
+// Agora é FILA, uma pergunta por vez.
 {
   const p = novo('5511900000009')
-  await p.foto('nota A')                       // fica perguntando
-  const r = await p.foto('haia cimento 300', 'm-B')
-  ok('a foto nova é processada normalmente', r.includes('aguardando sua aprovação'))
-  await espera(120)
-  ok('e a anterior foi resolvida, não esquecida', rota().includes('receber'))
+
+  const r1 = await p.foto('nota A')
+  ok('pergunta sobre a primeira', /obra/i.test(r1) || /valor/i.test(r1))
+
+  const r2 = await p.foto('nota B')
+  ok('a segunda ENTRA NA FILA, não cancela a primeira', /fila/i.test(r2))
+  ok('e diz a posição dela', r2.includes('2'))
+
+  const r3 = await p.foto('nota C')
+  ok('a terceira também entra', /fila/i.test(r3))
+
+  ok('nada foi enviado ainda — está esperando resposta', rota().length === 0)
+
+  // Responder resolve a PRIMEIRA e já pergunta sobre a segunda.
+  const r4 = await p.diz('haia cimento 100')
+  ok('responder lança a primeira', r4.includes('aguardando sua aprovação'))
+  ok('e já pergunta sobre a próxima', /obra/i.test(r4) || p.ditos.some(t => /obra/i.test(t)))
+
+  const r5 = await p.diz('tsuya areia 200')
+  ok('a segunda também lança', r5.includes('aguardando sua aprovação'))
+
+  const r6 = await p.diz('toschi tinta 300')
+  ok('e a terceira', r6.includes('aguardando sua aprovação'))
+
+  const lancados = chamadas.filter(c => c.url.includes('lancar')).length
+  ok('as TRÊS foram lançadas, nenhuma perdida', lancados === 3)
+}
+
+// ── 9b. Saber o que está esperando, e desistir de tudo ────────────────────
+// "Ficou meio bagunçado na conversa" — precisa haver um jeito de ver o que
+// falta e de sair do buraco sem perder comprovante.
+{
+  const p = novo('5511900000019')
+  await p.foto('nota X')
+  await p.foto('nota Y')
+
+  const lista = await p.diz('pendentes')
+  ok('"pendentes" lista o que está esperando', /2 comprovante/i.test(lista))
+
+  const r = await p.diz('cancelar tudo')
+  ok('"cancelar tudo" resolve', /caixa/i.test(r))
+  ok('mandando TODOS para a caixa', chamadas.filter(c => c.url.includes('receber')).length === 2)
+  ok('e diz onde achar', r.includes('/m/gasto'))
+
+  ok('depois disso a fila está vazia', /não tenho nenhum/i.test(await p.diz('pendentes')))
 }
 
 // ── 10. Cidade com DUAS obras: pergunta entre elas ────────────────────────
@@ -256,6 +318,35 @@ const rota = () => chamadas.map(c => c.url.replace(/^.*\/comprovantes\//, '')).f
   ok(`legenda de 3000 palavras responde rápido (${levou}ms)`, levou < 5000)
   ok('e ainda acha a obra', r.includes('AGUIA DE HAIA'))
   ok('e ainda acha o valor', r.includes('R$ 250,00'))
+}
+
+// ── 13. Rateio: uma compra, mais de uma obra ──────────────────────────────
+// "As vezes eu compro, e é para mais de uma obra, o mesmo item." Sem isso a
+// pessoa lança tudo numa obra e o custo da outra fica errado — e ninguém
+// percebe, porque o total bate com o comprovante.
+{
+  const p = novo('5511900000030')
+  const r = await p.foto('haia e tsuya areia, material, 600')
+  ok('rateia citando as duas obras', /rateado entre 2/i.test(r))
+  ok('mostra quanto foi para cada uma', r.includes('R$ 300,00'))
+  ok('lista as duas obras', r.includes('AGUIA DE HAIA') && r.includes('TSUYA'))
+}
+
+// Divisão que não fecha redondo não pode perder centavo: o total tem que
+// bater com o comprovante na mão de quem confere.
+{
+  const p = novo('5511900000031')
+  const r = await p.foto('haia tsuya toschi tinta, material, 100')
+  ok('divide entre três', /rateado entre 3/i.test(r))
+  ok('a sobra do centavo vai para a primeira', r.includes('R$ 33,34'))
+  ok('e as outras ficam com o resto', (r.match(/R\$ 33,33/g) ?? []).length === 2)
+}
+
+// Uma obra só continua sendo lançamento simples, sem falar em rateio.
+{
+  const p = novo('5511900000032')
+  const r = await p.foto('tsuya cimento 300')
+  ok('obra única não vira rateio', !/rateado/i.test(r) && r.includes('aguardando sua aprovação'))
 }
 
 srv.close()
