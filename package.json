@@ -11,11 +11,12 @@
     "test:texto": "node src/teste-texto.js",
     "test:catalogo": "node src/teste-catalogo.js",
     "test:atendimento": "node src/teste-atendimento.js",
-    "test": "npm run test:texto && npm run test:catalogo && npm run test:atendimento && npm run test:ficha && npm run test:lancamento && npm run test:obras && npm run test:gastos && npm run test:conversa",
+    "test": "npm run test:texto && npm run test:catalogo && npm run test:atendimento && npm run test:ficha && npm run test:lancamento && npm run test:obras && npm run test:gastos && npm run test:conversa-gastos && npm run test:conversa",
     "test:ficha": "node src/teste-ficha.js",
     "test:gastos": "node src/teste-gastos.js",
     "test:lancamento": "node src/teste-lancamento.js",
-    "test:obras": "node src/teste-obras.js"
+    "test:obras": "node src/teste-obras.js",
+    "test:conversa-gastos": "node src/teste-conversa-gastos.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",

@@ -165,6 +165,118 @@ async function postar({ arquivo, nomeArquivo, tipo, texto, idMensagem, extras })
   return { ok: false, motivo: 'desconhecido' }
 }
 
+/**
+ * As obras abertas, vindas do sistema.
+ *
+ * Substitui a lista escrita à mão no .env, que envelhecia calada: obra nova
+ * entrava no sistema e o robô seguia sem reconhecê-la, devolvendo "faltou a
+ * obra" para um nome que existe.
+ *
+ * Guardada por um tempo porque o cérebro que interpreta a legenda é síncrono
+ * — buscar no sistema a cada foto acrescentaria a latência da rede a todo
+ * comprovante. Mesma ideia do catalogo.js com as vagas do RH.
+ *
+ * Nunca lança. Sem resposta, quem chama usa a reserva do .env.
+ */
+const VALIDADE_OBRAS_MS = 1000 * 60 * 30
+let cacheObras = null   // { nomes, buscadoEm }
+
+export async function obrasDoSistema() {
+  if (cacheObras && Date.now() - cacheObras.buscadoEm < VALIDADE_OBRAS_MS) {
+    return cacheObras.nomes
+  }
+  if (!OBRAS_API_TOKEN) return null
+
+  try {
+    const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/obras`, {
+      headers: { Authorization: `Bearer ${OBRAS_API_TOKEN}` },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!r.ok) {
+      // 404 = servidor ainda sem a rota nova. Não é erro de configuração, é
+      // versão antiga do outro lado, e a reserva do .env cobre isso.
+      console.warn(`[obras] não consegui listar as obras (${r.status}) — usando a lista do .env.`)
+      return null
+    }
+    const j = await r.json()
+    const nomes = Array.isArray(j.obras) ? j.obras.filter(Boolean) : []
+    if (!nomes.length) return null
+
+    cacheObras = { nomes, buscadoEm: Date.now() }
+    console.log(`[obras] ${nomes.length} obra(s) carregada(s) do sistema`)
+    return nomes
+  } catch (e) {
+    console.warn('[obras] falha ao listar as obras:', e.message)
+    return null
+  }
+}
+
+/**
+ * Lança o comprovante direto como GASTO DA EQUIPE, já pendente de aprovação.
+ *
+ * É o caminho que economiza o trabalho de verdade: em vez de o comprovante
+ * esperar numa caixa para alguém digitar obra e valor, ele já nasce como
+ * lançamento na fila — e só falta abrir "Aprovar gastos" e confirmar.
+ *
+ * Exige obra e valor. Quem chama só usa este caminho quando tem os dois; sem
+ * eles, cai no enviarComprovante(), que põe na caixa.
+ *
+ * O 422 é resposta esperada, não falha: quer dizer que o sistema não
+ * reconheceu a obra, e vem com a lista para o robô PERGUNTAR qual é.
+ */
+export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, idMensagem }) {
+  if (!OBRAS_API_TOKEN) return { ok: false, motivo: 'nao-configurado' }
+  if (!arquivo?.byteLength) return { ok: false, motivo: 'arquivo-vazio' }
+  if (!obra || valor == null) return { ok: false, motivo: 'faltam-dados' }
+
+  const form = new FormData()
+  form.append('arquivo', new Blob([arquivo], { type: tipo || 'application/octet-stream' }), nomeArquivo || 'comprovante')
+  form.append('obra', String(obra))
+  form.append('valor', String(valor))
+  if (descricao) form.append('descricao', descricao)
+  if (categoria) form.append('categoria', categoria)
+  if (data) form.append('data', data)
+  if (fornecedor) form.append('fornecedor', fornecedor)
+  if (observacao) form.append('observacao', observacao)
+
+  try {
+    const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancar`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${OBRAS_API_TOKEN}`,
+        'Idempotency-Key': String(idMensagem),
+      },
+      body: form,
+      signal: AbortSignal.timeout(30000),
+    })
+    const cru = await r.text()
+    let j = {}
+    try { j = cru ? JSON.parse(cru) : {} } catch { j = {} }
+
+    if (r.ok) return { ok: true, id: j.id, obra: j.obra, mensagem: j.mensagem }
+
+    if (r.status === 422) {
+      // Obra não reconhecida: quem chama pergunta, oferecendo as opções.
+      return { ok: false, status: 422, obraNaoAchada: true, obras: j.obras ?? j.message?.obras ?? [] }
+    }
+    if (r.status === 404) {
+      // Servidor sem a rota nova. Quem chama cai para a caixa, que sempre
+      // existiu — melhor o caminho antigo que comprovante nenhum.
+      return { ok: false, status: 404, semRota: true }
+    }
+    console.error(`[obras] /lancar recusou ${r.status}: ${cru.slice(0, 300)}`)
+    return { ok: false, status: r.status, motivo: j.message || j.mensagem || `HTTP ${r.status}` }
+  } catch (e) {
+    console.error('[obras] /lancar falhou:', e.message)
+    return { ok: false, motivo: e.message }
+  }
+}
+
+/** Só para teste: esquece as obras guardadas. */
+export function _limparCacheObras() {
+  cacheObras = null
+}
+
 /** Só para teste: esquece o que foi descoberto sobre os campos extras. */
 export function _esquecerDescoberta() {
   extrasRecusados = false

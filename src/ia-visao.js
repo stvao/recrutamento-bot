@@ -32,11 +32,15 @@ const CHAVE = process.env.GEMINI_API_KEY || ''
  * Modelo indisponível é condição normal na cota gratuita, não exceção. Com a
  * lista, um 503 no primeiro só custa ir para o segundo.
  *
- * A ordem é de propósito: o melhor primeiro, e um `lite` no fim — leitura
- * pior é melhor que leitura nenhuma.
+ * A ordem é por VELOCIDADE MEDIDA, não por qualidade no papel. Medindo a
+ * mesma imagem contra a cota gratuita: o `gemini-3.5-flash` respondeu em 1
+ * segundo e o `gemini-flash-latest`, que estava em primeiro, em 25 — e com
+ * foto de verdade, que é payload maior, ele estourava o prazo e a leitura
+ * simplesmente não acontecia. O `lite` fica no fim: leitura pior é melhor
+ * que leitura nenhuma.
  */
 const MODELOS = (process.env.IA_VISAO_MODELO || process.env.IA_VISAO_MODELOS
-  || 'gemini-flash-latest,gemini-3.5-flash,gemini-flash-lite-latest')
+  || 'gemini-3.5-flash,gemini-flash-latest,gemini-flash-lite-latest')
   .split(',').map(m => m.trim()).filter(Boolean)
 
 const ENDPOINT_FIXO = process.env.IA_VISAO_ENDPOINT || null

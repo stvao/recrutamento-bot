@@ -111,6 +111,10 @@ async function tratarWebhook(req, res) {
     // antes de responder viraria a mesma mensagem chegando várias vezes.
     if (msg.mediaId) msg.arquivo = await baixarMidiaCloud(msg.mediaId)
 
+    // Como falar com quem enviou fora da resposta imediata — o módulo de
+    // gastos usa isso quando o prazo de uma pergunta estoura.
+    msg.enviarResposta = (t) => enviarMensagem(msg.de, t)
+
     const resposta = await rotear(msg)
     if (resposta) await enviarMensagem(msg.de, resposta)
   } catch (e) {

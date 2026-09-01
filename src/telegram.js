@@ -152,6 +152,9 @@ export async function conectar(aoReceber) {
             // Data do envio, que é a do lançamento. Telegram manda em
             // segundos.
             enviadoEm: msg.date ? msg.date * 1000 : Date.now(),
+            // Ver o comentário equivalente no baileys.js: o módulo de gastos
+            // precisa poder falar quando o prazo de uma pergunta estoura.
+            enviarResposta: (t) => enviarPorTelegram(msg.chat.id, t, msg.message_id),
           })
           if (resposta) await enviarPorTelegram(msg.chat.id, resposta, msg.message_id)
         } catch (e) {

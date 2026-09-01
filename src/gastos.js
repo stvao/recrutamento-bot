@@ -1,22 +1,37 @@
 /**
- * Módulo de gastos — comprovante que chega por mensagem vira item na caixa
- * de aprovação do sistema de obras.
+ * Módulo de gastos — comprovante que chega por mensagem vira lançamento
+ * esperando aprovação no sistema de obras.
  *
  * O problema que ele resolve: os comprovantes já chegam todo dia num grupo,
  * com a descrição escrita do lado, e alguém precisa olhar cada um e digitar
  * no sistema de custos. São muitos por dia, e nem sempre há tempo.
  *
- * O que ele NÃO faz: lançar no custo. O comprovante vai para a caixa
- * "Comprovantes recebidos", já com o resumo do que a IA leu, e a pessoa toca
- * em "Lançar", confere e salva. Lançar direto trocaria "trabalho de digitar"
- * por "trabalho de auditar", que é pior.
+ * ── Como ele se comporta ─────────────────────────────────────────────────
+ *
+ * Chega uma foto. Ele lê a legenda, lê a imagem, e:
+ *
+ *  - Tem obra e valor  → LANÇA como gasto da equipe, já pendente. Você só
+ *                        abre "Aprovar gastos" e confirma.
+ *  - Falta alguma coisa → PERGUNTA no grupo ("Qual a obra?", "Qual o valor?")
+ *                        e lança quando você responder.
+ *  - Você não responde  → passado o prazo, manda para a caixa de
+ *                        comprovantes, que é onde ficava antes. Comprovante
+ *                        na caixa é pior que lançado, e melhor que perdido.
+ *
+ * ── O que ele NÃO faz ────────────────────────────────────────────────────
+ *
+ * Aprovar. O gasto nasce PENDENTE e vira despesa só quando uma pessoa
+ * confirma — o mesmo botão de sempre. Aprovar sozinho trocaria "trabalho de
+ * digitar" por "trabalho de auditar", que é pior.
  *
  * Este arquivo não sabe por onde a mensagem chegou. WhatsApp e Telegram
  * entregam a mesma coisa, e é isso que permite trocar de canal sem tocar
  * aqui.
  */
 import { lerComprovante, visaoDisponivel } from './ia-visao.js'
-import { enviarComprovante, obrasConfigurado } from './obras-client.js'
+import {
+  enviarComprovante, lancarGasto, obrasDoSistema, obrasConfigurado,
+} from './obras-client.js'
 import { interpretar, combinar } from './lancamento.js'
 import { norm } from './texto.js'
 
@@ -73,9 +88,6 @@ const GRUPOS = new Set(
  * "120363044...@g.us", mas todo mundo sabe que ele se chama "Comprovantes".
  * Aceitar o nome tira um passo de configuração que só existia por limitação
  * nossa.
- *
- * Comparado sem acento e sem maiúscula, porque ninguém digita o nome do
- * grupo exatamente como ele foi salvo.
  */
 const GRUPOS_NORM = new Set([...GRUPOS].map(g => norm(g)))
 
@@ -88,39 +100,36 @@ const GRUPOS_NORM = new Set([...GRUPOS].map(g => norm(g)))
  */
 
 /**
+ * Obras de reserva, do .env.
+ *
+ * A fonte de verdade é o sistema de obras (obrasDoSistema). Esta lista só
+ * cobre o intervalo em que ele não responde — sem nome de obra nenhum, toda
+ * legenda escrita corrido viraria "faltou a obra".
+ */
+const OBRAS_RESERVA = (process.env.GASTOS_OBRAS || '')
+  .split(',').map(o => o.trim()).filter(Boolean)
+
+/**
  * Quanto esperar por uma descrição que vem em mensagem separada.
  *
  * Muita gente manda a foto e escreve o "o que é" logo em seguida, em outra
  * mensagem. Enviar na hora perderia essa descrição — e é ela que diz de qual
- * obra é o gasto, que o comprovante não informa. Enviar só depois de esperar
- * atrasa a confirmação de quem já escreveu a legenda junto.
- *
- * Então: legenda junto da foto, envia na hora. Foto sem legenda, segura por
- * este tempo esperando o complemento.
+ * obra é o gasto, que o comprovante não informa.
  */
 const ESPERA_DESCRICAO_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 60000)
 
 /**
- * Os nomes das obras.
+ * Quanto esperar pela RESPOSTA a uma pergunta.
  *
- * Sem eles não há como achar a obra numa legenda escrita corrido: em
- * "bombeamento de concreto bastos tsuya" o nome está no fim, e em "Bastos
- * Tsuya bomba para concreto" está no começo. Chutar posição produz "Bomba
- * Para" como obra.
- *
- * Fica no .env por ora, e é uma solução provisória com prazo: a fonte certa
- * é o próprio sistema de obras, como as vagas vêm do RH em catalogo.js. Só
- * que o token daqui é restrito a criar comprovante — não lê nada. Quando
- * existir um endpoint de leitura, esta lista vira reserva local, e o
- * comentário de catalogo.js explica por que vale manter uma.
+ * Bem mais longo que a espera pela legenda: aqui a pessoa já foi
+ * interpelada, e no canteiro ela larga o celular no bolso e volta meia hora
+ * depois. Passado o prazo, o comprovante vai para a caixa em vez de sumir.
  */
-const OBRAS = (process.env.GASTOS_OBRAS || '')
-  .split(',').map(o => o.trim()).filter(Boolean)
+const ESPERA_RESPOSTA_MS = Number(process.env.GASTOS_ESPERA_RESPOSTA_MS || 1000 * 60 * 30)
 
-/** telefone -> { pendente, prazo } — foto segurada esperando descrição. */
+/** remetente -> { pendente, prazo, perguntando } */
 const aguardando = new Map()
 
-/** O coringa está pedido mas não pode valer? Situação a gritar, não a ignorar. */
 export function coringaInvalido() {
   return QUALQUER_UM_DO_GRUPO && GRUPOS.size === 0
 }
@@ -156,6 +165,11 @@ export function origemAceita(chat, chatNome) {
   return false
 }
 
+/** As obras conhecidas agora: as do sistema, ou a reserva do .env. */
+async function obrasConhecidas() {
+  return (await obrasDoSistema()) ?? OBRAS_RESERVA
+}
+
 /** Diagnóstico, para o /metricas. */
 export function situacao() {
   return {
@@ -167,22 +181,10 @@ export function situacao() {
       : `${AUTORIZADOS.size} número(s) na lista`,
     leituraPorIA: visaoDisponivel(),
     obras: obrasConfigurado(),
-    obrasConhecidas: OBRAS.length ? OBRAS : 'nenhuma — a obra não será reconhecida em texto corrido',
+    obrasReserva: OBRAS_RESERVA.length,
+    esperandoResposta: aguardando.size,
   }
 }
-
-/**
- * Palavras que perguntam se ele está vivo.
- *
- * Existe porque a primeira coisa que se faz ao ligar o robô é mandar um
- * "oi" no grupo — e ele fica calado, de propósito, já que só reage a
- * comprovante. O silêncio é o certo na operação e é péssimo na hora de
- * instalar: não dá para distinguir "funcionando" de "nem conectou".
- *
- * Só responde a quem pode lançar, e só no grupo certo. Para todo o resto
- * ele continua mudo.
- */
-const PERGUNTAS_DE_TESTE = /^\s*(ping|teste|testando|robo|robô|status|voce esta ai|você está aí|ta ai|tá aí)\s*[?!.]*\s*$/i
 
 /** "R$ 1.234,50" */
 function moeda(v) {
@@ -199,10 +201,9 @@ function dataCurta(iso) {
 /**
  * O resumo que vai no campo `texto` do comprovante.
  *
- * Enquanto o endpoint aceitar só arquivo e texto livre, é ESTA linha que
- * aparece na caixa de aprovação, e é por ela que a pessoa confere sem abrir
- * a foto. Por isso ela é montada na ordem em que se lê um lançamento —
- * obra, o que foi, tipo, quanto — e não na ordem em que os dados chegaram.
+ * Usado só no caminho da CAIXA — quando não deu para lançar. É por esta
+ * linha que a pessoa confere sem abrir a foto, então ela sai na ordem em que
+ * se lê um lançamento: obra, o que foi, tipo, quanto.
  */
 export function montarTexto(dados, observacao) {
   const linhas = []
@@ -231,64 +232,24 @@ export function montarTexto(dados, observacao) {
   if (dados?.valor != null && !dados.valorDigitado) {
     linhas.push('(valor lido da imagem, não digitado — confira)')
   }
-  if (dados?.valor == null) {
-    linhas.push('(sem valor — precisa digitar)')
-  }
+  if (dados?.valor == null) linhas.push('(sem valor — precisa digitar)')
 
   return linhas.join('\n') || 'Comprovante enviado pelo WhatsApp.'
 }
 
-/** A resposta para quem mandou a foto. */
-function montarResposta(dados, envio) {
-  if (!envio.ok) {
-    if (envio.status === 401) return '❌ Meu acesso ao sistema de obras foi recusado (token inválido ou revogado). Avisa quem cuida do sistema.'
-    if (envio.status === 429) return '⏳ Muitos envios de uma vez. Manda esse de novo daqui a um minuto, por favor.'
-    if (envio.motivo === 'grande-demais') return '❌ O arquivo passou de 20 MB. Manda a foto em vez do PDF, ou tira outra foto.'
-    if (envio.status === 400) return `❌ O sistema de obras não aceitou esse arquivo (${envio.motivo}).`
-    return '❌ Não consegui falar com o sistema de obras agora. Manda de novo daqui a pouco — não vai duplicar.'
-  }
-
-  const linhas = []
-  // A mensagem vem do próprio endpoint ("Comprovante recebido. Você tem 3
-  // esperando lançamento") de propósito: quem sabe quantos estão pendentes é
-  // o sistema de obras, não o robô.
-  linhas.push(`✅ ${envio.mensagem || 'Comprovante recebido.'}`)
-
-  // Repete o que ENTENDEU, e não o que recebeu.
-  //
-  // É a única chance de você perceber, no momento em que ainda lembra do
-  // gasto, que a obra saiu errada ou o valor veio torto. Descobrir isso na
-  // hora de aprovar, dias depois, custa a mesma conferência que se estava
-  // tentando evitar.
-  const resumo = [
-    dados?.obra,
-    dados?.descricao,
-    dados?.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
-    moeda(dados?.valor),
-  ].filter(Boolean)
-  if (resumo.length) linhas.push(resumo.join(' · '))
-
-  const faltando = []
-  if (!dados?.obra) faltando.push('a obra')
-  if (!dados?.valor) faltando.push('o valor')
-  if (!dados?.tipo) faltando.push('o tipo')
-  if (faltando.length) {
-    linhas.push(`Faltou ${faltando.join(' e ')} — dá para completar na hora de aprovar.`)
-  } else if (dados?.valor != null && !dados.valorDigitado) {
-    linhas.push('⚠ Esse valor eu li da imagem. Confere na hora de aprovar.')
-  }
-
-  return linhas.join('\n')
-}
-
 /**
- * Trata uma mensagem que pode ser um comprovante.
+ * Palavras que perguntam se ele está vivo.
  *
- * Devolve o texto da resposta, ou null quando não há nada a dizer — mensagem
- * de gente não autorizada, ou texto solto que não complementa foto nenhuma.
- * Ficar calado é o certo aqui: o robô é membro de um grupo de trabalho, e
- * robô que comenta tudo é insuportável.
+ * Existe porque a primeira coisa que se faz ao ligar o robô é mandar um
+ * "oi" no grupo — e ele fica calado, de propósito, já que só reage a
+ * comprovante. O silêncio é o certo na operação e é péssimo na hora de
+ * instalar: não dá para distinguir "funcionando" de "nem conectou".
  */
+const PERGUNTAS_DE_TESTE = /^\s*(ping|teste|testando|robo|robô|status|voce esta ai|você está aí|ta ai|tá aí)\s*[?!.]*\s*$/i
+
+/** Quem desiste de responder. */
+const DESISTENCIA = /^\s*(cancelar|cancela|deixa|deixa pra la|deixa pra lá|esquece|nao sei|não sei|depois)\s*[!.]*\s*$/i
+
 export async function tratar(msg) {
   const { de, chat, chatNome, arquivo, nomeArquivo, tipo, texto, idMensagem } = msg
 
@@ -303,45 +264,308 @@ export async function tratar(msg) {
     return null
   }
 
-  // "ping", "teste", "robo?" — alguém conferindo se ele está no ar.
   if (!arquivo && PERGUNTAS_DE_TESTE.test(texto ?? '')) return respostaDeTeste()
 
-  // Texto solto: pode ser a descrição da foto que acabou de chegar.
-  if (!arquivo) return completarDescricao(de, texto)
+  // Texto solto: pode ser a resposta a uma pergunta, ou a descrição da foto
+  // que acabou de chegar.
+  if (!arquivo) return responderPendencia(de, texto)
 
-  // Chegou arquivo — se havia outro esperando descrição, esse não vem mais.
+  // Chegou arquivo — se havia outro esperando, esse não vem mais.
   const anterior = aguardando.get(de)
   if (anterior) {
     clearTimeout(anterior.prazo)
     aguardando.delete(de)
-    enviar(anterior.pendente).then(r => anterior.pendente.responder?.(r))
+    // A foto nova encerra a espera da anterior: ela vai pelo caminho que der,
+    // sem travar esta. Se havia promessa aberta, resolve; senão, avisa pelo
+    // canal — de um jeito ou de outro a pessoa fica sabendo o que aconteceu.
+    concluir(anterior.pendente).then((r) => {
+      if (anterior.pendente.responder) anterior.pendente.responder(r)
+      else avisar(anterior.pendente, r)
+    })
   }
 
-  const pendente = { de, arquivo, nomeArquivo, tipo, descricao: texto || null, idMensagem, enviadoEm: msg.enviadoEm ?? Date.now() }
+  const pendente = {
+    de, arquivo, nomeArquivo, tipo,
+    descricao: texto || null,
+    idMensagem,
+    enviadoEm: msg.enviadoEm ?? Date.now(),
+    // Como falar com quem mandou, quando não for resposta a nada.
+    enviar: msg.enviarResposta,
+  }
 
-  // Legenda junto da foto: não há o que esperar.
-  if (texto?.trim()) return enviar(pendente)
+  // Legenda junto da foto: dá para processar já.
+  if (texto?.trim()) return processar(pendente)
 
   // Sem legenda: segura um pouco, porque a descrição costuma vir na
   // mensagem seguinte, e é ela que diz de qual obra é o gasto.
+  return esperar(pendente, ESPERA_DESCRICAO_MS)
+}
+
+/**
+ * Segura o comprovante esperando a legenda que vem na mensagem seguinte.
+ *
+ * Devolve uma promessa em vez de texto para a confirmação sair como resposta
+ * à FOTO, e não à legenda — num grupo com várias pessoas mandando ao mesmo
+ * tempo, confirmação solta não diz de qual comprovante é.
+ */
+function esperar(pendente, ms) {
   return new Promise((resolve) => {
     pendente.responder = resolve
     const prazo = setTimeout(async () => {
-      aguardando.delete(de)
-      resolve(await enviar(pendente))
-    }, ESPERA_DESCRICAO_MS)
+      aguardando.delete(pendente.de)
+      resolve(await processar(pendente, { acabouOTempo: true }))
+    }, ms)
     prazo.unref?.()
-    aguardando.set(de, { pendente, prazo })
+    aguardando.set(pendente.de, { pendente, prazo, perguntando: false })
   })
 }
 
 /**
- * O que ele responde a "ping".
+ * Diz alguma coisa FORA da resposta a uma mensagem.
  *
- * Diz o que está e o que NÃO está pronto. Só "estou aqui" enganaria: o robô
- * pode estar conectado e ainda assim sem token de obras, e aí o comprovante
- * some sem ninguém entender.
+ * Precisa existir porque nem tudo acontece em resposta a algo: o prazo da
+ * pergunta estoura sozinho, meia hora depois, e o comprovante vai para a
+ * caixa — se ninguém for avisado, a pessoa fica achando que ele se perdeu.
+ *
+ * O canal é quem sabe mandar; aqui só se usa o que ele entregou. Sem isso,
+ * registra e segue: falar é desejável, e não conseguir falar não pode
+ * derrubar o lançamento.
  */
+async function avisar(pendente, texto) {
+  if (!texto) return
+  try {
+    if (typeof pendente.enviar === 'function') await pendente.enviar(texto)
+    else console.log(`[gastos] (sem canal para avisar) ${pendente.de}: ${texto.replace(/\n/g, ' / ')}`)
+  } catch (e) {
+    console.warn('[gastos] não consegui avisar:', e.message)
+  }
+}
+
+/**
+ * Chegou texto de alguém que tem comprovante parado.
+ *
+ * Pode ser a descrição que faltava, ou a resposta a uma pergunta. Nos dois
+ * casos, quem responde é a promessa que ficou aberta lá no tratar(), para a
+ * confirmação sair como resposta à FOTO e não a este texto.
+ */
+function responderPendencia(de, texto) {
+  const esperando = aguardando.get(de)
+  if (!esperando || !texto?.trim()) return null
+
+  clearTimeout(esperando.prazo)
+  aguardando.delete(de)
+  const { pendente } = esperando
+
+  if (DESISTENCIA.test(texto)) {
+    // Desistiu de responder: manda para a caixa em vez de perder.
+    return paraCaixa(pendente)
+  }
+
+  if (esperando.perguntando) {
+    // É a RESPOSTA à pergunta. Acumula com o que já se sabia, em vez de
+    // substituir: quem responde só "1400" não está apagando a obra que
+    // tinha escrito antes.
+    pendente.respostas = [...(pendente.respostas ?? []), texto.trim()]
+
+    // Aqui a confirmação sai como resposta a ESTA mensagem, e não à foto:
+    // a pessoa acabou de responder e é para ela que se está falando.
+    return processar(pendente)
+  }
+
+  // Era a legenda que faltava. A confirmação pertence à FOTO, então quem
+  // responde é a promessa que ficou aberta lá no tratar().
+  pendente.descricao = texto.trim()
+  processar(pendente).then(r => pendente.responder?.(r))
+  return null
+}
+
+/**
+ * Junta tudo que se sabe, e decide: lança, pergunta, ou manda para a caixa.
+ */
+async function processar(pendente, { acabouOTempo = false } = {}) {
+  const obras = await obrasConhecidas()
+
+  // Tudo que a pessoa escreveu, na legenda e nas respostas, lido junto.
+  //
+  // Junto e não separado: quem manda a foto com "bastos haia" e depois
+  // responde "1400" só tem um lançamento na cabeça, e interpretar as duas
+  // frases isoladamente perderia a metade de cada uma.
+  const escritoTudo = [pendente.descricao, ...(pendente.respostas ?? [])]
+    .filter(Boolean).join(', ')
+
+  const escrito = interpretar(escritoTudo, obras)
+
+  // A imagem é lida uma vez só e guardada: numa segunda passada depois da
+  // resposta, reler custaria mais 20 segundos e daria o mesmo resultado.
+  if (pendente.lido === undefined) {
+    pendente.lido = await lerComprovante({
+      arquivo: pendente.arquivo, tipo: pendente.tipo, descricao: escritoTudo,
+    }).catch(() => null)
+    console.log('[gastos] leitura da imagem:', pendente.lido ? JSON.stringify(pendente.lido) : 'nenhuma')
+  }
+
+  const dados = combinar(escrito, pendente.lido)
+  pendente.dados = dados
+
+  // Faltando obra ou valor, PERGUNTA — desde que ainda dê para perguntar.
+  const falta = []
+  if (!dados.obra) falta.push('obra')
+  if (dados.valor == null) falta.push('valor')
+
+  if (falta.length && !acabouOTempo && !pendente.jaPerguntou) {
+    return perguntar(pendente, falta, obras)
+  }
+
+  if (falta.length) return paraCaixa(pendente)
+
+  return lancar(pendente, dados)
+}
+
+/** Faz a pergunta e fica esperando a resposta. */
+function perguntar(pendente, falta, obras) {
+  pendente.jaPerguntou = true
+
+  const linhas = []
+  const d = pendente.dados
+
+  // Mostra o que JÁ entendeu antes de perguntar. Sem isso a pessoa não sabe
+  // se ele leu o resto, e acaba redigitando tudo.
+  const sabido = [
+    d.obra, d.descricao,
+    d.tipo ? d.tipo.replace(/_/g, ' ').toLowerCase() : null,
+    moeda(d.valor),
+  ].filter(Boolean)
+  if (sabido.length) linhas.push(`Anotei: ${sabido.join(' · ')}`)
+
+  if (falta.includes('obra') && falta.includes('valor')) {
+    linhas.push('Só faltou a *obra* e o *valor*. Me manda os dois?')
+  } else if (falta.includes('obra')) {
+    linhas.push('De qual *obra* é esse gasto?')
+  } else {
+    linhas.push('Qual foi o *valor*?')
+  }
+
+  // Oferece as obras quando são poucas: escolher de uma lista é mais rápido
+  // e erra menos que lembrar o nome exato.
+  if (falta.includes('obra') && obras.length && obras.length <= 12) {
+    linhas.push(`(${obras.join(' · ')})`)
+  }
+
+  // A pergunta sai AGORA, como resposta à foto. A confirmação virá depois,
+  // como resposta ao que a pessoa responder — por isso aqui não se abre
+  // promessa nenhuma: ela ficaria pendente para sempre.
+  const prazo = setTimeout(async () => {
+    aguardando.delete(pendente.de)
+    // Não respondeu: caixa, que é onde ficava antes. Comprovante na caixa é
+    // pior que lançado, e muito melhor que perdido. E precisa ser DITO, ou a
+    // pessoa fica achando que sumiu.
+    await avisar(pendente, await paraCaixa(pendente))
+  }, ESPERA_RESPOSTA_MS)
+  prazo.unref?.()
+  aguardando.set(pendente.de, { pendente, prazo, perguntando: true })
+
+  return linhas.join('\n')
+}
+
+/** Lança como gasto da equipe, pendente de aprovação. */
+async function lancar(pendente, dados) {
+  const data = new Date(pendente.enviadoEm ?? Date.now()).toISOString().slice(0, 10)
+
+  const r = await lancarGasto({
+    arquivo: pendente.arquivo,
+    nomeArquivo: pendente.nomeArquivo,
+    tipo: pendente.tipo,
+    obra: dados.obra,
+    valor: dados.valor,
+    descricao: dados.descricao || dados.estabelecimento || 'Comprovante enviado pelo WhatsApp',
+    categoria: dados.tipo,
+    data,
+    fornecedor: dados.estabelecimento,
+    observacao: dados.valorDigitado ? null : 'Valor lido da imagem pelo robô — confira.',
+    idMensagem: pendente.idMensagem,
+  })
+
+  if (r.ok) {
+    console.log(`[gastos] ${pendente.de} → LANÇADO em ${r.obra} (${moeda(dados.valor)})`)
+    const linhas = [`✅ ${r.mensagem || 'Lançado, aguardando aprovação.'}`]
+    linhas.push([
+      r.obra, dados.descricao,
+      dados.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
+      moeda(dados.valor),
+    ].filter(Boolean).join(' · '))
+    if (!dados.valorDigitado) linhas.push('⚠ Esse valor eu li da imagem. Confere ao aprovar.')
+    return linhas.join('\n')
+  }
+
+  // A obra não foi reconhecida pelo SISTEMA (não pela nossa lista): pergunta
+  // com os nomes que ele mesmo devolveu, que são os certos.
+  if (r.obraNaoAchada && !pendente.jaPerguntouObra) {
+    pendente.jaPerguntouObra = true
+    pendente.jaPerguntou = false
+    pendente.dados = { ...dados, obra: null }
+    return perguntar(pendente, ['obra'], r.obras ?? [])
+  }
+
+  // Sem a rota nova no servidor, ou qualquer outra falha: caixa.
+  if (r.semRota) {
+    console.warn('[gastos] servidor ainda sem /lancar — mandando para a caixa.')
+  } else {
+    console.warn('[gastos] lançamento falhou:', r.motivo ?? r.status)
+  }
+  return paraCaixa(pendente)
+}
+
+/** Manda para a caixa de comprovantes — o caminho de quando não dá para lançar. */
+async function paraCaixa(pendente) {
+  const dados = pendente.dados ?? {}
+  const envio = await enviarComprovante({
+    arquivo: pendente.arquivo,
+    nomeArquivo: pendente.nomeArquivo,
+    tipo: pendente.tipo,
+    texto: montarTexto(dados, pendente.lido?.observacao),
+    idMensagem: pendente.idMensagem,
+    extras: {
+      obra: dados.obra,
+      descricao: dados.descricao,
+      categoria: dados.tipo,
+      valor: dados.valor,
+      data: new Date(pendente.enviadoEm ?? Date.now()).toISOString().slice(0, 10),
+      dataComprovante: dados.dataComprovante,
+      estabelecimento: dados.estabelecimento,
+      documento: dados.documento,
+      formaPagamento: dados.formaPagamento,
+      confianca: dados.confianca,
+    },
+  })
+
+  console.log(`[gastos] ${pendente.de} → caixa: ${envio.ok ? 'ok' : envio.motivo}`)
+
+  if (!envio.ok) {
+    if (envio.status === 401) return '❌ Meu acesso ao sistema de obras foi recusado (token inválido ou revogado). Avisa quem cuida do sistema.'
+    if (envio.status === 429) return '⏳ Muitos envios de uma vez. Manda esse de novo daqui a um minuto, por favor.'
+    if (envio.motivo === 'grande-demais') return '❌ O arquivo passou de 20 MB. Manda a foto em vez do PDF, ou tira outra foto.'
+    if (envio.status === 400) return `❌ O sistema de obras não aceitou esse arquivo (${envio.motivo}).`
+    return '❌ Não consegui falar com o sistema de obras agora. Manda de novo daqui a pouco — não vai duplicar.'
+  }
+
+  const linhas = [`📥 ${envio.mensagem || 'Comprovante recebido.'}`]
+  const resumo = [
+    dados.obra, dados.descricao,
+    dados.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
+    moeda(dados.valor),
+  ].filter(Boolean)
+  if (resumo.length) linhas.push(resumo.join(' · '))
+
+  const falta = [!dados.obra && 'a obra', dados.valor == null && 'o valor'].filter(Boolean)
+  if (falta.length) linhas.push(`Faltou ${falta.join(' e ')} — completa na hora de lançar.`)
+  return linhas.join('\n')
+}
+
+/** Resolve um pendente pelo caminho que der, sem perguntar de novo. */
+async function concluir(pendente) {
+  return processar(pendente, { acabouOTempo: true })
+}
+
 function respostaDeTeste() {
   const linhas = ['👋 Estou aqui, ouvindo este grupo.']
 
@@ -355,78 +579,9 @@ function respostaDeTeste() {
 
   linhas.push('')
   linhas.push('Manda o comprovante com uma linha assim:')
-  linhas.push('_bastos tsuya, tijolos e areia, material, 2500,00_')
+  linhas.push('_bastos haia, tijolos e areia, material, 2500,00_')
+  linhas.push('Se faltar alguma coisa, eu pergunto.')
   return linhas.join('\n')
-}
-
-/** Texto que chega logo depois de uma foto vira a descrição dela. */
-function completarDescricao(de, texto) {
-  const esperando = aguardando.get(de)
-  if (!esperando || !texto?.trim()) return null
-
-  clearTimeout(esperando.prazo)
-  aguardando.delete(de)
-  esperando.pendente.descricao = texto.trim()
-
-  // Quem responde é a promessa que ficou aberta lá no tratar(), para a
-  // confirmação sair como resposta à FOTO, e não a este texto.
-  enviar(esperando.pendente).then(r => esperando.pendente.responder?.(r))
-  return null
-}
-
-/** Interpreta, lê, envia e monta a resposta. */
-async function enviar(pendente) {
-  const { arquivo, nomeArquivo, tipo, descricao, idMensagem, enviadoEm } = pendente
-
-  // O que a pessoa escreveu vem primeiro, e é o que vale.
-  const escrito = interpretar(descricao, OBRAS)
-
-  // A imagem é lida para preencher o que faltou e para conferência — nunca
-  // para corrigir quem digitou. Se a leitura falhar, o comprovante vai assim
-  // mesmo: a foto no lugar certo, com a linha que a pessoa escreveu, já
-  // resolve a maior parte. A leitura é o bônus, não o requisito.
-  const lido = await lerComprovante({ arquivo, tipo, descricao }).catch(() => null)
-  // O que a IA viu vai para o log inteiro. Quando o valor vem vazio, a
-  // pergunta é sempre "ela leu e não achou, ou nem chegou a rodar?" — e sem
-  // esta linha não havia como responder.
-  console.log('[gastos] leitura da imagem:', lido ? JSON.stringify(lido) : 'nenhuma')
-  const dados = combinar(escrito, lido)
-
-  // A DATA do lançamento é a do envio, não a que a IA leu no papel.
-  //
-  // É o combinado, e é o que corresponde ao fluxo real: manda-se o
-  // comprovante no dia em que se pagou. A data lida do papel vai junto como
-  // `dataComprovante`, para quem aprova ver se as duas batem.
-  const data = new Date(enviadoEm ?? Date.now()).toISOString().slice(0, 10)
-
-  const envio = await enviarComprovante({
-    arquivo,
-    nomeArquivo,
-    tipo,
-    texto: montarTexto(dados, lido?.observacao),
-    idMensagem,
-    extras: {
-      obra: dados.obra,
-      descricao: dados.descricao,
-      categoria: dados.tipo,
-      valor: dados.valor,
-      data,
-      dataComprovante: dados.dataComprovante,
-      estabelecimento: dados.estabelecimento,
-      documento: dados.documento,
-      formaPagamento: dados.formaPagamento,
-      // "digitado" quer dizer que uma pessoa escreveu o valor. É a diferença
-      // entre um número em que se pode confiar e um que precisa de conferência.
-      confianca: dados.confianca,
-    },
-  })
-
-  console.log(
-    `[gastos] ${pendente.de} → ${envio.ok ? 'ok' : `falhou: ${envio.motivo}`}`
-    + ` | obra=${dados.obra ?? '?'} tipo=${dados.tipo ?? '?'} valor=${moeda(dados.valor) ?? '?'}`
-    + ` (${dados.valorDigitado ? 'digitado' : 'lido da imagem'})`,
-  )
-  return montarResposta(dados, envio)
 }
 
 /** Só para teste: esquece as fotos seguradas. */

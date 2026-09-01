@@ -65,6 +65,8 @@ export function parseWebhook(body) {
           // Data do envio, que é a do lançamento. A Meta manda em segundos.
           enviadoEm: msg.timestamp ? Number(msg.timestamp) * 1000 : Date.now(),
         }
+        // enviarResposta é acrescentado por quem trata o webhook: aqui só se
+        // interpreta o payload, e mandar mensagem é outra responsabilidade.
       }
     }
   } catch {}

@@ -309,6 +309,10 @@ export async function conectar(aoReceber) {
           // Quando a mensagem foi enviada — é esta a data do lançamento, e
           // não a que a IA leu no papel. Vem em segundos, não milissegundos.
           enviadoEm: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
+          // Como falar com esta conversa fora da resposta a uma mensagem.
+          // O módulo de gastos precisa disso para avisar quando o prazo de
+          // uma pergunta estoura — meia hora depois, sem nada a que responder.
+          enviarResposta: (t) => responder(jid, t, { citar: grupo ? msg : null, rapido: grupo }),
         })
         // Em grupo, responde citando a mensagem: com várias pessoas mandando
         // comprovante junto, confirmação solta não diz de qual foto é.
