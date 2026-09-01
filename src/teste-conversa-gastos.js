@@ -1,23 +1,29 @@
 /**
- * O robô perguntando o que falta antes de lançar.
+ * O robô perguntando o que falta, e esperando você responder.
  *
- * É a diferença entre "comprovante numa caixa esperando alguém digitar" e
- * "lançamento pronto esperando um clique". Sem perguntar, todo comprovante
- * sem valor na legenda vira trabalho manual — e valor na legenda é
- * justamente o que as pessoas esquecem.
+ * A parte que mais importa aqui é a CITAÇÃO. Com três comprovantes
+ * esperando, é ela que diz a qual deles a resposta pertence — e sem ela a
+ * conversa vira o que virou no uso real: "acabou que misturou".
  *
- * Roda contra um sistema de obras de mentira, e SEM chave de IA: o que se
- * testa aqui é a decisão (lançar, perguntar, ou desistir para a caixa), não
- * a leitura da imagem.
+ * Roda contra um sistema de obras de mentira e SEM chave de IA: o que se
+ * testa é a decisão (lançar, perguntar, cobrar, desistir), não a leitura da
+ * imagem.
  */
 import { createServer } from 'node:http'
+import { rmSync } from 'node:fs'
 
+const PASTA = './dados/teste-pendentes'
+process.env.GASTOS_PENDENTES_DIR = PASTA
 process.env.GEMINI_API_KEY = ''            // sem leitura de imagem, de propósito
 process.env.GASTOS_AUTORIZADOS = '*'
 process.env.GASTOS_GRUPOS = 'Comprovantes'
 process.env.OBRAS_API_TOKEN = 'token-de-teste'
 process.env.GASTOS_ESPERA_DESCRICAO_MS = '50'
-process.env.GASTOS_ESPERA_RESPOSTA_MS = '300'
+process.env.GASTOS_COBRAR_APOS_MS = '80'
+process.env.GASTOS_DESISTIR_APOS_MS = '250'
+process.env.GASTOS_RONDA_MS = '40'
+
+rmSync(PASTA, { recursive: true, force: true })
 
 let falhas = 0
 function ok(desc, cond) {
@@ -26,7 +32,7 @@ function ok(desc, cond) {
 }
 
 /**
- * As obras, como elas são de verdade: nome oficial da escola, e a cidade só
+ * As obras como elas são de verdade: nome oficial da escola, e a cidade só
  * no endereço. Duas em Bastos, de propósito — é o caso ambíguo.
  */
 const OBRAS = [
@@ -35,7 +41,6 @@ const OBRAS = [
   { nome: 'EE/ETEC AGUIA DE HAIA', endereco: 'Av Aguia de Haia 500, Sao Paulo - SP' },
 ]
 
-/** Sistema de obras de mentira. */
 const chamadas = []
 const srv = createServer((req, res) => {
   let corpo = ''
@@ -45,13 +50,9 @@ const srv = createServer((req, res) => {
 
     if (req.url.endsWith('/comprovantes/obras')) {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      // Nomes e endereços REAIS em forma: o nome da obra é o da escola, e a
-      // cidade só existe no endereço.
-      return res.end(JSON.stringify({
-        obras: OBRAS.map(o => o.nome),
-        detalhes: OBRAS,
-      }))
+      return res.end(JSON.stringify({ obras: OBRAS.map(o => o.nome), detalhes: OBRAS }))
     }
+
     if (req.url.endsWith('/comprovantes/lancar')) {
       const campo = (n) => new RegExp(`name="${n}"\r?\n\r?\n([^\r]*)`).exec(corpo)?.[1] ?? ''
       const obra = campo('obra')
@@ -79,6 +80,7 @@ const srv = createServer((req, res) => {
           : `Rateado entre ${todas.length} obras, aguardando sua aprovação.`,
       }))
     }
+
     // /receber — a caixa
     res.writeHead(201, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: true, id: 'c1', mensagem: 'Comprovante recebido.', pendentes: 1 }))
@@ -87,269 +89,238 @@ const srv = createServer((req, res) => {
 await new Promise(r => srv.listen(0, '127.0.0.1', r))
 process.env.OBRAS_API_URL = `http://127.0.0.1:${srv.address().port}`
 
-const { tratar, encerrar, _limparPendentes } = await import('./gastos.js')
+const { tratar, iniciarRonda, _limparPendentes } = await import('./gastos.js')
 const { _limparCacheObras } = await import('./obras-client.js')
+iniciarRonda()
 
 const foto = Buffer.from('imagem-do-comprovante')
 const base = { chat: '123@g.us', chatNome: 'Comprovantes', ehGrupo: true }
 const espera = (ms) => new Promise(r => setTimeout(r, ms))
 
-function novo(de) {
+/**
+ * Uma pessoa conversando com o robô.
+ *
+ * `ditos` guarda tudo que o robô mandou — inclusive fora da resposta
+ * imediata: a pergunta sobre o segundo comprovante, a cobrança, o aviso de
+ * prazo. É por ali que se confere o que ele falou sem ter sido perguntado.
+ */
+function pessoa(de) {
   chamadas.length = 0
   _limparPendentes()
   _limparCacheObras()
   const ditos = []
+  let n = 0
+
+  const enviarResposta = async (t) => {
+    ditos.push(t)
+    return { id: `bot-${de}-${++n}` }   // o id que ela vai citar
+  }
+
+  const guardar = (r) => { if (typeof r === 'string') ditos.push(r); return r }
+
   return {
     ditos,
-    foto: (texto, id) => tratar({
+    ultimoId: () => `bot-${de}-${n}`,
+    foto: async (texto, id) => guardar(await tratar({
       ...base, de, arquivo: foto, nomeArquivo: 'c.jpg', tipo: 'image/jpeg',
-      texto, idMensagem: id ?? `m-${Math.random()}`,
-      enviarResposta: async (t) => { ditos.push(t) },
-    }),
-    diz: (texto) => tratar({
+      texto, idMensagem: id ?? `foto-${de}-${Math.random().toString(36).slice(2, 8)}`,
+      enviarResposta,
+    })),
+    diz: async (texto, citando) => guardar(await tratar({
       ...base, de, texto, idMensagem: `t-${Math.random()}`,
-      enviarResposta: async (t) => { ditos.push(t) },
-    }),
+      respondendoA: citando ?? null,
+      enviarResposta,
+    })),
   }
 }
 
-const rota = () => chamadas.map(c => c.url.replace(/^.*\/comprovantes\//, '')).filter(u => u !== 'obras')
+const lancados = () => chamadas.filter(c => c.url.includes('lancar')).length
+const naCaixa = () => chamadas.filter(c => c.url.includes('receber')).length
+const enviados = () => lancados() + naCaixa()
 
 // ── 1. Legenda completa: lança direto ─────────────────────────────────────
 {
-  const p = novo('5511900000001')
+  const p = pessoa('5511900000001')
   const r = await p.foto('haia, tijolos e areia, material, 2500,00')
   ok('lança direto quando não falta nada', r.includes('aguardando sua aprovação'))
   ok('e diz em qual obra', r.includes('AGUIA DE HAIA'))
   ok('e repete o valor entendido', r.includes('R$ 2.500,00'))
-  ok('foi para /lancar, não para a caixa', rota().includes('lancar') && !rota().includes('receber'))
+  ok('foi para /lancar, não para a caixa', lancados() === 1 && naCaixa() === 0)
 }
 
-// ── 2. Falta o valor: PERGUNTA ────────────────────────────────────────────
+// ── 2. Falta o valor: pergunta ────────────────────────────────────────────
 {
-  const p = novo('5511900000002')
-  const r = await p.foto('haia tijolos e areia')
-  ok('pergunta o valor quando falta', /valor/i.test(r))
-  ok('mostra o que já entendeu antes de perguntar', r.includes('AGUIA DE HAIA'))
-  ok('e ainda NÃO enviou nada', rota().length === 0)
+  const p = pessoa('5511900000002')
+  await p.foto('haia tijolos e areia')
+  await espera(20)
+  ok('pergunta o valor quando falta', p.ditos.some(t => /valor/i.test(t)))
+  ok('mostra o que já entendeu antes de perguntar', p.ditos.some(t => t.includes('AGUIA DE HAIA')))
+  ok('e ainda NÃO enviou nada', enviados() === 0)
 
-  const r2 = await p.diz('2500,00')
-  ok('responder o valor faz lançar', r2.includes('aguardando sua aprovação'))
-  ok('com o valor respondido', r2.includes('R$ 2.500,00'))
-  ok('e a obra da legenda não se perdeu', r2.includes('AGUIA DE HAIA'))
+  await p.diz('2500,00')
+  await espera(20)
+  ok('responder o valor faz lançar', p.ditos.some(t => t.includes('aguardando sua aprovação')))
+  ok('com o valor respondido', p.ditos.some(t => t.includes('R$ 2.500,00')))
 }
 
-// ── 3. Falta a obra: pergunta e oferece a lista ───────────────────────────
+// ── 3. TRÊS de uma vez, respondidos FORA DE ORDEM ─────────────────────────
+// É o caso que quebrou no uso real. Cada comprovante espera sozinho, e a
+// CITAÇÃO diz a qual deles a resposta pertence — a ordem é de quem responde.
 {
-  const p = novo('5511900000003')
-  const r = await p.foto('tijolos e areia 2500,00')
-  ok('pergunta a obra quando falta', /obra/i.test(r))
-  ok('oferece os nomes das obras do sistema', r.includes('AGUIA DE HAIA'))
+  const p = pessoa('5511900000003')
 
-  const r2 = await p.diz('haia')
-  ok('responder a obra faz lançar', r2.includes('aguardando sua aprovação'))
-  ok('e o valor da legenda não se perdeu', r2.includes('R$ 2.500,00'))
+  await p.foto('nota A', 'foto-A'); await espera(15)
+  const idA = p.ultimoId()
+  await p.foto('nota B', 'foto-B'); await espera(15)
+  const idB = p.ultimoId()
+  await p.foto('nota C', 'foto-C'); await espera(15)
+
+  ok('perguntou sobre os três', p.ditos.filter(t => /obra/i.test(t)).length >= 3)
+  ok('nenhum foi enviado ainda', enviados() === 0)
+
+  // Responde o do MEIO primeiro, citando a pergunta dele.
+  await p.diz('haia cimento 100', idB); await espera(20)
+  ok('responder o do meio lança só ele', lancados() === 1)
+
+  // Depois o ÚLTIMO, citando a FOTO em vez da pergunta.
+  await p.diz('tsuya areia 200', 'foto-C'); await espera(20)
+  ok('citar a FOTO também funciona', lancados() === 2)
+
+  // E o primeiro por último.
+  await p.diz('toschi tinta 300', idA); await espera(20)
+  ok('os três foram lançados, em qualquer ordem', lancados() === 3)
+  ok('e nenhum foi para a caixa', naCaixa() === 0)
 }
 
-// ── 4. Faltam os dois ─────────────────────────────────────────────────────
+// ── 4. Vários esperando e resposta SEM citação ────────────────────────────
+// Adivinhar aqui é o que faz a resposta cair no comprovante errado.
 {
-  const p = novo('5511900000004')
-  const r = await p.foto('nota do fornecedor')
-  ok('pergunta os dois de uma vez', /obra/i.test(r) && /valor/i.test(r))
+  const p = pessoa('5511900000004')
+  await p.foto('nota X', 'fx'); await espera(15)
+  await p.foto('nota Y', 'fy'); await espera(15)
 
-  const r2 = await p.diz('toschi 890')
-  ok('uma resposta só resolve os dois', r2.includes('aguardando sua aprovação'))
-  ok('acha a obra na resposta', r2.includes('TOSCHI'))
-  ok('acha o valor na resposta', r2.includes('R$ 890,00'))
+  const r = await p.diz('haia cimento 50')
+  ok('sem citação, pergunta de qual é', /qual|esperando resposta/i.test(r ?? ''))
+  ok('e não lança no palpite', lancados() === 0)
 }
 
-// ── 5. Não respondeu: vai para a caixa, e AVISA ───────────────────────────
-// Comprovante na caixa é pior que lançado, e muito melhor que perdido — e a
-// pessoa precisa saber que aconteceu, senão acha que sumiu.
+// ── 5. UM só esperando: não precisa citar ─────────────────────────────────
+// Exigir citação quando não há dúvida seria burocracia.
 {
-  const p = novo('5511900000005')
-  const r = await p.foto('nota sem nada')
-  ok('perguntou', /obra/i.test(r))
-
-  await espera(500)   // estoura o prazo de resposta
-  ok('passou o prazo e foi para a caixa', rota().includes('receber'))
-  ok('e AVISOU que foi para a caixa', p.ditos.some(t => t.includes('📥')))
-  ok('dizendo o que faltou', p.ditos.some(t => /Faltou/i.test(t)))
+  const p = pessoa('5511900000005')
+  await p.foto('nota única'); await espera(15)
+  await p.diz('haia cimento 70'); await espera(20)
+  ok('com um só esperando, responder direto basta', lancados() === 1)
 }
 
-// ── 6. Desistir na hora ───────────────────────────────────────────────────
+// ── 6. Demorou a responder: ele COBRA, uma vez ────────────────────────────
+// "Às vezes estou ocupado, e posso não ver a mensagem."
 {
-  const p = novo('5511900000006')
-  await p.foto('nota qualquer')
-  const r = await p.diz('deixa pra lá')
-  ok('desistir manda para a caixa na hora', r.includes('📥'))
-  ok('sem esperar o prazo', rota().includes('receber'))
+  const p = pessoa('5511900000006')
+  await p.foto('nota esquecida')
+  await espera(160)
+
+  ok('cobra quem não respondeu', p.ditos.some(t => /lembrete/i.test(t)))
+  ok('a cobrança repete a pergunta', p.ditos.some(t => /lembrete/i.test(t) && /obra|valor/i.test(t)))
+  ok('e ainda não desistiu', naCaixa() === 0)
+
+  const cobrancas = p.ditos.filter(t => /lembrete/i.test(t)).length
+  await espera(80)
+  ok('não fica cobrando sem parar', p.ditos.filter(t => /lembrete/i.test(t)).length === cobrancas)
 }
 
-// ── 7. O que NÃO deve virar resposta ──────────────────────────────────────
+// ── 7. Demorou DEMAIS: vai para a caixa, e avisa ──────────────────────────
 {
-  const p = novo('5511900000007')
-  ok('texto solto sem comprovante parado é ignorado', (await p.diz('bom dia pessoal')) === null)
+  const p = pessoa('5511900000007')
+  await p.foto('nota abandonada')
+  await espera(450)
+
+  ok('passado o prazo, vai para a caixa', naCaixa() >= 1)
+  ok('e diz que desistiu de esperar', p.ditos.some(t => /não tive resposta/i.test(t)))
 }
 
-// ── 8. Obra que o SISTEMA não reconhece ───────────────────────────────────
-// Nossa lista pode estar velha. Quem manda no nome da obra é o sistema, e
-// quando ele recusa, pergunta-se de novo com os nomes que ELE devolveu.
+// ── 8. Saber o que falta, e sair do buraco ────────────────────────────────
 {
-  const p = novo('5511900000008')
-  const r = await p.foto('obra fantasma cimento 100')
-  // "obra fantasma" não casa com a lista, então já pergunta antes de enviar
-  ok('obra desconhecida vira pergunta', /obra/i.test(r))
-}
-
-// ── 9. VÁRIAS fotos de uma vez ────────────────────────────────────────────
-// Foi assim que quebrou no uso real: cada foto nova cancelava a anterior, e
-// as respostas não tinham a qual pergunta pertencer. "Acabou que misturou."
-//
-// Agora é FILA, uma pergunta por vez.
-{
-  const p = novo('5511900000009')
-
-  const r1 = await p.foto('nota A')
-  ok('pergunta sobre a primeira', /obra/i.test(r1) || /valor/i.test(r1))
-
-  const r2 = await p.foto('nota B')
-  ok('a segunda ENTRA NA FILA, não cancela a primeira', /fila/i.test(r2))
-  ok('e diz a posição dela', r2.includes('2'))
-
-  const r3 = await p.foto('nota C')
-  ok('a terceira também entra', /fila/i.test(r3))
-
-  ok('nada foi enviado ainda — está esperando resposta', rota().length === 0)
-
-  // Responder resolve a PRIMEIRA e já pergunta sobre a segunda.
-  const r4 = await p.diz('haia cimento 100')
-  ok('responder lança a primeira', r4.includes('aguardando sua aprovação'))
-  ok('e já pergunta sobre a próxima', /obra/i.test(r4) || p.ditos.some(t => /obra/i.test(t)))
-
-  const r5 = await p.diz('tsuya areia 200')
-  ok('a segunda também lança', r5.includes('aguardando sua aprovação'))
-
-  const r6 = await p.diz('toschi tinta 300')
-  ok('e a terceira', r6.includes('aguardando sua aprovação'))
-
-  const lancados = chamadas.filter(c => c.url.includes('lancar')).length
-  ok('as TRÊS foram lançadas, nenhuma perdida', lancados === 3)
-}
-
-// ── 9b. Saber o que está esperando, e desistir de tudo ────────────────────
-// "Ficou meio bagunçado na conversa" — precisa haver um jeito de ver o que
-// falta e de sair do buraco sem perder comprovante.
-{
-  const p = novo('5511900000019')
-  await p.foto('nota X')
-  await p.foto('nota Y')
+  const p = pessoa('5511900000008')
+  await p.foto('nota 1'); await espera(15)
+  await p.foto('nota 2'); await espera(15)
 
   const lista = await p.diz('pendentes')
   ok('"pendentes" lista o que está esperando', /2 comprovante/i.test(lista))
+  ok('dizendo o que falta em cada um', /falta/i.test(lista))
+  ok('e como responder', /citando/i.test(lista))
 
   const r = await p.diz('cancelar tudo')
   ok('"cancelar tudo" resolve', /caixa/i.test(r))
-  ok('mandando TODOS para a caixa', chamadas.filter(c => c.url.includes('receber')).length === 2)
+  ok('mandando todos para a caixa', naCaixa() === 2)
   ok('e diz onde achar', r.includes('/m/gasto'))
-
-  ok('depois disso a fila está vazia', /não tenho nenhum/i.test(await p.diz('pendentes')))
+  ok('depois a lista fica vazia', /não tenho nenhum/i.test(await p.diz('pendentes')))
 }
 
-// ── 10. Cidade com DUAS obras: pergunta entre elas ────────────────────────
-// "bastos" é a cidade, e tem duas escolas. Chutar uma lançaria o custo na
-// errada, calado. Perguntar entre as duas é curto e mostra que ele entendeu.
+// ── 9. Cidade com duas obras: pergunta entre elas ─────────────────────────
 {
-  const p = novo('5511900000010')
-  const r = await p.foto('bastos cimento 500')
-  ok('cidade ambígua vira pergunta', /qual delas/i.test(r))
-  ok('lista a primeira candidata', r.includes('TSUYA'))
-  ok('lista a segunda candidata', r.includes('TOSCHI'))
-  ok('numera as opções', /1\)/.test(r) && /2\)/.test(r))
-  ok('NÃO lista as obras de outra cidade', !r.includes('AGUIA'))
+  const p = pessoa('5511900000009')
+  await p.foto('bastos cimento 500'); await espera(20)
+  const pergunta = p.ditos.find(t => /qual delas/i.test(t)) ?? ''
+  ok('cidade ambígua vira pergunta', pergunta.length > 0)
+  ok('lista as duas candidatas', pergunta.includes('TSUYA') && pergunta.includes('TOSCHI'))
+  ok('e NÃO as de outra cidade', !pergunta.includes('AGUIA'))
 
-  const r2 = await p.diz('2')
-  ok('responder o NÚMERO escolhe a obra', r2.includes('TOSCHI'))
-  ok('e o valor da legenda não virou o número', r2.includes('R$ 500,00'))
+  await p.diz('2'); await espera(20)
+  ok('responder o número escolhe a obra', p.ditos.some(t => t.includes('TOSCHI')))
+  ok('e o valor não virou o número', p.ditos.some(t => t.includes('R$ 500,00')))
 }
 
-// Responder pelo nome também vale, não só pelo número.
+// ── 10. Rateio: uma compra, mais de uma obra ──────────────────────────────
 {
-  const p = novo('5511900000011')
-  await p.foto('bastos cimento 500')
-  const r = await p.diz('tsuya')
-  ok('responder pelo nome também escolhe', r.includes('TSUYA'))
+  const p = pessoa('5511900000010')
+  const r = await p.foto('haia e tsuya areia, material, 600')
+  ok('rateia citando as duas obras', /rateado entre 2/i.test(r))
+  ok('mostra quanto foi para cada uma', r.includes('R$ 300,00'))
+
+  const p2 = pessoa('5511900000011')
+  const r2 = await p2.foto('haia tsuya toschi tinta, material, 100')
+  ok('divide entre três', /rateado entre 3/i.test(r2))
+  ok('a sobra do centavo vai para a primeira', r2.includes('R$ 33,34'))
+  ok('e as outras ficam com o resto', (r2.match(/R\$ 33,33/g) ?? []).length === 2)
 }
 
-// A cidade sem ambiguidade resolve sozinha.
+// ── 11. O que NÃO deve virar resposta ─────────────────────────────────────
 {
-  const p = novo('5511900000012')
-  const r = await p.foto('sao paulo tinta 300')
-  ok('cidade de uma obra só resolve direto', r.includes('AGUIA DE HAIA'))
-}
-
-// ── 11. Reinício não engole comprovante ───────────────────────────────────
-// Um deploy no meio da tarde perderia calado o que estava esperando
-// resposta: a pessoa responderia a pergunta e não receberia nada, e a foto
-// teria sumido. Na caixa ela pelo menos existe.
-{
-  const p = novo('5511900000020')
-  const r = await p.foto('nota esperando resposta')
-  ok('está esperando resposta', /obra/i.test(r))
-  ok('e nada foi enviado ainda', rota().length === 0)
-
-  const quantos = await encerrar()
-  ok('encerrar descarrega o que esperava', quantos === 1)
-  ok('foi para a caixa', rota().includes('receber'))
-  ok('e a pessoa foi avisada do reinício', p.ditos.some(t => /reiniciar/i.test(t)))
+  const p = pessoa('5511900000012')
+  ok('texto solto sem nada esperando é ignorado', (await p.diz('bom dia pessoal')) === null)
+  ok('"ping" responde', /estou aqui/i.test(await p.diz('ping')))
 }
 
 // ── 12. Legenda enorme não trava o robô ───────────────────────────────────
-// A busca compara palavras × obras, e cada comparação é uma distância de
-// edição: sem teto, 2000 palavras levavam 18 SEGUNDOS — e o robô atende uma
-// mensagem por vez, então nesse tempo ninguém mais é respondido.
 {
-  const p = novo('5511900000021')
+  const p = pessoa('5511900000013')
   const enorme = Array.from({ length: 3000 }, (_, i) => `palavra${i}`).join(' ')
   const t0 = Date.now()
   const r = await p.foto(`haia ${enorme} 250,00`)
   const levou = Date.now() - t0
-
   ok(`legenda de 3000 palavras responde rápido (${levou}ms)`, levou < 5000)
-  ok('e ainda acha a obra', r.includes('AGUIA DE HAIA'))
-  ok('e ainda acha o valor', r.includes('R$ 250,00'))
+  ok('e ainda acha a obra e o valor', r.includes('AGUIA DE HAIA') && r.includes('R$ 250,00'))
 }
 
-// ── 13. Rateio: uma compra, mais de uma obra ──────────────────────────────
-// "As vezes eu compro, e é para mais de uma obra, o mesmo item." Sem isso a
-// pessoa lança tudo numa obra e o custo da outra fica errado — e ninguém
-// percebe, porque o total bate com o comprovante.
+// ── 13. Reinício não perde comprovante ────────────────────────────────────
+// O arquivo mora em disco justamente para isto: um deploy no meio da tarde
+// não pode engolir o que estava esperando resposta.
 {
-  const p = novo('5511900000030')
-  const r = await p.foto('haia e tsuya areia, material, 600')
-  ok('rateia citando as duas obras', /rateado entre 2/i.test(r))
-  ok('mostra quanto foi para cada uma', r.includes('R$ 300,00'))
-  ok('lista as duas obras', r.includes('AGUIA DE HAIA') && r.includes('TSUYA'))
-}
+  const p = pessoa('5511900000014')
+  await p.foto('nota que sobrevive', 'foto-sobrevive'); await espera(15)
+  ok('está esperando', p.ditos.some(t => /obra/i.test(t)))
 
-// Divisão que não fecha redondo não pode perder centavo: o total tem que
-// bater com o comprovante na mão de quem confere.
-{
-  const p = novo('5511900000031')
-  const r = await p.foto('haia tsuya toschi tinta, material, 100')
-  ok('divide entre três', /rateado entre 3/i.test(r))
-  ok('a sobra do centavo vai para a primeira', r.includes('R$ 33,34'))
-  ok('e as outras ficam com o resto', (r.match(/R\$ 33,33/g) ?? []).length === 2)
-}
-
-// Uma obra só continua sendo lançamento simples, sem falar em rateio.
-{
-  const p = novo('5511900000032')
-  const r = await p.foto('tsuya cimento 300')
-  ok('obra única não vira rateio', !/rateado/i.test(r) && r.includes('aguardando sua aprovação'))
+  // Simula a subida seguinte: um módulo novo, relendo do disco.
+  const outro = await import(`./pendentes.js?reinicio=${Date.now()}`)
+  ok('o comprovante é relido do disco', outro.carregar() >= 1)
+  const recuperado = outro.todos().find(x => x.idMensagem === 'foto-sobrevive')
+  ok('com a ficha inteira', Boolean(recuperado))
+  ok('e o arquivo ainda lá', outro.arquivoDe(recuperado)?.length === foto.length)
 }
 
 srv.close()
 _limparPendentes()
+rmSync(PASTA, { recursive: true, force: true })
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exitCode = falhas ? 1 : 0

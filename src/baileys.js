@@ -179,6 +179,23 @@ function anexoDaMensagem(msg) {
   return null
 }
 
+/**
+ * A mensagem que esta está CITANDO, se houver.
+ *
+ * É o que permite responder fora de ordem: com três comprovantes esperando,
+ * citar a foto (ou a pergunta do robô) diz sozinho a qual deles a resposta
+ * pertence. Sem isso a resposta só pode valer para o último, e quem manda
+ * vários fica preso a uma sequência.
+ */
+function citada(msg) {
+  const m = msg.message ?? {}
+  const contexto = m.extendedTextMessage?.contextInfo
+    ?? m.imageMessage?.contextInfo
+    ?? m.documentMessage?.contextInfo
+    ?? m.conversation?.contextInfo
+  return contexto?.stanzaId ?? null
+}
+
 /** Só os dígitos do número, para casar com o que o RH guarda. */
 function numeroDoJid(jid) {
   return (jid ?? '').split('@')[0].split(':')[0]
@@ -313,6 +330,8 @@ export async function conectar(aoReceber) {
           // O módulo de gastos precisa disso para avisar quando o prazo de
           // uma pergunta estoura — meia hora depois, sem nada a que responder.
           enviarResposta: (t) => responder(jid, t, { citar: grupo ? msg : null, rapido: grupo }),
+          // A qual mensagem esta responde — a foto, ou a pergunta do robô.
+          respondendoA: citada(msg),
         })
         // Em grupo, responde citando a mensagem: com várias pessoas mandando
         // comprovante junto, confirmação solta não diz de qual foto é.
@@ -360,8 +379,11 @@ async function responder(jid, texto, { citar = null, rapido = false } = {}) {
       await espera(tempoDeDigitacao(texto))
       await sock.sendPresenceUpdate('paused', jid)
     }
-    await sock.sendMessage(jid, { text: texto }, citar ? { quoted: citar } : {})
-    return { ok: true }
+    // O id do que ACABOU de sair importa: é por ele que a pessoa vai citar a
+    // pergunta ao responder, e é assim que o robô sabe de qual comprovante
+    // ela está falando.
+    const enviada = await sock.sendMessage(jid, { text: texto }, citar ? { quoted: citar } : {})
+    return { ok: true, id: enviada?.key?.id ?? null }
   } catch (e) {
     console.error('[whatsapp] não consegui enviar:', e.message)
     return { ok: false, erro: e.message }

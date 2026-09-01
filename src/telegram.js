@@ -155,6 +155,10 @@ export async function conectar(aoReceber) {
             // Ver o comentário equivalente no baileys.js: o módulo de gastos
             // precisa poder falar quando o prazo de uma pergunta estoura.
             enviarResposta: (t) => enviarPorTelegram(msg.chat.id, t, msg.message_id),
+            // A qual mensagem esta responde — ver o comentário no baileys.js.
+            respondendoA: msg.reply_to_message
+              ? `tg:${msg.chat.id}:${msg.reply_to_message.message_id}`
+              : null,
           })
           if (resposta) await enviarPorTelegram(msg.chat.id, resposta, msg.message_id)
         } catch (e) {
@@ -181,12 +185,15 @@ export async function conectar(aoReceber) {
 export async function enviarPorTelegram(chatId, texto, responderA = null) {
   if (!TOKEN) return { ok: false, motivo: 'nao-configurado' }
   try {
-    await chamar('sendMessage', {
+    // O id do que acabou de sair importa: é por ele que a pessoa cita a
+    // pergunta ao responder. Mesmo formato do idMensagem, para os dois
+    // casarem sem conversão.
+    const enviada = await chamar('sendMessage', {
       chat_id: chatId,
       text: texto,
       ...(responderA ? { reply_parameters: { message_id: responderA, allow_sending_without_reply: true } } : {}),
     })
-    return { ok: true }
+    return { ok: true, id: enviada?.message_id ? `tg:${chatId}:${enviada.message_id}` : null }
   } catch (e) {
     console.error('[telegram] não consegui enviar:', e.message)
     return { ok: false, motivo: e.message }

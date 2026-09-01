@@ -34,6 +34,7 @@ import {
 } from './obras-client.js'
 import { interpretar, combinar, nomesDe } from './lancamento.js'
 import { norm } from './texto.js'
+import * as pendentes from './pendentes.js'
 
 /**
  * Quem pode lançar.
@@ -169,9 +170,6 @@ async function obrasConhecidas() {
 
 /** Diagnóstico, para o /metricas. */
 export function situacao() {
-  let esperando = 0
-  for (const f of filas.values()) esperando += f.itens.length + (f.perguntandoAgora ? 1 : 0)
-
   return {
     ativo: gastosAtivo(),
     autorizados: AUTORIZADOS.size,
@@ -182,7 +180,7 @@ export function situacao() {
     leituraPorIA: visaoDisponivel(),
     obras: obrasConfigurado(),
     obrasReserva: OBRAS_RESERVA.length,
-    esperandoResposta: esperando,
+    esperandoResposta: pendentes.quantos(),
   }
 }
 
@@ -248,79 +246,75 @@ export function montarTexto(dados, observacao) {
 const PERGUNTAS_DE_TESTE = /^\s*(ping|teste|testando|robo|robô|status|voce esta ai|você está aí|ta ai|tá aí)\s*[?!.]*\s*$/i
 
 /**
- * Quantos comprovantes cabem na fila de uma pessoa.
+ * Quantos comprovantes uma pessoa pode ter esperando.
  *
- * Cada um segura o ARQUIVO em memória — até 20 MB — enquanto espera. Sem
- * teto, um dia movimentado com todo mundo mandando foto e ninguém
- * respondendo encheria a memória e derrubaria o robô, que é bem pior que um
- * comprovante ir para a caixa mais cedo.
+ * Alto de propósito: o arquivo mora em disco, não na memória, e o custo de
+ * mais um esperando é uma ficha de poucos bytes. O teto existe só para um
+ * erro (alguém despejando o rolo da câmera) não encher o disco.
  */
-const MAX_NA_FILA = Number(process.env.GASTOS_MAX_AGUARDANDO || 30)
+const MAX_ESPERANDO = Number(process.env.GASTOS_MAX_AGUARDANDO || 50)
 
 /**
- * A fila de cada pessoa.
+ * Quando cobrar, e quando desistir.
  *
- * FILA, e não um comprovante só, porque foi assim que quebrou no uso real:
- * mandando cinco fotos seguidas, cada uma cancelava a anterior, e as
- * respostas não tinham a qual pergunta pertencer — "acabou que misturou".
+ * "Às vezes estou ocupado, e posso não ver a mensagem." Meia hora não serve
+ * para quem está na obra. Então ele espera HORAS, cobra uma vez no meio do
+ * caminho, e só no fim manda para a caixa — de onde nada se perde, só dá
+ * mais trabalho.
  *
- * A regra que organiza tudo agora: UMA PERGUNTA POR VEZ. O robô resolve o
- * primeiro da fila, e só depois pergunta sobre o próximo. É como uma pessoa
- * faria, e é o que torna "2500" uma resposta sem ambiguidade.
- *
- * remetente -> { itens: [pendente], prazo, perguntandoAgora: pendente|null }
+ * A cobrança é UMA. Robô que insiste vira aquele contato que a gente silencia,
+ * e aí ele para de servir para qualquer coisa.
  */
-const filas = new Map()
+const COBRAR_APOS_MS = Number(process.env.GASTOS_COBRAR_APOS_MS || 1000 * 60 * 60 * 3)
+const DESISTIR_APOS_MS = Number(process.env.GASTOS_DESISTIR_APOS_MS || 1000 * 60 * 60 * 24)
 
-function filaDe(de) {
-  let f = filas.get(de)
-  if (!f) {
-    f = { itens: [], prazo: null, perguntandoAgora: null }
-    filas.set(de, f)
-  }
-  return f
-}
-
-function limparPrazo(f) {
-  if (f.prazo) clearTimeout(f.prazo)
-  f.prazo = null
-}
-
-/** Some com a fila quando não sobra nada nela. */
-function recolher(de) {
-  const f = filas.get(de)
-  if (f && !f.itens.length && !f.perguntandoAgora) {
-    limparPrazo(f)
-    filas.delete(de)
-  }
-}
+/** De quanto em quanto tempo olhar quem está esperando demais. */
+const RONDA_MS = Number(process.env.GASTOS_RONDA_MS || 1000 * 60 * 5)
 
 /**
- * Diz alguma coisa FORA da resposta a uma mensagem.
+ * Quanto esperar por uma legenda que vem em mensagem separada.
  *
- * Precisa existir porque nem tudo acontece em resposta a algo: o prazo da
- * pergunta estoura sozinho, e o próximo da fila é perguntado depois que o
- * anterior foi resolvido — sem nada a que responder.
- *
- * O canal é quem sabe mandar; aqui só se usa o que ele entregou. Sem isso,
- * registra e segue: falar é desejável, e não conseguir falar não pode
- * derrubar o lançamento.
+ * Muita gente manda a foto e escreve o "o que é" logo em seguida. Perguntar
+ * antes disso seria perguntar o que a pessoa já ia dizer.
  */
-async function avisar(pendente, texto) {
-  if (!texto) return
-  try {
-    if (typeof pendente?.enviar === 'function') await pendente.enviar(texto)
-    else console.log(`[gastos] (sem canal para avisar) ${pendente?.de}: ${String(texto).replace(/\n/g, ' / ')}`)
-  } catch (e) {
-    console.warn('[gastos] não consegui avisar:', e.message)
-  }
-}
+const ESPERA_LEGENDA_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 60000)
 
 /** Como um comprovante aparece numa lista, em poucas palavras. */
 function apelidoDoItem(p) {
   const d = p.dados ?? {}
   const partes = [d.obra, d.descricao || p.descricao, moeda(d.valor)].filter(Boolean)
   return partes.length ? partes.join(' · ').slice(0, 60) : (p.nomeArquivo || 'comprovante')
+}
+
+/** "há 3 horas" — para a cobrança soar como gente. */
+function faz(ms) {
+  const min = Math.round(ms / 60000)
+  if (min < 60) return `há ${min} min`
+  const h = Math.round(min / 60)
+  if (h < 24) return `há ${h} hora${h === 1 ? '' : 's'}`
+  return `há ${Math.round(h / 24)} dia(s)`
+}
+
+/**
+ * Diz alguma coisa FORA da resposta a uma mensagem.
+ *
+ * A cobrança sai horas depois, e o prazo estoura sozinho: não há mensagem a
+ * que responder. O canal é quem sabe mandar; aqui só se usa o que ele
+ * entregou. Sem isso, registra e segue — falar é desejável, e não conseguir
+ * falar não pode derrubar o lançamento.
+ */
+async function avisar(pendente, texto) {
+  if (!texto) return null
+  try {
+    if (typeof pendente?.enviar === 'function') {
+      const r = await pendente.enviar(texto)
+      return r?.id ?? null
+    }
+    console.log(`[gastos] (sem canal para avisar) ${pendente?.de}: ${String(texto).replace(/\n/g, ' / ')}`)
+  } catch (e) {
+    console.warn('[gastos] não consegui avisar:', e.message)
+  }
+  return null
 }
 
 export async function tratar(msg) {
@@ -338,251 +332,283 @@ export async function tratar(msg) {
   }
 
   if (!arquivo && PERGUNTAS_DE_TESTE.test(texto ?? '')) return respostaDeTeste()
-  if (!arquivo && LISTAR.test(texto ?? '')) return listarFila(de)
-  if (!arquivo && CANCELAR_TUDO.test(texto ?? '')) return descartarFila(de)
-
-  if (!arquivo) return responderTexto(de, texto, msg.respondendoA)
+  if (!arquivo && LISTAR.test(texto ?? '')) return listar(de)
+  if (!arquivo && CANCELAR_TUDO.test(texto ?? '')) return descartarTudo(de)
+  if (!arquivo) return responderTexto(de, texto, msg.respondendoA, msg.enviarResposta)
 
   // ── Chegou um comprovante ────────────────────────────────────────────────
-  const f = filaDe(de)
-
-  if (f.itens.length + (f.perguntandoAgora ? 1 : 0) >= MAX_NA_FILA) {
-    return `⚠ Já tenho ${MAX_NA_FILA} comprovantes seus esperando. Responde os que faltam antes de mandar mais, ou escreve *cancelar tudo*.`
+  if (pendentes.doRemetente(de).length >= MAX_ESPERANDO) {
+    return `⚠ Já tenho ${MAX_ESPERANDO} comprovantes seus esperando. Responde alguns antes de mandar mais, ou escreve *cancelar tudo*.`
   }
 
-  const pendente = {
+  const p = pendentes.guardar({
     de, arquivo, nomeArquivo, tipo,
     descricao: texto || null,
     respostas: [],
     idMensagem,
     enviadoEm: msg.enviadoEm ?? Date.now(),
-    // Como falar com quem mandou, quando não for resposta a nada.
-    enviar: msg.enviarResposta,
-  }
-  f.itens.push(pendente)
+    criadoEm: Date.now(),
+  })
+  p.enviar = msg.enviarResposta
 
   /*
-    Já estou perguntando sobre outro? Então este espera a vez.
+    CADA COMPROVANTE ESPERA SOZINHO. Não há fila, e não há sequência.
 
-    Antes a foto nova CANCELAVA a anterior, e foi exatamente o que bagunçou:
-    quem manda cinco de uma vez perdia quatro. Agora ele entra na fila e a
-    pessoa fica sabendo em que posição está.
-  */
-  if (f.perguntandoAgora) {
-    return `📎 Recebi, é o ${f.itens.length + 1}º da fila. Vamos um de cada vez.`
-  }
-
-  /*
-    Sem legenda, segura um pouco: a descrição costuma vir na mensagem
-    seguinte, e é ela que diz de qual obra é o gasto. Com legenda, resolve já.
+    A fila veio antes e foi pior: com três esperando, a pessoa tinha que
+    responder na ordem que o robô escolheu. Agora ele pergunta sobre cada um
+    assim que chega, e a pessoa responde CITANDO — a citação diz sozinha a
+    qual comprovante a resposta pertence, e a ordem passa a ser dela.
   */
   if (!texto?.trim()) {
+    // Sem legenda: espera um pouco, porque a descrição costuma vir na
+    // mensagem seguinte, e é ela que diz de qual obra é o gasto.
     return new Promise((resolve) => {
-      pendente.responder = resolve
-      limparPrazo(f)
-      f.prazo = setTimeout(() => { bombear(de) }, ESPERA_DESCRICAO_MS)
-      f.prazo.unref?.()
+      p.responder = resolve
+      p.esperandoLegendaAte = Date.now() + ESPERA_LEGENDA_MS
+      setTimeout(() => {
+        if (!pendentes.porId(p.id)) return       // já resolvido pela legenda
+        p.esperandoLegendaAte = 0
+        resolveDireto(p).then(t => entregar(p, t))
+      }, ESPERA_LEGENDA_MS).unref?.()
     })
   }
 
-  return bombear(de)
+  return resolveDireto(p)
 }
 
 /**
- * Resolve o primeiro da fila, e segue até precisar perguntar algo.
+ * Processa um comprovante e devolve o texto para quem estiver ouvindo.
  *
- * Devolve o texto para quem chamou (a mensagem que disparou), e o que vier
- * depois — o próximo da fila — sai por `avisar`, porque já não há mensagem a
- * que responder.
+ * Resolvido, sai da lista e do disco. Faltando informação, vira pergunta e
+ * continua esperando — cada um por conta própria.
  */
-async function bombear(de) {
-  const f = filas.get(de)
-  if (!f || f.perguntandoAgora) return null
+async function resolveDireto(p) {
+  const r = await processar(p)
 
-  limparPrazo(f)
-  let paraQuemChamou = null
-
-  while (f.itens.length) {
-    const pendente = f.itens[0]
-    const r = await processar(pendente)
-
-    if (r?.perguntando) {
-      // Parou aqui: precisa de resposta antes de seguir.
-      f.itens.shift()
-      f.perguntandoAgora = pendente
-      limparPrazo(f)
-      f.prazo = setTimeout(async () => {
-        f.perguntandoAgora = null
-        // Não respondeu: caixa, que é onde ficava antes. Comprovante na
-        // caixa é pior que lançado, e muito melhor que perdido.
-        await avisar(pendente, await paraCaixa(pendente))
-        recolher(de)
-        const seguinte = await bombear(de)
-        if (seguinte) await avisar(pendente, seguinte)
-      }, ESPERA_RESPOSTA_MS)
-      f.prazo.unref?.()
-
-      const texto = f.itens.length
-        ? `${r.texto}\n_(faltam mais ${f.itens.length} depois deste)_`
-        : r.texto
-
-      if (paraQuemChamou === null) return entregar(pendente, texto)
-      await avisar(pendente, texto)
-      return paraQuemChamou
-    }
-
-    // Resolvido (lançado ou mandado para a caixa).
-    f.itens.shift()
-    if (paraQuemChamou === null) paraQuemChamou = entregar(pendente, r.texto)
-    else await avisar(pendente, r.texto)
+  if (!r.perguntando) {
+    pendentes.remover(p.id)
+    return r.texto
   }
 
-  recolher(de)
-  return paraQuemChamou
+  // Ficou esperando. Quantos mais estão na mesma situação? Dizer isso evita
+  // a sensação de bagunça de quem mandou vários e não sabe o que falta.
+  const outros = pendentes.doRemetente(p.de).filter(x => x.id !== p.id && x.perguntadoEm).length
+  const texto = outros
+    ? `${r.texto}\n_(responde citando esta mensagem — tenho mais ${outros} esperando)_`
+    : r.texto
+
+  const idPergunta = await avisar(p, texto)
+  if (idPergunta) {
+    // Guarda o id da PERGUNTA: citar a pergunta é o jeito mais natural de
+    // responder, e sem isto só citar a foto funcionaria.
+    p.idPergunta = idPergunta
+  }
+  p.perguntadoEm = Date.now()
+  pendentes.atualizar(p)
+
+  // Já foi dito por `avisar`; devolver de novo mandaria a mesma coisa duas
+  // vezes. Quando não há canal, volta como resposta normal.
+  return idPergunta ? null : texto
 }
 
-/**
- * Entrega o texto pela promessa que ficou aberta, quando existe.
- *
- * A promessa existe quando o comprovante veio sem legenda: a confirmação
- * pertence à FOTO, e não à legenda que chegou depois. Num grupo com várias
- * pessoas mandando ao mesmo tempo, confirmação solta não diz de qual é.
- */
-function entregar(pendente, texto) {
-  if (pendente.responder) {
-    pendente.responder(texto)
-    pendente.responder = null
+/** Entrega pela promessa que ficou aberta, quando existe. */
+function entregar(p, texto) {
+  if (p.responder) {
+    p.responder(texto)
+    p.responder = null
     return null
   }
   return texto
 }
 
-/** Texto solto: resposta a uma pergunta, ou legenda que faltava. */
-function responderTexto(de, texto, respondendoA) {
-  const f = filas.get(de)
-  if (!f || !texto?.trim()) return null
+/**
+ * Texto solto: uma resposta, ou a legenda que faltava.
+ *
+ * A CITAÇÃO manda. Com três comprovantes esperando, é ela que diz a qual a
+ * resposta pertence — e é isso que libera responder fora de ordem.
+ */
+function responderTexto(de, texto, respondendoA, enviar) {
+  const meus = pendentes.doRemetente(de)
+  if (!meus.length || !texto?.trim()) return null
 
-  /*
-    Respondeu CITANDO uma foto específica?
+  // 1) Citou alguma coisa: vale o que foi citado.
+  let alvo = pendentes.porCitacao(de, respondendoA)
 
-    É o que a pessoa faz quando percebe que se perdeu — e citar é a única
-    forma de dizer, sem ambiguidade, sobre qual comprovante ela está falando.
-  */
-  if (respondendoA) {
-    const naFila = f.itens.find(p => p.idMensagem === respondendoA)
-    if (naFila) {
-      naFila.respostas.push(texto.trim())
-      return null   // será usado quando chegar a vez dele
-    }
-    if (f.perguntandoAgora?.idMensagem === respondendoA) {
-      return aplicarResposta(de, f, texto)
+  // 2) Não citou. Se só um está esperando resposta, é ele — não há dúvida.
+  if (!alvo) {
+    const perguntados = meus.filter(p => p.perguntadoEm)
+    if (perguntados.length === 1) alvo = perguntados[0]
+    else if (perguntados.length > 1) {
+      // Vários esperando e nenhuma citação: adivinhar aqui é o que faz
+      // resposta cair no comprovante errado, que é pior que perguntar.
+      const linhas = [`Tenho ${perguntados.length} comprovantes esperando resposta. Esta é de qual?`]
+      perguntados.forEach((p, i) => linhas.push(`${i + 1}) ${apelidoDoItem(p)}`))
+      linhas.push('')
+      linhas.push('Responde *citando* a mensagem daquele comprovante — ou manda o número dele.')
+      // Guarda a numeração para "1" funcionar como escolha.
+      for (const p of perguntados) { p.opcoesPendentes = perguntados.map(x => x.id); pendentes.atualizar(p) }
+      return linhas.join('\n')
     }
   }
 
-  if (f.perguntandoAgora) return aplicarResposta(de, f, texto)
+  // 3) Ninguém foi perguntado ainda: é a legenda da última foto sem legenda.
+  if (!alvo) {
+    const semLegenda = meus.filter(p => !p.descricao && p.esperandoLegendaAte > Date.now())
+    alvo = semLegenda[semLegenda.length - 1] ?? null
+    if (!alvo) return null
+    alvo.descricao = texto.trim()
+    alvo.esperandoLegendaAte = 0
+    pendentes.atualizar(alvo)
+    if (enviar) alvo.enviar = enviar
+    return resolveDireto(alvo).then(t => entregar(alvo, t))
+  }
 
-  // Ninguém foi perguntado ainda: é a legenda da última foto sem legenda.
-  const ultimo = f.itens[f.itens.length - 1]
-  if (!ultimo || ultimo.descricao) return null
-  ultimo.descricao = texto.trim()
-  return bombear(de)
+  if (enviar) alvo.enviar = enviar
+  return aplicarResposta(alvo, texto)
 }
 
-/** Aplica o que a pessoa respondeu ao comprovante que está sendo perguntado. */
-function aplicarResposta(de, f, texto) {
-  const pendente = f.perguntandoAgora
-  limparPrazo(f)
-
+/** Aplica o que a pessoa respondeu ao comprovante certo. */
+function aplicarResposta(p, texto) {
   if (DESISTENCIA.test(texto)) {
-    f.perguntandoAgora = null
-    return paraCaixa(pendente).then(async (r) => {
-      const seguinte = await bombear(de)
-      return seguinte ? `${r}\n\n${seguinte}` : r
-    })
+    return paraCaixa(p).then((r) => { pendentes.remover(p.id); return r })
+  }
+
+  const so = texto.trim().replace(/[).\s]+$/, '')
+
+  // Escolheu um COMPROVANTE pelo número, quando havia vários sem citação.
+  if (/^\d{1,2}$/.test(so) && p.opcoesPendentes?.length) {
+    const escolhido = pendentes.porId(p.opcoesPendentes[Number(so) - 1])
+    for (const id of p.opcoesPendentes) {
+      const outro = pendentes.porId(id)
+      if (outro) { delete outro.opcoesPendentes; pendentes.atualizar(outro) }
+    }
+    if (escolhido) {
+      return `Certo, é o "${apelidoDoItem(escolhido)}". Agora me responde: ` +
+        `${escolhido.ultimaPergunta ?? 'o que falta nele?'}`
+    }
   }
 
   /*
-    "1" ou "2" respondendo a uma lista numerada.
+    "1" ou "2" respondendo a uma lista de OBRAS.
 
-    É o que a pessoa faz quando o robô acabou de listar as opções, e sem isto
-    o número seria lido como VALOR — "1" viraria R$ 1,00 e o gasto entraria
-    errado.
+    Sem isto o número seria lido como valor — "1" viraria R$ 1,00 e o gasto
+    entraria errado.
   */
-  const so = texto.trim().replace(/[).\s]+$/, '')
-  if (/^\d{1,2}$/.test(so) && pendente.opcoes?.length) {
+  if (/^\d{1,2}$/.test(so) && p.opcoes?.length) {
     const i = Number(so) - 1
-    if (i >= 0 && i < pendente.opcoes.length) {
-      pendente.obraEscolhida = pendente.opcoes[i]
-    } else {
-      pendente.respostas.push(texto.trim())
-    }
+    if (i >= 0 && i < p.opcoes.length) p.obraEscolhida = p.opcoes[i]
+    else p.respostas.push(texto.trim())
   } else {
-    pendente.respostas.push(texto.trim())
+    p.respostas.push(texto.trim())
   }
 
-  f.perguntandoAgora = null
-  f.itens.unshift(pendente)   // volta para a frente da fila
-  return bombear(de)
+  // Perguntar de novo é permitido depois de uma resposta: a pessoa pode ter
+  // dado só metade do que faltava.
+  p.jaPerguntou = false
+  p.perguntadoEm = null
+  pendentes.atualizar(p)
+  return resolveDireto(p)
 }
 
 /** O que ainda está esperando. */
-function listarFila(de) {
-  const f = filas.get(de)
-  const todos = [...(f?.perguntandoAgora ? [f.perguntandoAgora] : []), ...(f?.itens ?? [])]
-  if (!todos.length) return '✅ Não tenho nenhum comprovante seu esperando.'
+function listar(de) {
+  const meus = pendentes.doRemetente(de)
+  if (!meus.length) return '✅ Não tenho nenhum comprovante seu esperando.'
 
-  const linhas = [`Tenho ${todos.length} comprovante(s) seu(s) esperando:`]
-  todos.forEach((p, i) => linhas.push(`${i + 1}) ${apelidoDoItem(p)}`))
+  const linhas = [`Tenho ${meus.length} comprovante(s) seu(s) esperando:`]
+  meus.forEach((p, i) => {
+    const falta = []
+    if (!p.dados?.obra) falta.push('obra')
+    if (p.dados?.valor == null) falta.push('valor')
+    linhas.push(`${i + 1}) ${apelidoDoItem(p)}${falta.length ? ` — falta ${falta.join(' e ')}` : ''} _(${faz(Date.now() - p.criadoEm)})_`)
+  })
   linhas.push('')
-  linhas.push('Estou perguntando sobre o primeiro. Responde ele que eu sigo para o próximo.')
+  linhas.push('Responde *citando* a mensagem de cada um — pode ser em qualquer ordem.')
   linhas.push('_(ou escreve *cancelar tudo* para mandar todos para a caixa)_')
   return linhas.join('\n')
 }
 
 /** Manda tudo que está esperando para a caixa e limpa. */
-async function descartarFila(de) {
-  const f = filas.get(de)
-  const todos = [...(f?.perguntandoAgora ? [f.perguntandoAgora] : []), ...(f?.itens ?? [])]
-  if (!todos.length) return '✅ Não tinha nada seu esperando.'
+async function descartarTudo(de) {
+  const meus = pendentes.doRemetente(de)
+  if (!meus.length) return '✅ Não tinha nada seu esperando.'
 
-  limparPrazo(f)
-  filas.delete(de)
-
-  await Promise.allSettled(todos.map(p => paraCaixa(p)))
-  return `📥 Mandei os ${todos.length} para a caixa de comprovantes.\nAbre /m/gasto no sistema para lançar cada um.`
+  await Promise.allSettled(meus.map(async (p) => {
+    await paraCaixa(p)
+    pendentes.remover(p.id)
+  }))
+  return `📥 Mandei os ${meus.length} para a caixa de comprovantes.\nAbre /m/gasto no sistema para lançar cada um.`
 }
 
 /**
- * Manda para a caixa tudo que está esperando, antes de o processo morrer.
+ * A ronda: cobra quem sumiu, e desiste de quem sumiu demais.
  *
- * Sem isto, um deploy no meio da tarde perde silenciosamente os comprovantes
- * que estavam na fila: a pessoa respondeu a pergunta e não recebe nada, e a
- * foto se foi. Na caixa ela pelo menos existe, e alguém completa.
+ * "Se eu demorar a responder, ele me cobra depois?" Cobra — uma vez. Robô
+ * que insiste vira aquele contato que a gente silencia, e aí ele para de
+ * servir para qualquer coisa. Passado o prazo maior, o comprovante vai para
+ * a caixa: de lá nada se perde, só dá mais trabalho.
+ */
+async function ronda() {
+  const agora = Date.now()
+
+  for (const p of pendentes.todos()) {
+    if (!p.perguntadoEm) continue
+    const parado = agora - p.perguntadoEm
+
+    if (parado > DESISTIR_APOS_MS) {
+      const r = await paraCaixa(p)
+      pendentes.remover(p.id)
+      await avisar(p, `⏰ Faz ${faz(parado)} que perguntei sobre este e não tive resposta.\n${r}`)
+      continue
+    }
+
+    if (parado > COBRAR_APOS_MS && !p.cobradoEm) {
+      p.cobradoEm = agora
+      pendentes.atualizar(p)
+      await avisar(p,
+        `🔔 Lembrete: este comprovante ainda está esperando desde ${faz(parado)}.\n`
+        + `${apelidoDoItem(p)}\n`
+        + `${p.ultimaPergunta ?? 'Falta a obra ou o valor.'}\n`
+        + '_(responde citando esta mensagem, ou escreve *cancelar tudo*)_')
+    }
+  }
+}
+
+/** Liga a ronda. Chamado uma vez, no arranque. */
+export function iniciarRonda() {
+  pendentes.carregar()
+  const t = setInterval(() => { ronda().catch(e => console.error('[gastos] ronda:', e.message)) }, RONDA_MS)
+  t.unref?.()
+  return t
+}
+
+/**
+ * Encerrando: o que estava esperando FICA, agora que mora em disco.
+ *
+ * Antes isto despejava tudo na caixa, porque a memória ia embora com o
+ * processo. Com o arquivo em disco, um deploy deixou de ser motivo para
+ * desistir de um comprovante — ele é relido no arranque e continua
+ * esperando a resposta.
  */
 export async function encerrar() {
-  const todos = []
-  for (const f of filas.values()) {
-    limparPrazo(f)
-    if (f.perguntandoAgora) todos.push(f.perguntandoAgora)
-    todos.push(...f.itens)
-  }
-  filas.clear()
-  if (!todos.length) return 0
-
-  console.log(`[gastos] encerrando — mandando ${todos.length} comprovante(s) que esperavam para a caixa.`)
-  await Promise.allSettled(todos.map(async (p) => {
-    const r = await paraCaixa(p)
-    await avisar(p, `⚠ Precisei reiniciar antes de você responder.\n${r}`)
-  }))
-  return todos.length
+  const quantos = pendentes.quantos()
+  if (quantos) console.log(`[gastos] ${quantos} comprovante(s) ficam esperando em disco até a próxima subida.`)
+  return quantos
 }
 
-/** Só para teste: esquece as fotos seguradas. */
+/** Só para teste: esquece o que está esperando. */
 export function _limparPendentes() {
-  for (const f of filas.values()) limparPrazo(f)
-  filas.clear()
+  for (const p of pendentes.todos()) pendentes.remover(p.id)
+  pendentes._esquecer()
 }
 
+/**
+ * O que ele responde a "ping".
+ *
+ * Diz o que está e o que NÃO está pronto. Só "estou aqui" enganaria: o robô
+ * pode estar conectado e ainda assim sem token de obras, e aí o comprovante
+ * some sem ninguém entender por quê.
+ */
 function respostaDeTeste() {
   const linhas = ['👋 Estou aqui, ouvindo este grupo.']
 
@@ -596,21 +622,10 @@ function respostaDeTeste() {
 
   linhas.push('')
   linhas.push('Manda o comprovante com uma linha assim:')
-  linhas.push('_bastos haia, tijolos e areia, material, 2500,00_')
-  linhas.push('Se faltar alguma coisa, eu pergunto.')
+  linhas.push('_haia, tijolos e areia, material, 2500,00_')
+  linhas.push('Se faltar alguma coisa, eu pergunto — e você responde citando a mensagem.')
   return linhas.join('\n')
 }
-
-/**
- * Manda para a caixa tudo que está esperando, antes de o processo morrer.
- *
- * Sem isto, um deploy no meio da tarde perde silenciosamente os
- * comprovantes que estavam esperando resposta: a pessoa respondeu a
- * pergunta e não recebe nada, e a foto se foi. Na caixa ela pelo menos
- * existe, e alguém completa.
- *
- * Devolve quantos foram descarregados, para quem chama registrar.
- */
 
 /** Quem desiste de responder. */
 const DESISTENCIA = /^\s*(cancelar|cancela|deixa|deixa pra la|deixa pra lá|esquece|nao sei|não sei|depois)\s*[!.]*\s*$/i
@@ -644,7 +659,7 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
   // resposta, reler custaria mais 20 segundos e daria o mesmo resultado.
   if (pendente.lido === undefined) {
     pendente.lido = await lerComprovante({
-      arquivo: pendente.arquivo, tipo: pendente.tipo, descricao: escritoTudo,
+      arquivo: pendentes.arquivoDe(pendente), tipo: pendente.tipo, descricao: escritoTudo,
     }).catch(() => null)
     console.log('[gastos] leitura da imagem:', pendente.lido ? JSON.stringify(pendente.lido) : 'nenhuma')
   }
@@ -693,16 +708,27 @@ function perguntar(pendente, falta, obras) {
   const candidatos = d?.candidatos ?? null
   const nomes = nomesDe(obras)
 
+  /*
+    A pergunta em si fica guardada à parte.
+
+    A cobrança, horas depois, repete ELA — não a última linha do que foi
+    dito. A última linha costuma ser a lista de obras, e repetir só a lista
+    não lembra ninguém do que estava sendo perguntado.
+  */
+  const pergunta = candidatos?.length
+    ? 'Aí tem mais de uma obra. É qual delas?'
+    : falta.includes('obra') && falta.includes('valor')
+      ? 'Só faltou a *obra* e o *valor*. Me manda os dois?'
+      : falta.includes('obra')
+        ? 'De qual *obra* é esse gasto?'
+        : 'Qual foi o *valor*?'
+
+  pendente.ultimaPergunta = pergunta
+  linhas.push(pergunta)
+
   if (candidatos?.length) {
-    linhas.push('Aí tem mais de uma obra. É qual delas?')
     candidatos.forEach((o, i) => linhas.push(`${i + 1}) ${o}`))
     if (falta.includes('valor')) linhas.push('E qual foi o *valor*?')
-  } else if (falta.includes('obra') && falta.includes('valor')) {
-    linhas.push('Só faltou a *obra* e o *valor*. Me manda os dois?')
-  } else if (falta.includes('obra')) {
-    linhas.push('De qual *obra* é esse gasto?')
-  } else {
-    linhas.push('Qual foi o *valor*?')
   }
 
   if (!candidatos?.length && falta.includes('obra') && nomes.length && nomes.length <= 12) {
@@ -721,7 +747,7 @@ async function lancar(pendente, dados) {
   const data = new Date(pendente.enviadoEm ?? Date.now()).toISOString().slice(0, 10)
 
   const r = await lancarGasto({
-    arquivo: pendente.arquivo,
+    arquivo: pendentes.arquivoDe(pendente),
     nomeArquivo: pendente.nomeArquivo,
     tipo: pendente.tipo,
     obra: dados.obra,
@@ -774,7 +800,7 @@ async function lancar(pendente, dados) {
 async function paraCaixa(pendente) {
   const dados = pendente.dados ?? {}
   const envio = await enviarComprovante({
-    arquivo: pendente.arquivo,
+    arquivo: pendentes.arquivoDe(pendente),
     nomeArquivo: pendente.nomeArquivo,
     tipo: pendente.tipo,
     texto: montarTexto(dados, pendente.lido?.observacao),

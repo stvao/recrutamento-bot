@@ -327,6 +327,15 @@ if (process.env.TELEGRAM_TOKEN) {
     .catch(e => console.error('[telegram] não consegui conectar:', e.message))
 }
 
+/*
+  Relê o que ficou esperando e liga a ronda que cobra quem sumiu.
+
+  Vem antes do aviso abaixo de propósito: se houver comprovante recuperado
+  do disco, a linha de recuperação aparece junto com a de estado, e fica
+  claro que o robô subiu com trabalho pendente.
+*/
+gastos.iniciarRonda()
+
 if (gastos.gastosAtivo()) {
   const s = gastos.situacao()
   console.log(
