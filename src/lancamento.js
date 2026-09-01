@@ -27,7 +27,7 @@
  * e é por isso que a lista de obras entra aqui. Com ela, procura-se cada
  * nome conhecido em qualquer posição da frase; o que sobra é a descrição.
  */
-import { norm, melhorMatch } from './texto.js'
+import { norm, melhorMatch, distancia } from './texto.js'
 import { CATEGORIAS } from './ia-visao.js'
 
 /**
@@ -124,35 +124,72 @@ export function acharTipo(pedaco) {
  *
  * Devolve o que achou e as palavras que sobraram — quem chama precisa das
  * duas coisas, senão o nome da obra apareceria de novo na descrição.
+ *
+ * Tolera erro de escrita no nome INTEIRO, e não só em palavra solta:
+ * "bastos haya", "bastos aia" e "Bastos Haia" caem todos na mesma obra.
+ * Quem digita está na obra, no celular, com pressa.
  */
 export function acharNaFrase(texto, conhecidos, { tolerante = true } = {}) {
   const palavras = (texto || '').split(/\s+/).filter(Boolean)
   if (!palavras.length || !conhecidos?.length) return { achado: null, resto: texto ?? '' }
 
   const alvos = conhecidos.map(c => ({ original: c, limpo: norm(c) })).filter(a => a.limpo)
-  const maxJanela = Math.min(4, palavras.length)
+  const maxJanela = Math.min(5, palavras.length)
+
+  // Guarda o MELHOR casamento, em vez de aceitar o primeiro.
+  //
+  // Aceitando o primeiro, "Bastos" ganharia de "Bastos Haia" só por ser
+  // testado antes — e o custo iria para a obra errada, que é o pior erro
+  // que este arquivo pode cometer. Ordena-se por: erro menor primeiro, e
+  // empatado, janela mais longa.
+  let melhor = null
 
   for (let tamanho = maxJanela; tamanho >= 1; tamanho--) {
     for (let i = 0; i + tamanho <= palavras.length; i++) {
       const janela = norm(palavras.slice(i, i + tamanho).join(' '))
       if (!janela) continue
 
-      let alvo = alvos.find(a => a.limpo === janela)
+      for (const alvo of alvos) {
+        let erro = null
 
-      // Tolerância a erro de escrita só em janela de UMA palavra: aplicada a
-      // frases inteiras, ela casa qualquer coisa com qualquer coisa.
-      if (!alvo && tolerante && tamanho === 1) {
-        const perto = melhorMatch(janela, alvos.map(a => ({ valor: a.original, termos: [a.original] })))
-        if (perto) alvo = alvos.find(a => a.original === perto)
-      }
+        if (alvo.limpo === janela) {
+          erro = 0
+        } else if (tolerante) {
+          const d = distancia(janela, alvo.limpo)
+          if (d <= toleranciaDe(alvo.limpo)) erro = d
+        }
 
-      if (alvo) {
-        const resto = [...palavras.slice(0, i), ...palavras.slice(i + tamanho)].join(' ').trim()
-        return { achado: alvo.original, resto }
+        if (erro === null) continue
+        if (!melhor || erro < melhor.erro || (erro === melhor.erro && tamanho > melhor.tamanho)) {
+          melhor = { alvo: alvo.original, erro, tamanho, i }
+        }
       }
     }
   }
-  return { achado: null, resto: texto ?? '' }
+
+  if (!melhor) return { achado: null, resto: texto ?? '' }
+
+  const resto = [...palavras.slice(0, melhor.i), ...palavras.slice(melhor.i + melhor.tamanho)].join(' ').trim()
+  return { achado: melhor.alvo, resto }
+}
+
+/**
+ * Quantas letras podem estar erradas, pelo tamanho do nome.
+ *
+ * Proporcional de propósito: uma letra trocada em "Bastos Haia" (11 letras)
+ * é erro de digitação; a mesma letra em "SP" seria outra coisa. Nome curto
+ * exige acerto, nome longo perdoa.
+ *
+ * O teto é baixo por escolha. Errar para menos faz a pessoa completar a obra
+ * na hora de aprovar — chato. Errar para mais manda o custo para a obra
+ * errada, e ninguém percebe.
+ */
+function toleranciaDe(nome) {
+  const n = nome.length
+  if (n <= 4) return 0
+  if (n <= 8) return 1
+  if (n <= 14) return 2
+  return 3
 }
 
 /**

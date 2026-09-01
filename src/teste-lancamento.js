@@ -8,7 +8,7 @@
 import { interpretar, acharValor, acharTipo, acharNaFrase, combinar } from './lancamento.js'
 
 /** As obras de verdade, como estão no .env de produção. */
-const OBRAS = ['Bastos Tsuya', 'Bastos', 'Peruíbe', 'Caraguatatuba', 'Praia Grande', 'Buritama', 'Pereiras', 'Itapevi']
+const OBRAS = ['Bastos Tsuya', 'Bastos haia', 'Peruibe', 'Caraguatatuba', 'Praia Grande', 'Buritama', 'Pereiras', 'Itapevi']
 
 let falhas = 0
 function ok(desc, cond) {
@@ -135,13 +135,52 @@ ok('funciona sem a IA', semIA.valor === 1800 && semIA.obra === 'bastos tsuya')
 {
   const r = interpretar('Bastos Tsuya cimento 100', OBRAS)
   ok('a obra mais específica ganha', r.obra === 'Bastos Tsuya')
-  const r2 = interpretar('Bastos cimento 100', OBRAS)
-  ok('e a curta ainda é reconhecida sozinha', r2.obra === 'Bastos')
+  const r2 = interpretar('Bastos haia cimento 100', OBRAS)
+  ok('e a outra "Bastos" é reconhecida', r2.obra === 'Bastos haia')
 }
 
-// Nome de obra com acento e caixa diferente do .env
-ok('obra sem acento é reconhecida', interpretar('peruibe andaime 300', OBRAS).obra === 'Peruíbe')
 ok('obra em maiúscula é reconhecida', interpretar('PRAIA GRANDE marmita 90', OBRAS).obra === 'Praia Grande')
+
+// ── Erro de escrita no nome da obra ───────────────────────────────────────
+// Quem digita está na obra, no celular, com pressa. Exigir o nome exato
+// devolveria "faltou a obra" o tempo todo.
+const comErro = [
+  ['bastos haya cimento 200', 'Bastos haia'],
+  ['bastos aia cimento 200', 'Bastos haia'],
+  ['bastos tsuia cimento 200', 'Bastos Tsuya'],
+  ['caraguatatuva areia 100', 'Caraguatatuba'],
+  ['praia grand marmita 50', 'Praia Grande'],
+  ['buritma cimento 80', 'Buritama'],
+]
+for (const [linha, esperada] of comErro) {
+  ok(`"${linha}" → ${esperada}`, interpretar(linha, OBRAS).obra === esperada)
+}
+
+// O caso que mais importa: duas obras parecidas NÃO podem se confundir.
+// Mandar o custo para a obra errada é o pior erro que este arquivo comete,
+// porque ninguém percebe.
+ok('"bastos haia" NÃO vira Bastos Tsuya', interpretar('bastos haia cimento 10', OBRAS).obra === 'Bastos haia')
+ok('"bastos tsuya" NÃO vira Bastos haia', interpretar('bastos tsuya cimento 10', OBRAS).obra === 'Bastos Tsuya')
+
+// Fora de ordem: a obra pode estar em qualquer lugar da frase.
+ok('obra no fim', interpretar('cimento 200 buritama', OBRAS).obra === 'Buritama')
+ok('obra no meio', interpretar('nota de peruibe do mes', OBRAS).obra === 'Peruibe')
+
+// Faltando itens: cada campo é opcional, e o que falta fica nulo em vez de
+// derrubar o resto.
+{
+  const soObra = interpretar('buritama', OBRAS)
+  ok('só a obra: reconhece', soObra.obra === 'Buritama')
+  ok('só a obra: valor fica nulo p/ a IA', soObra.valor === null)
+
+  const semObra = interpretar('cimento 200', OBRAS)
+  ok('sem obra: não inventa', semObra.obra === null)
+  ok('sem obra: mas pega o resto', semObra.valor === 200 && semObra.tipo === 'MATERIAL')
+}
+
+// Nome curto demais não perdoa erro: com 4 letras ou menos, uma troca já é
+// outra palavra, e o risco de casar errado supera a conveniência.
+ok('palavra curta não casa por semelhança', interpretar('itapevo cimento 10', ['Ita']).obra === null)
 
 // ── Classificador sai da frase; pista fica ────────────────────────────────
 // Tratar os dois iguais arrancava "tijolos" da descrição como se fosse a
