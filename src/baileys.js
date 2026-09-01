@@ -250,6 +250,9 @@ export async function conectar(aoReceber) {
           // Id da mensagem do WhatsApp: é o que garante a idempotência do
           // envio ao sistema de obras, e é estável entre reentregas.
           idMensagem: msg.key.id,
+          // Quando a mensagem foi enviada — é esta a data do lançamento, e
+          // não a que a IA leu no papel. Vem em segundos, não milissegundos.
+          enviadoEm: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
         })
         // Em grupo, responde citando a mensagem: com várias pessoas mandando
         // comprovante junto, confirmação solta não diz de qual foto é.

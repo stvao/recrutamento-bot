@@ -62,6 +62,8 @@ export function parseWebhook(body) {
           // Id da mensagem da Meta: estável entre reentregas, que é
           // exatamente o que a idempotência do sistema de obras precisa.
           idMensagem: msg.id,
+          // Data do envio, que é a do lançamento. A Meta manda em segundos.
+          enviadoEm: msg.timestamp ? Number(msg.timestamp) * 1000 : Date.now(),
         }
       }
     }

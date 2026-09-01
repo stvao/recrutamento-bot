@@ -60,27 +60,35 @@ const emOutroGrupo = await tratar({
 ok('autorizado em grupo não cadastrado é ignorado', emOutroGrupo === null)
 
 // ── 4. O resumo que aparece na caixa de aprovação ─────────────────────────
-const leitura = {
-  valor: 250, data: '2026-08-28', estabelecimento: 'Posto Ipiranga',
-  categoria: 'COMBUSTIVEL', formaPagamento: 'Pix', confianca: 'alta',
-  documento: null, observacao: null,
+// É por esta linha que a pessoa confere sem abrir a foto, então ela sai na
+// ordem em que se lê um lançamento: obra, o que foi, tipo, quanto.
+const digitado = {
+  obra: 'Bastos Tsuya', descricao: 'tijolos e areia', tipo: 'MATERIAL',
+  valor: 2500, valorDigitado: true, estabelecimento: 'Deposito Silva',
+  formaPagamento: 'Pix', documento: '12345', dataComprovante: '2026-08-28',
 }
-const texto = montarTexto(leitura, 'obra de Buritama')
-ok('resumo traz o estabelecimento', texto.includes('Posto Ipiranga'))
-ok('resumo traz o valor em reais', texto.includes('R$ 250,00'))
-ok('resumo traz a data', texto.includes('28/08'))
-ok('resumo traz o que a pessoa escreveu', texto.includes('obra de Buritama'))
-ok('leitura confiante não pede conferência', !texto.includes('incerta'))
+const texto = montarTexto(digitado, null)
+ok('resumo traz a obra', texto.includes('Bastos Tsuya'))
+ok('resumo traz a descrição', texto.includes('tijolos e areia'))
+ok('resumo traz o tipo legível', texto.includes('material'))
+ok('resumo traz o valor em reais', texto.includes('R$ 2.500,00'))
+ok('resumo traz a data do comprovante', texto.includes('28/08'))
+ok('resumo traz a forma de pagamento', texto.includes('Pix'))
+ok('valor digitado NÃO pede conferência', !texto.includes('confira'))
 
-const incerto = montarTexto({ ...leitura, confianca: 'baixa' }, null)
-ok('leitura incerta AVISA para conferir', incerto.includes('confira o valor'))
+// Valor que veio da imagem avisa; valor digitado por gente, não. Encher de
+// alerta o que está certo faz a pessoa parar de ler os alertas.
+const lidoDaImagem = montarTexto({ ...digitado, valorDigitado: false }, null)
+ok('valor lido da imagem AVISA para conferir', lidoDaImagem.includes('confira'))
 
-const semLeitura = montarTexto(null, 'cimento da obra')
-ok('sem leitura, o texto da pessoa ainda vai', semLeitura.includes('cimento da obra'))
-ok('sem leitura e sem texto, ainda vai algo', montarTexto(null, null).length > 0)
+const semValor = montarTexto({ obra: 'Peruibe', valor: null }, null)
+ok('sem valor, avisa que precisa digitar', semValor.includes('precisa digitar'))
 
-// Valor grande sai legível — 1234.5 não pode virar "R$ 1234.5"
-ok('milhar sai formatado', montarTexto({ ...leitura, valor: 1234.5 }, null).includes('R$ 1.234,50'))
+ok('observação da IA aparece', montarTexto(digitado, 'foto cortada').includes('foto cortada'))
+ok('sem nada, ainda vai algum texto', montarTexto(null, null).length > 0)
+
+// Milhar precisa sair legível — 1234.5 não pode virar "R$ 1234.5"
+ok('milhar sai formatado', montarTexto({ valor: 1234.5 }, null).includes('R$ 1.234,50'))
 
 // ── 5. A conferência do que o modelo leu ──────────────────────────────────
 // Mesma regra do atendimento: o modelo é instruído, mas instrução não é

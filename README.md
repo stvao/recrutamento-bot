@@ -52,6 +52,7 @@ mostra quantas conversas começaram, terminaram e onde as pessoas desistem.
 | `gastos.js` | O módulo de comprovantes: quem pode lançar, e o que vira envio. |
 | `ia-visao.js` | Lê o comprovante e **confere** o que o modelo diz ter lido. |
 | `obras-client.js` | Envia o comprovante ao sistema de obras. |
+| `lancamento.js` | Lê a linha que você escreve: obra, descrição, tipo, valor. |
 
 A regra que organiza tudo: **o modelo decide o que dizer; o código é dono dos
 fatos e do que fica gravado.** Salário e alojamento entram prontos, vindos do
@@ -85,6 +86,44 @@ resumo do que a IA leu, e a pessoa toca em "Lançar", confere e salva.
 Lançar direto trocaria *trabalho de digitar* por *trabalho de auditar*, que é
 pior: a IA erra — lê 1.500 onde era 1.800, troca a data, erra a categoria.
 
+### Como se manda
+
+Comprovante (foto, PDF ou arquivo), e a linha do que é:
+
+```
+[foto do comprovante]
+bastos tsuya, tijolos e areia, material, 2500,00
+ └─ obra ──┘  └─ descrição ─┘  └tipo┘   └valor┘
+```
+
+Pode ser legenda da foto ou mensagem separada logo depois — nesse caso o robô
+segura o comprovante por 60 segundos esperando a linha chegar.
+
+**A ordem é livre e tudo é opcional.** O que der para identificar com certeza
+é identificado; o que faltar você completa na hora de aprovar. O tipo aceita
+como se fala na obra ("gasolina", "diária", "marmita", "frete") e tolera erro
+de digitação — "materal" vira `MATERIAL`, pelo mesmo mecanismo que reconhece
+"pedrero" como Pedreiro.
+
+**O que você escreveu ganha da IA. Sempre.** A leitura da imagem acontece,
+mas só preenche buraco — nunca corrige quem digitou. Lançar 1.500 porque o
+modelo leu errado, num campo onde você escreveu 1.800, é o erro que ninguém
+percebe até fechar o mês. Por isso o envio marca cada valor como *digitado*
+ou *lido da imagem*, e a resposta avisa só no segundo caso.
+
+**A data do lançamento é a do envio**, não a que a IA leu no papel — manda-se
+o comprovante no dia em que se pagou. A data lida do papel vai junto como
+`dataComprovante`, para quem aprova ver se as duas batem.
+
+A resposta repete o que ele **entendeu**, não o que recebeu:
+
+```
+✅ Comprovante recebido. Você tem 3 esperando lançamento.
+Bastos Tsuya · tijolos e areia · material · R$ 2.500,00
+```
+
+É a sua chance de ver que a obra saiu errada enquanto ainda lembra do gasto.
+
 Três regras que não se negociam:
 
 - **Lista de autorizados.** Sem ela, qualquer um lança no financeiro.
@@ -101,12 +140,21 @@ Três regras que não se negociam:
 | Token | `OBRAS_API_TOKEN`, gerado em "Enviar pelo iPhone" (`/m/atalho`). Só cria comprovante — não lê, não lança, não aprova. |
 | Cabeçalho | `Idempotency-Key: <id da mensagem>` |
 
-**Lacuna conhecida:** o endpoint aceita só `arquivo` e `texto`. Enquanto for
-assim, a IA escreve o resumo (`Posto Ipiranga · R$ 250,00 · 28/08`) no texto,
-e a pessoa lê e digita o valor — ganha-se a foto no lugar certo, não o
-preenchimento. O robô **já manda** `valor`, `data`, `categoria` e o resto como
-campos extras, que o servidor ignora sem erro; quando o DTO do outro lado
-aceitá-los, o formulário passa a abrir preenchido sem mexer aqui.
+**Lacuna conhecida, e é ela que separa "quase pronto" de "pronto":** o
+endpoint aceita só `arquivo` e `texto`. Enquanto for assim, tudo vira aquela
+linha de texto na caixa, e **você ainda digita obra, tipo e valor** — ganha-se
+a foto no lugar certo com a informação do lado, não o preenchimento.
+
+O robô **já manda** `obra`, `descricao`, `categoria`, `valor`, `data`,
+`dataComprovante`, `estabelecimento`, `documento`, `formaPagamento` e
+`confianca` como campos extras do multipart, que um servidor que não os
+conhece ignora sem erro. No dia em que o DTO e o modelo `ComprovanteRecebido`
+aceitarem esses campos, o formulário passa a abrir preenchido **sem mexer uma
+linha aqui**.
+
+Falta também um jeito de resolver a obra pelo título. O robô manda `obra`
+como texto (`"bastos tsuya"`); casar isso com a obra certa é do lado de lá,
+que é quem tem a lista — o token daqui só cria comprovante, não lê nada.
 
 ### Por qual canal
 

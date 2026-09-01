@@ -148,6 +148,9 @@ export async function conectar(aoReceber) {
             // Chat + mensagem, porque message_id só é único dentro do chat.
             // É o que garante a idempotência do envio ao sistema de obras.
             idMensagem: `tg:${msg.chat.id}:${msg.message_id}`,
+            // Data do envio, que é a do lançamento. Telegram manda em
+            // segundos.
+            enviadoEm: msg.date ? msg.date * 1000 : Date.now(),
           })
           if (resposta) await enviarPorTelegram(msg.chat.id, resposta, msg.message_id)
         } catch (e) {

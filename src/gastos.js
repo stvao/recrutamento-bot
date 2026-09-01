@@ -17,6 +17,7 @@
  */
 import { lerComprovante, visaoDisponivel } from './ia-visao.js'
 import { enviarComprovante, obrasConfigurado } from './obras-client.js'
+import { interpretar, combinar } from './lancamento.js'
 
 /**
  * Quem pode lançar.
@@ -106,29 +107,47 @@ function dataCurta(iso) {
 /**
  * O resumo que vai no campo `texto` do comprovante.
  *
- * Enquanto o endpoint aceitar só arquivo e texto livre, é esta linha que
- * aparece na caixa e permite a pessoa conferir sem abrir a foto. Quando ele
- * passar a aceitar valor/data/categoria, ela continua útil como descrição.
+ * Enquanto o endpoint aceitar só arquivo e texto livre, é ESTA linha que
+ * aparece na caixa de aprovação, e é por ela que a pessoa confere sem abrir
+ * a foto. Por isso ela é montada na ordem em que se lê um lançamento —
+ * obra, o que foi, tipo, quanto — e não na ordem em que os dados chegaram.
  */
-export function montarTexto(leitura, descricao) {
-  const partes = []
-  if (leitura?.estabelecimento) partes.push(leitura.estabelecimento)
-  if (leitura?.valor) partes.push(moeda(leitura.valor))
-  if (leitura?.data) partes.push(dataCurta(leitura.data))
-  if (leitura?.formaPagamento) partes.push(leitura.formaPagamento)
-
+export function montarTexto(dados, observacao) {
   const linhas = []
-  if (partes.length) linhas.push(partes.join(' · '))
-  if (descricao?.trim()) linhas.push(descricao.trim())
-  if (leitura?.observacao) linhas.push(`⚠ ${leitura.observacao}`)
-  if (leitura && leitura.confianca !== 'alta') {
-    linhas.push('(leitura automática incerta — confira o valor)')
+
+  const cabeca = [
+    dados?.obra,
+    dados?.descricao,
+    dados?.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
+    moeda(dados?.valor),
+  ].filter(Boolean)
+  if (cabeca.length) linhas.push(cabeca.join(' · '))
+
+  const detalhe = [
+    dados?.estabelecimento && dados.estabelecimento !== dados.descricao ? dados.estabelecimento : null,
+    dados?.formaPagamento,
+    dados?.documento ? `doc ${dados.documento}` : null,
+    dados?.dataComprovante ? `comprovante de ${dataCurta(dados.dataComprovante)}` : null,
+  ].filter(Boolean)
+  if (detalhe.length) linhas.push(detalhe.join(' · '))
+
+  if (observacao) linhas.push(`⚠ ${observacao}`)
+
+  // Só avisa quando o valor veio de máquina. Valor digitado por gente não
+  // precisa de aviso — e encher de alerta o que está certo faz a pessoa
+  // parar de ler os alertas.
+  if (dados?.valor != null && !dados.valorDigitado) {
+    linhas.push('(valor lido da imagem, não digitado — confira)')
   }
+  if (dados?.valor == null) {
+    linhas.push('(sem valor — precisa digitar)')
+  }
+
   return linhas.join('\n') || 'Comprovante enviado pelo WhatsApp.'
 }
 
 /** A resposta para quem mandou a foto. */
-function montarResposta(leitura, envio) {
+function montarResposta(dados, envio) {
   if (!envio.ok) {
     if (envio.status === 401) return '❌ Meu acesso ao sistema de obras foi recusado (token inválido ou revogado). Avisa quem cuida do sistema.'
     if (envio.status === 429) return '⏳ Muitos envios de uma vez. Manda esse de novo daqui a um minuto, por favor.'
@@ -143,14 +162,30 @@ function montarResposta(leitura, envio) {
   // o sistema de obras, não o robô.
   linhas.push(`✅ ${envio.mensagem || 'Comprovante recebido.'}`)
 
-  if (leitura?.valor) {
-    const detalhe = [leitura.estabelecimento, moeda(leitura.valor), dataCurta(leitura.data)]
-      .filter(Boolean).join(' · ')
-    linhas.push(detalhe)
-    if (leitura.confianca !== 'alta') linhas.push('⚠ Não consegui ler com certeza — confere o valor na hora de lançar.')
-  } else if (visaoDisponivel()) {
-    linhas.push('Não consegui ler o valor nesse aqui — vai precisar digitar na hora de lançar.')
+  // Repete o que ENTENDEU, e não o que recebeu.
+  //
+  // É a única chance de você perceber, no momento em que ainda lembra do
+  // gasto, que a obra saiu errada ou o valor veio torto. Descobrir isso na
+  // hora de aprovar, dias depois, custa a mesma conferência que se estava
+  // tentando evitar.
+  const resumo = [
+    dados?.obra,
+    dados?.descricao,
+    dados?.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
+    moeda(dados?.valor),
+  ].filter(Boolean)
+  if (resumo.length) linhas.push(resumo.join(' · '))
+
+  const faltando = []
+  if (!dados?.obra) faltando.push('a obra')
+  if (!dados?.valor) faltando.push('o valor')
+  if (!dados?.tipo) faltando.push('o tipo')
+  if (faltando.length) {
+    linhas.push(`Faltou ${faltando.join(' e ')} — dá para completar na hora de aprovar.`)
+  } else if (dados?.valor != null && !dados.valorDigitado) {
+    linhas.push('⚠ Esse valor eu li da imagem. Confere na hora de aprovar.')
   }
+
   return linhas.join('\n')
 }
 
@@ -185,7 +220,7 @@ export async function tratar(msg) {
     enviar(anterior.pendente).then(r => anterior.pendente.responder?.(r))
   }
 
-  const pendente = { de, arquivo, nomeArquivo, tipo, descricao: texto || null, idMensagem }
+  const pendente = { de, arquivo, nomeArquivo, tipo, descricao: texto || null, idMensagem, enviadoEm: msg.enviadoEm ?? Date.now() }
 
   // Legenda junto da foto: não há o que esperar.
   if (texto?.trim()) return enviar(pendente)
@@ -218,34 +253,55 @@ function completarDescricao(de, texto) {
   return null
 }
 
-/** Lê, envia e monta a resposta. */
+/** Interpreta, lê, envia e monta a resposta. */
 async function enviar(pendente) {
-  const { arquivo, nomeArquivo, tipo, descricao, idMensagem } = pendente
+  const { arquivo, nomeArquivo, tipo, descricao, idMensagem, enviadoEm } = pendente
 
-  // Se a leitura falhar, o comprovante vai assim mesmo: a foto no lugar
-  // certo, com a descrição de quem enviou, já economiza o trabalho de achar
-  // a imagem depois. A leitura é o bônus, não o requisito.
-  const leitura = await lerComprovante({ arquivo, tipo, descricao }).catch(() => null)
+  // O que a pessoa escreveu vem primeiro, e é o que vale.
+  const escrito = interpretar(descricao)
+
+  // A imagem é lida para preencher o que faltou e para conferência — nunca
+  // para corrigir quem digitou. Se a leitura falhar, o comprovante vai assim
+  // mesmo: a foto no lugar certo, com a linha que a pessoa escreveu, já
+  // resolve a maior parte. A leitura é o bônus, não o requisito.
+  const lido = await lerComprovante({ arquivo, tipo, descricao }).catch(() => null)
+  const dados = combinar(escrito, lido)
+
+  // A DATA do lançamento é a do envio, não a que a IA leu no papel.
+  //
+  // É o combinado, e é o que corresponde ao fluxo real: manda-se o
+  // comprovante no dia em que se pagou. A data lida do papel vai junto como
+  // `dataComprovante`, para quem aprova ver se as duas batem.
+  const data = new Date(enviadoEm ?? Date.now()).toISOString().slice(0, 10)
 
   const envio = await enviarComprovante({
     arquivo,
     nomeArquivo,
     tipo,
-    texto: montarTexto(leitura, descricao),
+    texto: montarTexto(dados, lido?.observacao),
     idMensagem,
-    extras: leitura ? {
-      valor: leitura.valor,
-      data: leitura.data,
-      categoria: leitura.categoria,
-      estabelecimento: leitura.estabelecimento,
-      documento: leitura.documento,
-      formaPagamento: leitura.formaPagamento,
-      confianca: leitura.confianca,
-    } : null,
+    extras: {
+      obra: dados.obra,
+      descricao: dados.descricao,
+      categoria: dados.tipo,
+      valor: dados.valor,
+      data,
+      dataComprovante: dados.dataComprovante,
+      estabelecimento: dados.estabelecimento,
+      documento: dados.documento,
+      formaPagamento: dados.formaPagamento,
+      // "digitado" quer dizer que uma pessoa escreveu o valor. É a diferença
+      // entre um número em que se pode confiar e um que precisa de conferência.
+      confianca: dados.confianca,
+    },
   })
 
-  console.log(`[gastos] ${pendente.de} → ${envio.ok ? `ok (${moeda(leitura?.valor) ?? 'sem valor lido'})` : `falhou: ${envio.motivo}`}`)
-  return montarResposta(leitura, envio)
+  console.log(
+    `[gastos] ${pendente.de} → ${envio.ok ? 'ok' : `falhou: ${envio.motivo}`}`
+    + ` | obra=${dados.obra ?? '?'} tipo=${dados.tipo ?? '?'} valor=${moeda(dados.valor) ?? '?'}`
+    + ` (${dados.valorDigitado ? 'digitado' : 'lido da imagem'})`,
+  )
+  return montarResposta(dados, envio)
 }
 
 /** Só para teste: esquece as fotos seguradas. */
