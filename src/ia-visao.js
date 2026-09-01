@@ -21,22 +21,54 @@
 const CHAVE = process.env.GEMINI_API_KEY || ''
 
 /**
- * Modelo separado do da conversa, de propósito.
+ * Modelos de visão, em ordem de preferência.
  *
- * A conversa usa o `flash-lite`, rápido e barato porque só precisa escrever
- * texto. Ler valor em cupom amassado é outra tarefa: errar um dígito aqui
- * custa dinheiro, então vale o modelo maior. Trocável pelo .env.
+ * É uma LISTA, e não um modelo só, por uma razão medida na prática: o
+ * `gemini-flash-latest` passou a devolver 503 (sobrecarregado) e a leitura
+ * simplesmente parou de acontecer — em silêncio, porque a falha aqui é
+ * tratada como "segue sem resumo". Comprovante chegava sem valor nenhum e
+ * ninguém sabia por quê.
+ *
+ * Modelo indisponível é condição normal na cota gratuita, não exceção. Com a
+ * lista, um 503 no primeiro só custa ir para o segundo.
+ *
+ * A ordem é de propósito: o melhor primeiro, e um `lite` no fim — leitura
+ * pior é melhor que leitura nenhuma.
  */
-const MODELO = process.env.IA_VISAO_MODELO || 'gemini-flash-latest'
-const ENDPOINT = process.env.IA_VISAO_ENDPOINT
-  || `https://generativelanguage.googleapis.com/v1beta/models/${MODELO}:generateContent`
+const MODELOS = (process.env.IA_VISAO_MODELO || process.env.IA_VISAO_MODELOS
+  || 'gemini-flash-latest,gemini-3.5-flash,gemini-flash-lite-latest')
+  .split(',').map(m => m.trim()).filter(Boolean)
 
-/** Ler imagem demora mais que escrever frase — o prazo da conversa é curto demais. */
-const PRAZO_MS = Number(process.env.IA_VISAO_PRAZO_MS || 20000)
-const TENTATIVAS = Number(process.env.IA_VISAO_TENTATIVAS || 2)
+const ENDPOINT_FIXO = process.env.IA_VISAO_ENDPOINT || null
+
+function enderecoDe(modelo) {
+  return ENDPOINT_FIXO
+    || `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`
+}
+
+/**
+ * Quanto esperar por modelo.
+ *
+ * Medido contra a cota gratuita: uma leitura de comprovante leva de 15 a 25
+ * segundos quando o serviço está carregado. O prazo era 20s e cortava
+ * leitura boa no meio. Quem mandou a foto no grupo aceita esperar meio
+ * minuto pela confirmação; o que ele não aceita é o valor vir vazio.
+ */
+const PRAZO_MS = Number(process.env.IA_VISAO_PRAZO_MS || 35000)
+
+/**
+ * Quantos modelos tentar. Não é "quantas vezes o mesmo": repetir no modelo
+ * que acabou de responder 503 não muda nada — trocar de modelo, sim.
+ */
+const TENTATIVAS = Number(process.env.IA_VISAO_TENTATIVAS || MODELOS.length)
 
 export function visaoDisponivel() {
   return Boolean(CHAVE)
+}
+
+/** Diagnóstico: quais modelos estão na fila. */
+export function modelosDeVisao() {
+  return [...MODELOS]
 }
 
 /**
@@ -47,8 +79,8 @@ export function visaoDisponivel() {
  * exatamente o trabalho que se quer tirar dela.
  */
 export const CATEGORIAS = [
-  'COMBUSTIVEL', 'MATERIAL', 'ALIMENTACAO', 'FERRAMENTA', 'TRANSPORTE',
-  'MAO_DE_OBRA', 'HOSPEDAGEM', 'MANUTENCAO', 'TAXA', 'OUTROS',
+  'COMBUSTIVEL', 'MATERIAL', 'ALIMENTACAO', 'FERRAMENTA', 'LOCACAO',
+  'TRANSPORTE', 'MAO_DE_OBRA', 'HOSPEDAGEM', 'MANUTENCAO', 'TAXA', 'OUTROS',
 ]
 
 const ESQUEMA = {
@@ -91,7 +123,10 @@ CATEGORIA, pelo que foi comprado:
 - COMBUSTIVEL: posto, gasolina, diesel, etanol, arla
 - MATERIAL: cimento, areia, tijolo, tinta, madeira, material elétrico/hidráulico
 - ALIMENTACAO: restaurante, mercado, padaria, marmita, água, café
-- FERRAMENTA: compra ou aluguel de ferramenta e equipamento
+- FERRAMENTA: COMPRA de ferramenta ou equipamento
+- LOCACAO: ALUGUEL de equipamento — bomba de concreto, betoneira, andaime,
+  escoramento, caçamba, guincho, gerador, container. Se foi alugado e não
+  comprado, é LOCACAO.
 - TRANSPORTE: frete, pedágio, estacionamento, passagem, aplicativo
 - MAO_DE_OBRA: pagamento a prestador, diária, empreita
 - HOSPEDAGEM: hotel, pousada, aluguel de alojamento
@@ -110,15 +145,21 @@ CATEGORIA, pelo que foi comprado:
 export async function lerComprovante({ arquivo, tipo, descricao }) {
   if (!CHAVE) return null
 
-  for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
-    const r = await umaTentativa({ arquivo, tipo, descricao })
-    if (r) return r
-    if (tentativa < TENTATIVAS) console.warn(`[ia-visao] tentando de novo (${tentativa + 1}/${TENTATIVAS})`)
+  const quantos = Math.min(TENTATIVAS, MODELOS.length)
+  for (let i = 0; i < quantos; i++) {
+    const modelo = MODELOS[i]
+    const r = await umaTentativa({ arquivo, tipo, descricao, modelo })
+    if (r) {
+      if (i > 0) console.log(`[ia-visao] leitura veio do modelo reserva "${modelo}"`)
+      return r
+    }
+    if (i + 1 < quantos) console.warn(`[ia-visao] "${modelo}" não respondeu — tentando "${MODELOS[i + 1]}"`)
   }
+  console.warn('[ia-visao] nenhum modelo respondeu — o comprovante segue sem leitura da imagem.')
   return null
 }
 
-async function umaTentativa({ arquivo, tipo, descricao }) {
+async function umaTentativa({ arquivo, tipo, descricao, modelo }) {
   const partes = [
     { inline_data: { mime_type: tipo || 'image/jpeg', data: Buffer.from(arquivo).toString('base64') } },
   ]
@@ -146,7 +187,7 @@ async function umaTentativa({ arquivo, tipo, descricao }) {
   try {
     const controle = new AbortController()
     const prazo = setTimeout(() => controle.abort(), PRAZO_MS)
-    const r = await fetch(`${ENDPOINT}?key=${CHAVE}`, {
+    const r = await fetch(`${enderecoDe(modelo)}?key=${CHAVE}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(corpo),
@@ -155,8 +196,14 @@ async function umaTentativa({ arquivo, tipo, descricao }) {
     clearTimeout(prazo)
 
     if (!r.ok) {
-      const nivel = r.status === 429 ? 'cota esgotada' : `HTTP ${r.status}`
-      console.warn(`[ia-visao] ${nivel} — comprovante segue sem resumo.`)
+      // 503 = modelo sobrecarregado, 429 = cota do dia, 404 = modelo que não
+      // existe mais. Nenhum é erro de programação, e nenhum melhora
+      // insistindo no MESMO modelo — quem chama passa para o próximo.
+      const nivel = r.status === 429 ? 'cota esgotada'
+        : r.status === 503 ? 'modelo sobrecarregado'
+        : r.status === 404 ? 'modelo não existe'
+        : `HTTP ${r.status}`
+      console.warn(`[ia-visao] "${modelo}": ${nivel}`)
       return null
     }
 
@@ -166,7 +213,8 @@ async function umaTentativa({ arquivo, tipo, descricao }) {
 
     return conferir(JSON.parse(texto))
   } catch (e) {
-    console.warn('[ia-visao] indisponível:', e.name === 'AbortError' ? `demorou mais de ${PRAZO_MS}ms` : e.message)
+    console.warn(`[ia-visao] "${modelo}" indisponível:`, e.name === 'AbortError' || e.name === 'TimeoutError'
+      ? `demorou mais de ${PRAZO_MS}ms` : e.message)
     return null
   }
 }

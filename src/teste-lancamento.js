@@ -5,7 +5,10 @@
  * separada por vírgula. Uma divisão ingênua parte o valor no meio e lança
  * 2.500 como "2" — erro que ninguém percebe até fechar o mês.
  */
-import { interpretar, acharValor, acharTipo, combinar } from './lancamento.js'
+import { interpretar, acharValor, acharTipo, acharNaFrase, combinar } from './lancamento.js'
+
+/** As obras de verdade, como estão no .env de produção. */
+const OBRAS = ['Bastos Tsuya', 'Bastos', 'Peruíbe', 'Caraguatatuba', 'Praia Grande', 'Buritama', 'Pereiras', 'Itapevi']
 
 let falhas = 0
 function ok(desc, cond) {
@@ -108,6 +111,75 @@ ok('e avisa que esse valor não foi digitado', meio.valorDigitado === false)
 // Sem IA nenhuma (leitura falhou), o que foi escrito basta.
 const semIA = combinar(escrito, null)
 ok('funciona sem a IA', semIA.valor === 1800 && semIA.obra === 'bastos tsuya')
+
+// ── Legendas REAIS, escritas sem vírgula ──────────────────────────────────
+// Estas duas vieram do primeiro uso de verdade. O nome da obra está no
+// COMEÇO de uma e no FIM da outra — não há como separar isso de texto
+// corrido sem saber quais obras existem, e é por isso que a lista entra.
+{
+  const a = interpretar('Bastos Tsuya bomba para concreto locação 1.400,00', OBRAS)
+  ok('real 1: acha a obra no começo', a.obra === 'Bastos Tsuya')
+  ok('real 1: "locação" é o tipo', a.tipo === 'LOCACAO')
+  ok('real 1: a descrição sobrevive inteira', a.descricao === 'bomba para concreto')
+  ok('real 1: o valor sai certo', a.valor === 1400)
+
+  const b = interpretar('bombeamento de concreto bastos tsuya', OBRAS)
+  ok('real 2: acha a obra no FIM', b.obra === 'Bastos Tsuya')
+  ok('real 2: deduz LOCACAO de "bombeamento"', b.tipo === 'LOCACAO')
+  ok('real 2: a descrição sobrevive inteira', b.descricao === 'bombeamento de concreto')
+  ok('real 2: sem valor na legenda, fica nulo p/ a IA preencher', b.valor === null)
+}
+
+// A obra mais longa ganha da mais curta: "Bastos Tsuya" e "Bastos" são obras
+// diferentes, e casar a errada manda o custo para o lugar errado.
+{
+  const r = interpretar('Bastos Tsuya cimento 100', OBRAS)
+  ok('a obra mais específica ganha', r.obra === 'Bastos Tsuya')
+  const r2 = interpretar('Bastos cimento 100', OBRAS)
+  ok('e a curta ainda é reconhecida sozinha', r2.obra === 'Bastos')
+}
+
+// Nome de obra com acento e caixa diferente do .env
+ok('obra sem acento é reconhecida', interpretar('peruibe andaime 300', OBRAS).obra === 'Peruíbe')
+ok('obra em maiúscula é reconhecida', interpretar('PRAIA GRANDE marmita 90', OBRAS).obra === 'Praia Grande')
+
+// ── Classificador sai da frase; pista fica ────────────────────────────────
+// Tratar os dois iguais arrancava "tijolos" da descrição como se fosse a
+// classificação, e sobrava "e areia".
+{
+  const r = interpretar('bastos tsuya, tijolos e areia, material, 2500,00', OBRAS)
+  ok('classificador "material" sai da descrição', r.descricao === 'tijolos e areia')
+  ok('e vira o tipo', r.tipo === 'MATERIAL')
+
+  const r2 = interpretar('caraguatatuba 20 sacos de cimento 1.240,50', OBRAS)
+  ok('pista "cimento" FICA na descrição', r2.descricao === '20 sacos de cimento')
+  ok('e ainda assim define o tipo', r2.tipo === 'MATERIAL')
+}
+
+// ── Locação é um tipo próprio ─────────────────────────────────────────────
+ok('"locacao" é classificador', acharTipo('locacao') === 'LOCACAO')
+ok('"aluguel" também', acharTipo('aluguel') === 'LOCACAO')
+ok('"betoneira" leva a LOCACAO', acharTipo('betoneira') === 'LOCACAO')
+ok('"andaime" leva a LOCACAO', acharTipo('andaime') === 'LOCACAO')
+
+// ── A busca por janela de palavras ────────────────────────────────────────
+{
+  const r = acharNaFrase('nota fiscal praia grande urgente', ['Praia Grande', 'Bastos'])
+  ok('acha o nome no meio da frase', r.achado === 'Praia Grande')
+  ok('e devolve o resto sem ele', r.resto === 'nota fiscal urgente')
+
+  ok('não inventa quando não tem', acharNaFrase('nota fiscal', ['Bastos']).achado === null)
+  ok('lista vazia não quebra', acharNaFrase('qualquer coisa', []).achado === null)
+  ok('texto vazio não quebra', acharNaFrase('', ['Bastos']).achado === null)
+}
+
+// Sem a lista de obras, texto corrido NÃO chuta um nome de obra: melhor
+// admitir que não sabe do que mandar o custo para a obra errada.
+{
+  const semLista = interpretar('bombeamento de concreto bastos tsuya', [])
+  ok('sem a lista, não inventa obra em texto corrido', semLista.obra === null)
+  ok('mas guarda tudo na descrição', semLista.descricao?.includes('bastos tsuya'))
+}
 
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)

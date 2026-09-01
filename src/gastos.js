@@ -100,6 +100,23 @@ const GRUPOS_NORM = new Set([...GRUPOS].map(g => norm(g)))
  */
 const ESPERA_DESCRICAO_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 60000)
 
+/**
+ * Os nomes das obras.
+ *
+ * Sem eles não há como achar a obra numa legenda escrita corrido: em
+ * "bombeamento de concreto bastos tsuya" o nome está no fim, e em "Bastos
+ * Tsuya bomba para concreto" está no começo. Chutar posição produz "Bomba
+ * Para" como obra.
+ *
+ * Fica no .env por ora, e é uma solução provisória com prazo: a fonte certa
+ * é o próprio sistema de obras, como as vagas vêm do RH em catalogo.js. Só
+ * que o token daqui é restrito a criar comprovante — não lê nada. Quando
+ * existir um endpoint de leitura, esta lista vira reserva local, e o
+ * comentário de catalogo.js explica por que vale manter uma.
+ */
+const OBRAS = (process.env.GASTOS_OBRAS || '')
+  .split(',').map(o => o.trim()).filter(Boolean)
+
 /** telefone -> { pendente, prazo } — foto segurada esperando descrição. */
 const aguardando = new Map()
 
@@ -150,6 +167,7 @@ export function situacao() {
       : `${AUTORIZADOS.size} número(s) na lista`,
     leituraPorIA: visaoDisponivel(),
     obras: obrasConfigurado(),
+    obrasConhecidas: OBRAS.length ? OBRAS : 'nenhuma — a obra não será reconhecida em texto corrido',
   }
 }
 
@@ -361,13 +379,17 @@ async function enviar(pendente) {
   const { arquivo, nomeArquivo, tipo, descricao, idMensagem, enviadoEm } = pendente
 
   // O que a pessoa escreveu vem primeiro, e é o que vale.
-  const escrito = interpretar(descricao)
+  const escrito = interpretar(descricao, OBRAS)
 
   // A imagem é lida para preencher o que faltou e para conferência — nunca
   // para corrigir quem digitou. Se a leitura falhar, o comprovante vai assim
   // mesmo: a foto no lugar certo, com a linha que a pessoa escreveu, já
   // resolve a maior parte. A leitura é o bônus, não o requisito.
   const lido = await lerComprovante({ arquivo, tipo, descricao }).catch(() => null)
+  // O que a IA viu vai para o log inteiro. Quando o valor vem vazio, a
+  // pergunta é sempre "ela leu e não achou, ou nem chegou a rodar?" — e sem
+  // esta linha não havia como responder.
+  console.log('[gastos] leitura da imagem:', lido ? JSON.stringify(lido) : 'nenhuma')
   const dados = combinar(escrito, lido)
 
   // A DATA do lançamento é a do envio, não a que a IA leu no papel.

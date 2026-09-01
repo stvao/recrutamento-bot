@@ -16,6 +16,16 @@
  * A ordem dos campos é livre e tudo é opcional. O que der para identificar
  * com certeza é identificado; o resto vira descrição, e a pessoa completa na
  * hora de aprovar — que é onde ela já está de qualquer jeito.
+ *
+ * E a vírgula também é opcional. Na prática ninguém escreve tão arrumado:
+ *
+ *   Bastos Tsuya bomba para concreto locação 1.400,00
+ *   bombeamento de concreto bastos tsuya
+ *
+ * Nos dois a obra é "Bastos Tsuya" — no começo de um, no fim do outro. Não
+ * há como separar isso de um texto corrido sem SABER quais obras existem,
+ * e é por isso que a lista de obras entra aqui. Com ela, procura-se cada
+ * nome conhecido em qualquer posição da frase; o que sobra é a descrição.
  */
 import { norm, melhorMatch } from './texto.js'
 import { CATEGORIAS } from './ia-visao.js'
@@ -31,7 +41,10 @@ const TERMOS = {
   COMBUSTIVEL: ['combustivel', 'gasolina', 'diesel', 'etanol', 'alcool', 'posto', 'arla', 'abastecimento'],
   MATERIAL: ['material', 'materiais', 'cimento', 'areia', 'tijolo', 'tijolos', 'brita', 'tinta', 'madeira', 'ferro', 'eletrico', 'hidraulico'],
   ALIMENTACAO: ['alimentacao', 'comida', 'almoco', 'marmita', 'refeicao', 'lanche', 'mercado', 'padaria', 'agua', 'cafe'],
-  FERRAMENTA: ['ferramenta', 'ferramentas', 'equipamento', 'aluguel de ferramenta', 'epi'],
+  FERRAMENTA: ['ferramenta', 'ferramentas', 'equipamento', 'epi', 'furadeira', 'serra'],
+  LOCACAO: ['locacao', 'locacoes', 'aluguel', 'alugado', 'alugada', 'bomba', 'bombeamento',
+    'betoneira', 'andaime', 'andaimes', 'escoramento', 'cacamba', 'guincho', 'gerador',
+    'container', 'compactador', 'placa vibratoria', 'bomba para concreto'],
   TRANSPORTE: ['transporte', 'frete', 'pedagio', 'estacionamento', 'passagem', 'uber', 'onibus'],
   MAO_DE_OBRA: ['mao de obra', 'maodeobra', 'diaria', 'diarias', 'empreita', 'empreiteiro', 'pagamento', 'servico', 'prestador'],
   HOSPEDAGEM: ['hospedagem', 'hotel', 'pousada', 'alojamento', 'estadia'],
@@ -102,6 +115,88 @@ export function acharTipo(pedaco) {
 }
 
 /**
+ * Procura um dos nomes conhecidos dentro de um texto corrido.
+ *
+ * Compara JANELAS DE PALAVRAS, e não o texto todo: "bomba para concreto
+ * bastos tsuya" precisa casar "bastos tsuya" mesmo cercado de outras
+ * palavras. A janela mais longa ganha, para "Bastos Tsuya" vencer "Bastos"
+ * quando as duas obras existem.
+ *
+ * Devolve o que achou e as palavras que sobraram — quem chama precisa das
+ * duas coisas, senão o nome da obra apareceria de novo na descrição.
+ */
+export function acharNaFrase(texto, conhecidos, { tolerante = true } = {}) {
+  const palavras = (texto || '').split(/\s+/).filter(Boolean)
+  if (!palavras.length || !conhecidos?.length) return { achado: null, resto: texto ?? '' }
+
+  const alvos = conhecidos.map(c => ({ original: c, limpo: norm(c) })).filter(a => a.limpo)
+  const maxJanela = Math.min(4, palavras.length)
+
+  for (let tamanho = maxJanela; tamanho >= 1; tamanho--) {
+    for (let i = 0; i + tamanho <= palavras.length; i++) {
+      const janela = norm(palavras.slice(i, i + tamanho).join(' '))
+      if (!janela) continue
+
+      let alvo = alvos.find(a => a.limpo === janela)
+
+      // Tolerância a erro de escrita só em janela de UMA palavra: aplicada a
+      // frases inteiras, ela casa qualquer coisa com qualquer coisa.
+      if (!alvo && tolerante && tamanho === 1) {
+        const perto = melhorMatch(janela, alvos.map(a => ({ valor: a.original, termos: [a.original] })))
+        if (perto) alvo = alvos.find(a => a.original === perto)
+      }
+
+      if (alvo) {
+        const resto = [...palavras.slice(0, i), ...palavras.slice(i + tamanho)].join(' ').trim()
+        return { achado: alvo.original, resto }
+      }
+    }
+  }
+  return { achado: null, resto: texto ?? '' }
+}
+
+/**
+ * Dois vocabulários, e confundi-los estraga a descrição.
+ *
+ * CLASSIFICADORES são as palavras que a pessoa escreve para DIZER o tipo:
+ * "material", "locação", "mão de obra". Elas são o campo, então saem da
+ * frase depois de reconhecidas — repetir "material" na descrição não
+ * acrescenta nada.
+ *
+ * TERMOS (acima) são PISTAS: "cimento", "tijolos", "bomba", "gasolina".
+ * Elas dizem qual é o tipo, mas são a descrição do gasto e ficam onde estão.
+ *
+ * Tratar as duas iguais foi um erro real: "bastos tsuya, tijolos e areia,
+ * material" virava descrição "e areia", porque "tijolos" tinha sido
+ * arrancado como se fosse a classificação.
+ */
+const CLASSIFICADORES = {
+  COMBUSTIVEL: ['combustivel', 'combustiveis'],
+  MATERIAL: ['material', 'materiais'],
+  ALIMENTACAO: ['alimentacao', 'refeicao', 'alimentacoes'],
+  FERRAMENTA: ['ferramenta', 'ferramentas'],
+  LOCACAO: ['locacao', 'locacoes', 'aluguel', 'alugado', 'alugada'],
+  TRANSPORTE: ['transporte', 'frete'],
+  MAO_DE_OBRA: ['mao de obra', 'maodeobra', 'mao-de-obra', 'servico', 'servicos'],
+  HOSPEDAGEM: ['hospedagem'],
+  MANUTENCAO: ['manutencao'],
+  TAXA: ['taxa', 'taxas', 'imposto', 'impostos'],
+  OUTROS: ['outros'],
+}
+
+const TODOS_OS_CLASSIFICADORES = Object.entries(CLASSIFICADORES)
+  .flatMap(([cat, ts]) => ts.map(t => ({ termo: t, cat })))
+
+/** Sobras de preposição no começo da descrição, depois de tirar uma palavra. */
+function limparBordas(t) {
+  return (t || '')
+    .replace(/^\s*(de|da|do|para|pra|por|com|em|e)\s+/i, '')
+    .replace(/\s*,\s*$/, '')
+    .replace(/^\s*,\s*/, '')
+    .trim()
+}
+
+/**
  * Interpreta a linha inteira.
  *
  * Devolve sempre um objeto — linha vazia ou incompreensível dá todos os
@@ -109,54 +204,63 @@ export function acharTipo(pedaco) {
  * Nunca recusa um comprovante por não entender o texto: a foto no lugar
  * certo já vale, e quem aprova completa o que faltar.
  */
-export function interpretar(texto) {
+export function interpretar(texto, obras = []) {
   const vazio = { obra: null, descricao: null, tipo: null, valor: null, textoOriginal: texto ?? null }
   if (!texto?.trim()) return vazio
 
   const { valor, resto } = acharValor(texto)
 
-  const pedacos = resto.split(/[,;\n]|\s+[-–—]\s+/).map(p => p.trim()).filter(Boolean)
-  if (!pedacos.length) return { ...vazio, valor }
+  // A linha foi escrita no formato com separador, ou é texto corrido?
+  //
+  // Isto muda o que se pode supor. Com separador vale a convenção
+  // documentada — o primeiro campo é a obra —, mesmo que só sobre um campo
+  // depois de tirar o valor e o tipo ("bastos tsuya, combustivel, 300").
+  // Em texto corrido, supor posição produziria "Bomba Para" como obra.
+  const temSeparador = /[,;\n]|\s+[-–—]\s+/.test(resto)
 
-  // O tipo pode estar em qualquer posição, e é o único campo com vocabulário
-  // conhecido — então acha-se ele primeiro e o que sobra se acomoda em volta.
-  let tipo = null
-  let ondeTipo = -1
-  for (let i = 0; i < pedacos.length; i++) {
-    const limpo = norm(pedacos[i])
+  // 1) A OBRA, por nome conhecido, em qualquer posição da frase.
+  //
+  // Vem primeiro porque é o campo mais específico: nome de obra é próprio, e
+  // deixar para depois faria "Bastos" ser consumido como outra coisa.
+  const porNome = acharNaFrase(resto, obras)
+  let obra = porNome.achado
+  let sobra = porNome.resto
 
-    // O pedaço é EXATAMENTE o nome de um tipo ("material", "mao de obra")?
-    // Então é o campo do tipo, não importa quantas palavras tenha.
-    if (TERMO_EXATO.has(limpo)) {
-      tipo = TERMO_EXATO.get(limpo)
-      ondeTipo = i
-      break
-    }
+  // 2) O TIPO, quando a pessoa o ESCREVEU ("material", "locação").
+  //
+  //    Só o classificador sai da frase. As pistas ("cimento", "bomba") ficam,
+  //    porque elas são a descrição do gasto.
+  const porTipo = acharNaFrase(sobra, TODOS_OS_CLASSIFICADORES.map(t => t.termo), { tolerante: false })
+  let tipo = porTipo.achado
+    ? TODOS_OS_CLASSIFICADORES.find(t => t.termo === porTipo.achado)?.cat ?? null
+    : null
+  if (tipo) sobra = porTipo.resto
 
-    // Senão, aceita parecido — mas só em pedaço CURTO. "tijolos e areia"
-    // casaria com MATERIAL, e ali é a descrição do que foi comprado, não a
-    // classificação: consumir esse pedaço apagaria o que a pessoa escreveu.
-    const achado = acharTipo(pedacos[i])
-    if (achado && limpo.split(' ').length <= 2) {
-      tipo = achado
-      ondeTipo = i
-      break
+  // 3) O que sobrou vira descrição — separadores viram espaço, porque a
+  //    vírgula já cumpriu o papel dela ou nunca existiu.
+  let descricao = limparBordas(
+    sobra.split(/[,;\n]|\s+[-–—]\s+/).map(p => limparBordas(p)).filter(Boolean).join(', '),
+  ) || null
+
+  // 4) Obra não reconhecida, mas a linha veio separada por vírgula: então
+  //    vale a convenção documentada, e o primeiro pedaço é a obra.
+  //
+  //    Só nesse caso. Em texto corrido, chutar que as primeiras palavras são
+  //    o nome da obra produziria "Bomba Para" como obra — pior que admitir
+  //    que não sabe e deixar a pessoa escolher.
+  if (!obra && temSeparador) {
+    const pedacos = sobra.split(/[,;\n]|\s+[-–—]\s+/).map(p => p.trim()).filter(Boolean)
+    if (pedacos.length) {
+      obra = pedacos[0]
+      descricao = pedacos.slice(1).map(limparBordas).filter(Boolean).join(', ') || null
     }
   }
 
-  const sobrou = pedacos.filter((_, i) => i !== ondeTipo)
+  // 5) Última tentativa para o tipo: pelo que a descrição diz ("tijolos e
+  //    areia" → MATERIAL). É palpite, e por isso só depois de tudo falhar.
+  if (!tipo) tipo = acharTipo(descricao ?? '')
 
-  // Primeiro pedaço é a obra: é assim que a linha é escrita, e a obra é o
-  // campo que o sistema de obras precisa para saber onde lançar.
-  const obra = sobrou[0] ?? null
-  const descricao = sobrou.slice(1).join(', ') || null
-
-  // Nenhuma categoria reconhecida, mas há descrição: tenta achar o tipo
-  // dentro dela ("tijolos e areia" → MATERIAL). É palpite, e por isso só
-  // acontece depois de o campo próprio ter falhado.
-  const tipoFinal = tipo ?? acharTipo(descricao ?? '')
-
-  return { obra, descricao, tipo: tipoFinal, valor, textoOriginal: texto }
+  return { obra, descricao, tipo, valor, textoOriginal: texto }
 }
 
 /**
