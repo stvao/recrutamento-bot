@@ -41,7 +41,8 @@ const TERMOS = {
   COMBUSTIVEL: ['combustivel', 'gasolina', 'diesel', 'etanol', 'alcool', 'posto', 'arla', 'abastecimento'],
   MATERIAL: ['material', 'materiais', 'cimento', 'areia', 'tijolo', 'tijolos', 'brita', 'tinta', 'madeira', 'ferro', 'eletrico', 'hidraulico'],
   ALIMENTACAO: ['alimentacao', 'comida', 'almoco', 'marmita', 'refeicao', 'lanche', 'mercado', 'padaria', 'agua', 'cafe'],
-  FERRAMENTA: ['ferramenta', 'ferramentas', 'equipamento', 'epi', 'furadeira', 'serra'],
+  FERRAMENTAS: ['ferramenta', 'ferramentas', 'equipamento', 'furadeira', 'serra', 'marreta'],
+  EPI: ['epi', 'capacete', 'bota', 'botina', 'luva', 'luvas', 'oculos', 'cinto', 'uniforme', 'protetor'],
   LOCACAO: ['locacao', 'locacoes', 'aluguel', 'alugado', 'alugada', 'bomba', 'bombeamento',
     'betoneira', 'andaime', 'andaimes', 'escoramento', 'cacamba', 'guincho', 'gerador',
     'container', 'compactador', 'placa vibratoria', 'bomba para concreto'],
@@ -49,8 +50,7 @@ const TERMOS = {
   MAO_DE_OBRA: ['mao de obra', 'maodeobra', 'diaria', 'diarias', 'empreita', 'empreiteiro', 'pagamento', 'servico', 'prestador'],
   HOSPEDAGEM: ['hospedagem', 'hotel', 'pousada', 'alojamento', 'estadia'],
   MANUTENCAO: ['manutencao', 'oficina', 'peca', 'pneu', 'revisao', 'conserto', 'mecanico'],
-  TAXA: ['taxa', 'cartorio', 'prefeitura', 'art', 'licenca', 'multa', 'imposto', 'guia'],
-  OUTROS: ['outros', 'outro', 'diverso', 'diversos'],
+  OUTRO: ['outro', 'outros', 'diverso', 'diversos', 'taxa', 'cartorio', 'licenca', 'multa'],
 }
 
 const OPCOES_TIPO = Object.entries(TERMOS).map(([valor, termos]) => ({ valor, termos }))
@@ -211,14 +211,14 @@ const CLASSIFICADORES = {
   COMBUSTIVEL: ['combustivel', 'combustiveis'],
   MATERIAL: ['material', 'materiais'],
   ALIMENTACAO: ['alimentacao', 'refeicao', 'alimentacoes'],
-  FERRAMENTA: ['ferramenta', 'ferramentas'],
+  FERRAMENTAS: ['ferramenta', 'ferramentas'],
+  EPI: ['epi'],
   LOCACAO: ['locacao', 'locacoes', 'aluguel', 'alugado', 'alugada'],
   TRANSPORTE: ['transporte', 'frete'],
   MAO_DE_OBRA: ['mao de obra', 'maodeobra', 'mao-de-obra', 'servico', 'servicos'],
   HOSPEDAGEM: ['hospedagem'],
   MANUTENCAO: ['manutencao'],
-  TAXA: ['taxa', 'taxas', 'imposto', 'impostos'],
-  OUTROS: ['outros'],
+  OUTRO: ['outro', 'outros', 'taxa', 'taxas'],
 }
 
 const TODOS_OS_CLASSIFICADORES = Object.entries(CLASSIFICADORES)

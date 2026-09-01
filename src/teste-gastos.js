@@ -105,7 +105,7 @@ ok('data boa passa', conferir({ valor: 10, data: '2026-08-28' }).data === '2026-
 
 ok('categoria inventada é descartada', conferir({ valor: 10, categoria: 'PIZZA' }).categoria === null)
 ok('categoria da lista passa', conferir({ valor: 10, categoria: 'MATERIAL' }).categoria === 'MATERIAL')
-ok('a lista de categorias existe', CATEGORIAS.includes('COMBUSTIVEL') && CATEGORIAS.includes('OUTROS'))
+ok('a lista de categorias existe', CATEGORIAS.includes('COMBUSTIVEL') && CATEGORIAS.includes('OUTRO'))
 
 // Sem valor legível não existe confiança alta, mesmo o modelo dizendo que sim.
 ok('sem valor, a confiança cai para baixa', conferir({ valor: 0, confianca: 'alta' }).confianca === 'baixa')

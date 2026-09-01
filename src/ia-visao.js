@@ -74,13 +74,18 @@ export function modelosDeVisao() {
 /**
  * As categorias que o sistema de obras conhece.
  *
- * Lista fechada de propósito: categoria inventada pelo modelo não casa com
- * nada do outro lado, e a pessoa teria que corrigir na mão — que é
+ * COPIADAS DE LÁ, não inventadas aqui — é a união das listas das telas
+ * /m/gasto e /m/gasto-campo do novagestao-obras. Antes eram parecidas mas
+ * não iguais ("FERRAMENTA" no lugar de "FERRAMENTAS", "OUTROS" no lugar de
+ * "OUTRO", uma "TAXA" que não existe do outro lado), e categoria que não
+ * casa não preenche nada: a pessoa teria que escolher na mão, que é
  * exatamente o trabalho que se quer tirar dela.
+ *
+ * Mexeu numa das telas de lá, confira esta lista.
  */
 export const CATEGORIAS = [
-  'COMBUSTIVEL', 'MATERIAL', 'ALIMENTACAO', 'FERRAMENTA', 'LOCACAO',
-  'TRANSPORTE', 'MAO_DE_OBRA', 'HOSPEDAGEM', 'MANUTENCAO', 'TAXA', 'OUTROS',
+  'MATERIAL', 'COMBUSTIVEL', 'ALIMENTACAO', 'TRANSPORTE', 'MAO_DE_OBRA',
+  'FERRAMENTAS', 'LOCACAO', 'EPI', 'HOSPEDAGEM', 'MANUTENCAO', 'OUTRO',
 ]
 
 const ESQUEMA = {
@@ -123,16 +128,17 @@ CATEGORIA, pelo que foi comprado:
 - COMBUSTIVEL: posto, gasolina, diesel, etanol, arla
 - MATERIAL: cimento, areia, tijolo, tinta, madeira, material elétrico/hidráulico
 - ALIMENTACAO: restaurante, mercado, padaria, marmita, água, café
-- FERRAMENTA: COMPRA de ferramenta ou equipamento
+- FERRAMENTAS: COMPRA de ferramenta ou equipamento
 - LOCACAO: ALUGUEL de equipamento — bomba de concreto, betoneira, andaime,
   escoramento, caçamba, guincho, gerador, container. Se foi alugado e não
   comprado, é LOCACAO.
+- EPI: capacete, bota, luva, óculos, cinto, protetor — equipamento de
+  proteção. Uniforme entra aqui.
 - TRANSPORTE: frete, pedágio, estacionamento, passagem, aplicativo
 - MAO_DE_OBRA: pagamento a prestador, diária, empreita
 - HOSPEDAGEM: hotel, pousada, aluguel de alojamento
 - MANUTENCAO: oficina, peça, pneu, revisão de veículo
-- TAXA: cartório, prefeitura, ART, licença, multa
-- OUTROS: só quando nenhuma das outras serve`
+- OUTRO: taxa, cartório, ART, licença, multa, e tudo que não couber acima`
 
 /**
  * Lê um comprovante e devolve o que conseguiu extrair.
