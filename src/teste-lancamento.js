@@ -5,7 +5,7 @@
  * separada por vírgula. Uma divisão ingênua parte o valor no meio e lança
  * 2.500 como "2" — erro que ninguém percebe até fechar o mês.
  */
-import { interpretar, acharValor, acharTipo, acharNaFrase, combinar } from './lancamento.js'
+import { interpretar, acharValor, acharTipo, acharNaFrase, apelidosDe, acharObra, combinar } from './lancamento.js'
 
 /** As obras de verdade, como estão no .env de produção. */
 const OBRAS = ['Bastos Tsuya', 'Bastos haia', 'Peruibe', 'Caraguatatuba', 'Praia Grande', 'Buritama', 'Pereiras', 'Itapevi']
@@ -219,6 +219,74 @@ ok('"andaime" leva a LOCACAO', acharTipo('andaime') === 'LOCACAO')
   ok('sem a lista, não inventa obra em texto corrido', semLista.obra === null)
   ok('mas guarda tudo na descrição', semLista.descricao?.includes('bastos tsuya'))
 }
+
+// ── Apelido: o nome que a pessoa REALMENTE escreve ────────────────────────
+// Os nomes cadastrados são o nome oficial da escola. Ninguém escreve isso no
+// WhatsApp — e comparar o nome inteiro por semelhança nunca casaria, porque a
+// diferença é grande demais.
+const REAIS = [
+  'EE DR FRANCISCO PEREIRA DA ROCHA',
+  'EE OSWALDO LUIZ SANCHES TOSCHI',
+  'EE PROFA TSUYA OHNO KIMURA',
+  'EE VER EGILDO PASCHOALUCCI',
+  'EE/ETEC AGUIA DE HAIA',
+  'Escola Ambiental - Itapevi',
+]
+
+{
+  const ap = apelidosDe(REAIS)
+  ok('"tsuya" vira apelido', ap.get('tsuya') === 'EE PROFA TSUYA OHNO KIMURA')
+  ok('"haia" vira apelido', ap.get('haia') === 'EE/ETEC AGUIA DE HAIA')
+  ok('"itapevi" vira apelido', ap.get('itapevi') === 'Escola Ambiental - Itapevi')
+
+  // "EE" está em cinco das seis: casaria com todas e apontaria para a errada.
+  ok('"ee" NÃO vira apelido', !ap.has('ee'))
+  ok('"escola" NÃO vira apelido', !ap.has('escola'))
+  ok('"profa" NÃO vira apelido', !ap.has('profa'))
+  ok('"de" NÃO vira apelido', !ap.has('de'))
+}
+
+// As legendas que ele escreve de verdade, contra os nomes de verdade.
+const reais = [
+  ['bastos haia bomba para concreto locação 1.400,00', 'EE/ETEC AGUIA DE HAIA'],
+  ['bombeamento de concreto bastos tsuya', 'EE PROFA TSUYA OHNO KIMURA'],
+  ['tsuya cimento 200', 'EE PROFA TSUYA OHNO KIMURA'],
+  ['haia marmita 90', 'EE/ETEC AGUIA DE HAIA'],
+  ['itapevi andaime 300', 'Escola Ambiental - Itapevi'],
+  ['toschi tijolos 500', 'EE OSWALDO LUIZ SANCHES TOSCHI'],
+  ['kimura areia 100', 'EE PROFA TSUYA OHNO KIMURA'],
+]
+for (const [linha, esperada] of reais) {
+  ok(`"${linha}" → ${esperada}`, interpretar(linha, REAIS).obra === esperada)
+}
+
+// Erro de escrita no apelido vale — mas só em apelido LONGO o bastante.
+ok('"tsuia" acha a obra', interpretar('tsuia cimento 10', REAIS).obra === 'EE PROFA TSUYA OHNO KIMURA')
+ok('"kimurra" acha a obra', interpretar('kimurra cimento 10', REAIS).obra === 'EE PROFA TSUYA OHNO KIMURA')
+
+// "haia" tem 4 letras, e apelido curto exige acerto exato. Numa palavra
+// dessas, uma letra trocada vira outra palavra válida — e casar errado
+// mandaria o custo para a obra errada, calado. Perguntar custa uma mensagem;
+// o erro custa o fechamento do mês.
+ok('apelido curto errado NÃO vira palpite', interpretar('haya cimento 10', REAIS).obra === null)
+
+// "bastos" é o nome da cidade, e não está em nome de obra nenhum: sozinho
+// não pode virar palpite, senão o custo iria para uma obra ao acaso.
+ok('"bastos" sozinho NÃO escolhe obra', interpretar('bastos cimento 100', REAIS).obra === null)
+
+// O nome completo, quando escrito, continua ganhando.
+ok('nome completo ainda casa', interpretar('EE PROFA TSUYA OHNO KIMURA cimento 50', REAIS).obra === 'EE PROFA TSUYA OHNO KIMURA')
+
+// E o resto da linha sobrevive ao apelido.
+{
+  const r = interpretar('haia bomba para concreto locação 1400', REAIS)
+  ok('apelido não come a descrição', r.descricao === 'bomba para concreto')
+  ok('apelido não come o tipo', r.tipo === 'LOCACAO')
+  ok('apelido não come o valor', r.valor === 1400)
+}
+
+// Sem obras conhecidas, não inventa apelido nenhum.
+ok('lista vazia não quebra', acharObra('qualquer coisa', []).achado === null)
 
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)

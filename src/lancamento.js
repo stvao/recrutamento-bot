@@ -22,10 +22,15 @@
  *   Bastos Tsuya bomba para concreto locação 1.400,00
  *   bombeamento de concreto bastos tsuya
  *
- * Nos dois a obra é "Bastos Tsuya" — no começo de um, no fim do outro. Não
- * há como separar isso de um texto corrido sem SABER quais obras existem,
- * e é por isso que a lista de obras entra aqui. Com ela, procura-se cada
- * nome conhecido em qualquer posição da frase; o que sobra é a descrição.
+ * Nos dois a obra é a mesma — no começo de um, no fim do outro. Não há como
+ * separar isso de um texto corrido sem SABER quais obras existem, e é por
+ * isso que a lista de obras entra aqui. Com ela, procura-se cada nome
+ * conhecido em qualquer posição da frase; o que sobra é a descrição.
+ *
+ * E ninguém escreve o nome cadastrado. A obra chamada "EE PROFA TSUYA OHNO
+ * KIMURA" é "bastos tsuya" no WhatsApp, e "EE/ETEC AGUIA DE HAIA" é "bastos
+ * haia". Por isso vale também o APELIDO: uma palavra que só exista naquela
+ * obra a identifica sozinha. Ver apelidosDe().
  */
 import { norm, melhorMatch, distancia } from './texto.js'
 import { CATEGORIAS } from './ia-visao.js'
@@ -193,6 +198,74 @@ function toleranciaDe(nome) {
 }
 
 /**
+ * Palavras que aparecem em quase todo nome de obra e não identificam nada.
+ *
+ * "EE" está em cinco das seis; "escola", "prof", "dr" no mesmo caso. Elas
+ * seriam casadas por qualquer coisa e apontariam para a obra errada.
+ */
+const GENERICAS = new Set([
+  'ee', 'etec', 'em', 'emef', 'emei', 'escola', 'colegio', 'obra', 'obras',
+  'prof', 'profa', 'professor', 'professora', 'dr', 'dra', 'doutor', 'ver',
+  'vereador', 'de', 'da', 'do', 'das', 'dos', 'e', 'reforma', 'ampliacao',
+])
+
+/**
+ * O apelido de cada obra: a palavra que só existe nela.
+ *
+ * Nasceu de um caso real. Os nomes cadastrados são "EE PROFA TSUYA OHNO
+ * KIMURA" e "EE/ETEC AGUIA DE HAIA", mas ninguém escreve isso no WhatsApp —
+ * escreve "bastos tsuya" e "bastos haia". Comparar o nome inteiro por
+ * semelhança nunca casaria: a diferença é grande demais.
+ *
+ * Só que "tsuya" aparece em UMA obra, e "haia" também. Uma palavra que
+ * existe em um único nome identifica aquele nome sozinha, e é isso que se
+ * usa. Palavra repetida entre obras não vale nada e fica de fora — é o que
+ * impede "EE" de casar com cinco obras ao mesmo tempo.
+ *
+ * A vantagem sobre uma lista de apelidos no .env é não precisar de
+ * manutenção: obra nova entra no sistema e o apelido dela sai daí sozinho.
+ */
+export function apelidosDe(obras) {
+  const emQuantas = new Map()   // palavra -> quantas obras a contêm
+  const donaDe = new Map()      // palavra -> nome da obra
+
+  for (const obra of obras) {
+    const palavras = new Set(norm(obra).split(' ').filter(p => p.length >= 3 && !GENERICAS.has(p)))
+    for (const p of palavras) {
+      emQuantas.set(p, (emQuantas.get(p) ?? 0) + 1)
+      donaDe.set(p, obra)
+    }
+  }
+
+  const apelidos = new Map()
+  for (const [palavra, quantas] of emQuantas) {
+    if (quantas === 1) apelidos.set(palavra, donaDe.get(palavra))
+  }
+  return apelidos
+}
+
+/**
+ * Acha a obra numa frase: pelo nome inteiro, ou por uma palavra que só
+ * exista nela.
+ *
+ * O nome inteiro é tentado primeiro porque é mais específico. Só depois vem
+ * o apelido — e nele a tolerância a erro de escrita continua valendo, porque
+ * quem digita "tsuia" quis dizer "tsuya".
+ */
+export function acharObra(texto, obras) {
+  const porNome = acharNaFrase(texto, obras)
+  if (porNome.achado) return porNome
+
+  const apelidos = apelidosDe(obras)
+  if (!apelidos.size) return { achado: null, resto: texto ?? '' }
+
+  const porApelido = acharNaFrase(texto, [...apelidos.keys()])
+  if (!porApelido.achado) return { achado: null, resto: texto ?? '' }
+
+  return { achado: apelidos.get(porApelido.achado), resto: porApelido.resto }
+}
+
+/**
  * Dois vocabulários, e confundi-los estraga a descrição.
  *
  * CLASSIFICADORES são as palavras que a pessoa escreve para DIZER o tipo:
@@ -259,7 +332,7 @@ export function interpretar(texto, obras = []) {
   //
   // Vem primeiro porque é o campo mais específico: nome de obra é próprio, e
   // deixar para depois faria "Bastos" ser consumido como outra coisa.
-  const porNome = acharNaFrase(resto, obras)
+  const porNome = acharObra(resto, obras)
   let obra = porNome.achado
   let sobra = porNome.resto
 
