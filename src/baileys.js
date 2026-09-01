@@ -12,9 +12,10 @@
  *
  * Cuidados que reduzem o risco de bloqueio, e por quê:
  *
- *  - Só responde a conversa de UMA pessoa. Grupo, lista de transmissão e
- *    status são ignorados: robô que fala em grupo é o padrão que mais leva
- *    a denúncia.
+ *  - Só responde conversa de UMA pessoa, e os grupos que estiverem em
+ *    GASTOS_GRUPOS. Lista de transmissão, status e todo grupo não listado
+ *    são ignorados: robô que fala em grupo é o padrão que mais leva a
+ *    denúncia, e o robô só tem o que fazer no grupo dos comprovantes.
  *  - Nunca inicia conversa. Só responde quem falou primeiro.
  *  - Espera alguns segundos e mostra "digitando…" antes de responder. Robô
  *    que responde em 200ms é reconhecível por qualquer sistema antifraude.
@@ -51,6 +52,17 @@ function tempoDeDigitacao(texto) {
   return Math.min(base + texto.length * 40, 12000)
 }
 
+/**
+ * Os grupos onde o robô tem o que fazer.
+ *
+ * Só o dos comprovantes. Estar num grupo e ficar calado é o padrão; a
+ * exceção é explícita e vem da mesma variável que o módulo de gastos usa,
+ * para não haver duas listas divergindo.
+ */
+const GRUPOS_ATENDIDOS = new Set(
+  (process.env.GASTOS_GRUPOS || '').split(',').map(g => g.trim()).filter(Boolean),
+)
+
 /** É conversa individual de uma pessoa de verdade? */
 function ehConversaPessoal(msg) {
   const jid = msg.key?.remoteJid ?? ''
@@ -73,6 +85,34 @@ function textoDaMensagem(msg) {
     ?? m.buttonsResponseMessage?.selectedDisplayText
     ?? m.listResponseMessage?.title
     ?? null
+}
+
+/** É um grupo que o robô acompanha? */
+function ehGrupoAtendido(msg) {
+  const jid = msg.key?.remoteJid ?? ''
+  if (msg.key?.fromMe) return false
+  if (!jid.endsWith('@g.us')) return false
+  return GRUPOS_ATENDIDOS.has(jid) || GRUPOS_ATENDIDOS.has(jid.split('@')[0])
+}
+
+/**
+ * A parte da mensagem que carrega um arquivo, se houver.
+ *
+ * PDF chega como documentMessage e foto como imageMessage — os dois valem
+ * como comprovante. Áudio, vídeo e figurinha não.
+ */
+function anexoDaMensagem(msg) {
+  const m = msg.message ?? {}
+  const img = m.imageMessage
+  if (img) return { tipo: img.mimetype || 'image/jpeg', nome: 'comprovante.jpg' }
+  const doc = m.documentMessage ?? m.documentWithCaptionMessage?.message?.documentMessage
+  if (doc) {
+    const tipo = doc.mimetype || ''
+    if (tipo.startsWith('image/') || tipo === 'application/pdf') {
+      return { tipo, nome: doc.fileName || 'comprovante' }
+    }
+  }
+  return null
 }
 
 /** Só os dígitos do número, para casar com o que o RH guarda. */
@@ -148,24 +188,47 @@ export async function conectar(aoReceber) {
     if (type !== 'notify') return
 
     for (const msg of messages) {
-      if (!ehConversaPessoal(msg)) continue
+      const pessoal = ehConversaPessoal(msg)
+      const grupo = !pessoal && ehGrupoAtendido(msg)
+      if (!pessoal && !grupo) continue
 
-      const texto = textoDaMensagem(msg)
       const jid = msg.key.remoteJid
-      if (!texto?.trim()) {
-        // Áudio, figurinha, documento. Ela não processa, mas ficar muda é
-        // pior: a pessoa acha que não chegou.
+      const texto = textoDaMensagem(msg)
+      const anexo = anexoDaMensagem(msg)
+
+      // Num grupo, quem falou é o participante — remoteJid é o grupo. Sem
+      // isso a lista de autorizados compararia com o id do grupo, e nunca
+      // ninguém passaria.
+      const de = numeroDoJid(grupo ? (msg.key.participant ?? '') : jid)
+
+      if (pessoal && !anexo && !texto?.trim()) {
+        // Áudio ou figurinha na conversa de candidato. Ela não processa, mas
+        // ficar muda é pior: a pessoa acha que não chegou.
         await responder(jid, 'Consigo ler só mensagem de texto, viu? Pode escrever aí que eu te ajudo. 🙂')
         continue
       }
 
-      const numero = numeroDoJid(jid)
       try {
-        const resposta = await aoReceber(numero, texto.trim())
-        if (resposta) await responder(jid, resposta)
+        const arquivo = anexo ? await baixar(msg) : null
+        const resposta = await aoReceber({
+          canal: 'whatsapp',
+          de,
+          chat: grupo ? jid : de,
+          ehGrupo: grupo,
+          texto: texto?.trim() || null,
+          arquivo,
+          tipo: anexo?.tipo ?? null,
+          nomeArquivo: anexo?.nome ?? null,
+          // Id da mensagem do WhatsApp: é o que garante a idempotência do
+          // envio ao sistema de obras, e é estável entre reentregas.
+          idMensagem: msg.key.id,
+        })
+        // Em grupo, responde citando a mensagem: com várias pessoas mandando
+        // comprovante junto, confirmação solta não diz de qual foto é.
+        if (resposta) await responder(jid, resposta, { citar: grupo ? msg : null, rapido: grupo })
       } catch (e) {
         console.error('[whatsapp] erro ao atender:', e.message)
-        await responder(jid, 'Tive um probleminha aqui no sistema. Pode repetir, por favor?')
+        if (pessoal) await responder(jid, 'Tive um probleminha aqui no sistema. Pode repetir, por favor?')
       }
     }
   })
@@ -173,15 +236,40 @@ export async function conectar(aoReceber) {
   return sock
 }
 
+/**
+ * Baixa o arquivo da mensagem.
+ *
+ * Devolve null se não der: o comprovante não chega ao sistema de obras, mas
+ * a conexão não cai e as outras mensagens seguem sendo atendidas.
+ */
+async function baixar(msg) {
+  try {
+    const { downloadMediaMessage } = await import('@whiskeysockets/baileys')
+    const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+      logger: pino({ level: 'error' }),
+      reuploadRequest: sock.updateMediaMessage,
+    })
+    return buffer?.length ? buffer : null
+  } catch (e) {
+    console.error('[whatsapp] não consegui baixar o arquivo:', e.message)
+    return null
+  }
+}
+
 /** Envia, com a pausa e o "digitando…" que fazem parecer gente. */
-async function responder(jid, texto) {
+async function responder(jid, texto, { citar = null, rapido = false } = {}) {
   if (!sock) return { ok: false }
   try {
-    await sock.presenceSubscribe(jid)
-    await sock.sendPresenceUpdate('composing', jid)
-    await espera(tempoDeDigitacao(texto))
-    await sock.sendPresenceUpdate('paused', jid)
-    await sock.sendMessage(jid, { text: texto })
+    // A pausa existe para o robô não se denunciar na conversa com candidato.
+    // No grupo interno todo mundo sabe que é robô, e demorar 10 segundos
+    // para confirmar um comprovante só atrapalha quem está mandando vinte.
+    if (!rapido) {
+      await sock.presenceSubscribe(jid)
+      await sock.sendPresenceUpdate('composing', jid)
+      await espera(tempoDeDigitacao(texto))
+      await sock.sendPresenceUpdate('paused', jid)
+    }
+    await sock.sendMessage(jid, { text: texto }, citar ? { quoted: citar } : {})
     return { ok: true }
   } catch (e) {
     console.error('[whatsapp] não consegui enviar:', e.message)

@@ -17,8 +17,9 @@ import {
   marcarConcluida, marcarEscalada, metricas,
 } from './store.js'
 import { getVagas, origemDaLista, intervaloDeAtualizacao } from './catalogo.js'
-import { enviarMensagem, parseWebhook } from './connectors.js'
+import { enviarMensagem, parseWebhook, baixarMidiaCloud } from './connectors.js'
 import { enviarCandidatura, avisarRH } from './rh-client.js'
+import * as gastos from './gastos.js'
 
 const app = express()
 app.use(express.json({ limit: '1mb' }))
@@ -36,6 +37,7 @@ app.get('/metricas', (_req, res) => res.json({
   ...metricas(),
   vagas: origemDaLista(),
   atendente: iaDisponivel() ? 'Maria Vitória (IA)' : 'roteiro',
+  gastos: gastos.situacao(),
 }))
 
 /**
@@ -104,8 +106,13 @@ async function tratarWebhook(req, res) {
   const msg = parseWebhook(req.body)
   if (!msg) return
   try {
-    const resposta = await processar(msg.from, msg.text)
-    if (resposta) await enviarMensagem(msg.from, resposta)
+    // O download da mídia acontece DEPOIS do 200 acima, de propósito: a Meta
+    // reentrega o webhook que demora a responder, e baixar um PDF de 15 MB
+    // antes de responder viraria a mesma mensagem chegando várias vezes.
+    if (msg.mediaId) msg.arquivo = await baixarMidiaCloud(msg.mediaId)
+
+    const resposta = await rotear(msg)
+    if (resposta) await enviarMensagem(msg.de, resposta)
   } catch (e) {
     console.error('[webhook] erro:', e.message)
   }
@@ -138,6 +145,40 @@ function tempoDecorrido(ms) {
   if (horas < 24) return `há ${horas} hora${horas === 1 ? '' : 's'}`
   const dias = Math.round(horas / 24)
   return `há ${dias} dia${dias === 1 ? '' : 's'}`
+}
+
+/**
+ * Quem atende esta mensagem.
+ *
+ * O robô tem dois módulos, e a regra de qual atende é de SEGURANÇA, não de
+ * organização: sem ela, quem descobrir o número manda uma foto e cria
+ * lançamento no financeiro da empresa.
+ *
+ * Por isso a ordem é esta. Primeiro pergunta-se se o remetente está na lista
+ * de autorizados a lançar gasto; só quem está entra no módulo de gastos.
+ * Todo o resto — que é a esmagadora maioria — vai para o recrutamento, como
+ * sempre foi.
+ *
+ * Mensagem de grupo nunca chega ao recrutamento. A Maria Vitória conversa
+ * com um candidato por vez, e não teria o que fazer num grupo de trabalho.
+ */
+async function rotear(msg) {
+  const podeLancar = gastos.autorizado(msg.de) && gastos.origemAceita(msg.chat)
+
+  if (podeLancar && (msg.arquivo || msg.ehGrupo)) {
+    return gastos.tratar(msg)
+  }
+
+  if (msg.ehGrupo) return null
+
+  // Arquivo de candidato: ela não lê, mas ficar muda faz a pessoa achar que
+  // não chegou.
+  if (msg.arquivo && !msg.texto) {
+    return 'Recebi seu arquivo, mas aqui eu consigo ler só texto. Pode escrever pra mim? 🙂'
+  }
+  if (!msg.texto) return null
+
+  return processar(msg.de, msg.texto)
 }
 
 /**
@@ -226,8 +267,29 @@ async function processar(from, text) {
  */
 if (process.env.CONNECTOR === 'baileys') {
   const { conectar } = await import('./baileys.js')
-  conectar(async (numero, texto) => processar(numero, texto))
+  conectar(rotear)
     .catch(e => console.error('[whatsapp] não consegui conectar:', e.message))
+}
+
+/**
+ * Conexão com o Telegram.
+ *
+ * Sobe em PARALELO ao WhatsApp, não no lugar dele. Os dois canais servem a
+ * públicos diferentes: candidato está no WhatsApp e não vai instalar outro
+ * aplicativo para se candidatar; o grupo dos comprovantes é de gente da casa,
+ * e ali o Telegram lê grupo sem risco de bloquear número nenhum.
+ */
+if (process.env.TELEGRAM_TOKEN) {
+  const { conectar: conectarTelegram } = await import('./telegram.js')
+  conectarTelegram(rotear)
+    .catch(e => console.error('[telegram] não consegui conectar:', e.message))
+}
+
+if (gastos.gastosAtivo()) {
+  const s = gastos.situacao()
+  console.log(`[gastos] no ar — ${s.autorizados} autorizado(s), leitura por IA: ${s.leituraPorIA ? 'sim' : 'não'}`)
+} else if (process.env.OBRAS_API_TOKEN || process.env.GASTOS_AUTORIZADOS) {
+  console.warn('[gastos] configuração incompleta — falta OBRAS_API_TOKEN ou GASTOS_AUTORIZADOS. Comprovantes NÃO serão enviados.')
 }
 
 const PORT = process.env.PORT || 3100

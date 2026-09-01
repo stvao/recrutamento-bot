@@ -1,17 +1,28 @@
-# Robô de recrutamento — WhatsApp
+# Robô — WhatsApp e Telegram
 
-Atende candidatos por WhatsApp, conduz a conversa e registra a candidatura no
-sistema de RH. A atendente se chama **Maria Vitória**.
+Um serviço, dois módulos, e a intenção de receber outros:
 
-Roda como serviço separado do RH. Fala com ele só por HTTP, com um token
-compartilhado — é essa fronteira estreita que permite os dois viverem em
+| Módulo | Quem fala com ele | O que faz |
+|---|---|---|
+| **Recrutamento** | Candidatos, no WhatsApp | Conduz a conversa e registra a candidatura no RH. A atendente se chama **Maria Vitória**. |
+| **Gastos** | A equipe, no grupo de comprovantes | Lê a foto do comprovante e joga na caixa de aprovação do sistema de obras. |
+
+Roda separado dos dois sistemas. Fala com eles só por HTTP, com token
+compartilhado — é essa fronteira estreita que permite os três viverem em
 repositórios diferentes.
 
 ```
-WhatsApp ──▶ robô ──▶ Gemini (escreve a conversa)
-                │
-                └──▶ RH (vagas, cidades, candidatura, alertas)
+                    ┌──▶ recrutamento ──▶ Gemini (escreve a conversa)
+WhatsApp ──▶ robô ──┤                 └──▶ RH (vagas, candidatura, alertas)
+Telegram ──▶        │
+                    └──▶ gastos ──────▶ Gemini (lê o comprovante)
+                                    └──▶ Obras (caixa de aprovação)
 ```
+
+**Quem atende é decidido pelo remetente**, e isso é segurança, não
+organização: só quem está em `GASTOS_AUTORIZADOS` entra no módulo de gastos.
+Sem essa lista, qualquer um que descubra o número manda uma foto e cria
+lançamento no financeiro da empresa. Todo o resto vai para o recrutamento.
 
 ## Subir
 
@@ -37,6 +48,10 @@ mostra quantas conversas começaram, terminaram e onde as pessoas desistem.
 | `baileys.js` | Conexão com o WhatsApp pela via não oficial (QR code). |
 | `connectors.js` | Troca de conector: `none`, `baileys`, `zapi`, `cloud`. |
 | `rh-client.js` | Envia candidatura e alerta ao RH. |
+| `telegram.js` | Conexão com o Telegram (long polling — sem webhook nem domínio). |
+| `gastos.js` | O módulo de comprovantes: quem pode lançar, e o que vira envio. |
+| `ia-visao.js` | Lê o comprovante e **confere** o que o modelo diz ter lido. |
+| `obras-client.js` | Envia o comprovante ao sistema de obras. |
 
 A regra que organiza tudo: **o modelo decide o que dizer; o código é dono dos
 fatos e do que fica gravado.** Salário e alojamento entram prontos, vindos do
@@ -57,6 +72,56 @@ do outro** — é o preço de estarem em repositórios separados.
 
 O RH também chama o robô em `POST /simular`, para o simulador interno
 (`/recrutamento/robo`) testar a conversa sem WhatsApp.
+
+## O módulo de gastos
+
+Os comprovantes já chegam todo dia num grupo, com a descrição escrita do
+lado, e alguém precisa olhar cada um e digitar no sistema de custos. Isso é o
+que o módulo tira do caminho.
+
+O que ele **não** faz é lançar no custo. O comprovante vai para a caixa
+"Comprovantes recebidos" (topo de `/m/gasto` e `/m/gasto-campo`), já com o
+resumo do que a IA leu, e a pessoa toca em "Lançar", confere e salva.
+Lançar direto trocaria *trabalho de digitar* por *trabalho de auditar*, que é
+pior: a IA erra — lê 1.500 onde era 1.800, troca a data, erra a categoria.
+
+Três regras que não se negociam:
+
+- **Lista de autorizados.** Sem ela, qualquer um lança no financeiro.
+- **Nada entra direto no custo.** Sempre a caixa de aprovação.
+- **Idempotência em todo envio.** O `Idempotency-Key` é o id da mensagem, que
+  é estável entre reentregas. A Meta reentrega webhooks; sem a chave, o mesmo
+  gasto entra duas vezes.
+
+### O contrato com o sistema de obras
+
+| | |
+|---|---|
+| `POST /api/comprovantes/receber` | `multipart`: `arquivo` (imagem ou PDF, até 20 MB) e `texto` livre. |
+| Token | `OBRAS_API_TOKEN`, gerado em "Enviar pelo iPhone" (`/m/atalho`). Só cria comprovante — não lê, não lança, não aprova. |
+| Cabeçalho | `Idempotency-Key: <id da mensagem>` |
+
+**Lacuna conhecida:** o endpoint aceita só `arquivo` e `texto`. Enquanto for
+assim, a IA escreve o resumo (`Posto Ipiranga · R$ 250,00 · 28/08`) no texto,
+e a pessoa lê e digita o valor — ganha-se a foto no lugar certo, não o
+preenchimento. O robô **já manda** `valor`, `data`, `categoria` e o resto como
+campos extras, que o servidor ignora sem erro; quando o DTO do outro lado
+aceitá-los, o formulário passa a abrir preenchido sem mexer aqui.
+
+### Por qual canal
+
+O grupo é o problema. A **API oficial da Meta não entrega mensagem de grupo** —
+não é configuração, é limite da plataforma. Sobram:
+
+- **`CONNECTOR=baileys`** lê o grupo direto, sem mudar o hábito de ninguém.
+  O número pode ser bloqueado, então use um chip dedicado e barato — se cair,
+  troca-se o chip. **Nunca o número que atende candidato.**
+- **Telegram** lê grupo nativamente, sem verificação e sem risco de bloqueio,
+  mas exige mover o grupo de aplicativo.
+- **`CONNECTOR=cloud`** (oficial) só funciona se cada pessoa **encaminhar** o
+  comprovante para o número do bot.
+
+Os dois canais sobem juntos: `TELEGRAM_TOKEN` não substitui o WhatsApp, soma.
 
 ## Quando o modelo não responde
 

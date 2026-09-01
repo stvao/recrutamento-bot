@@ -26,20 +26,97 @@ export async function enviarMensagem(para, texto) {
 }
 
 /**
- * Extrai { from, text } do payload recebido no webhook, conforme o provedor.
- * Retorna null se não for uma mensagem de texto de entrada.
+ * Normaliza o payload do webhook para o formato que o roteador entende —
+ * o MESMO que o Baileys e o Telegram entregam:
+ *
+ *   { canal, de, chat, ehGrupo, texto, arquivo, tipo, nomeArquivo, idMensagem }
+ *
+ * `arquivo` vem null aqui: o webhook traz só o id da mídia, e baixar exige
+ * outra chamada. Quem trata resolve isso com baixarMidiaCloud(), já que o
+ * download não deve atrasar o 200 que a Meta espera.
+ *
+ * Retorna null se não for mensagem de entrada aproveitável.
  */
 export function parseWebhook(body) {
   // WhatsApp Cloud API (oficial)
   try {
     const msg = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]
-    if (msg?.from && msg?.text?.body) return { from: msg.from, text: msg.text.body }
+    if (msg?.from) {
+      const midia = msg.image ?? msg.document
+      const tipo = midia?.mime_type ?? null
+      const serve = tipo && (tipo.startsWith('image/') || tipo === 'application/pdf')
+      const texto = msg.text?.body ?? midia?.caption ?? null
+      if (texto || serve) {
+        return {
+          canal: 'whatsapp-cloud',
+          de: String(msg.from),
+          chat: String(msg.from),
+          // A API oficial não entrega mensagem de grupo. Não é configuração:
+          // é limite da plataforma, e vale para receber e para enviar.
+          ehGrupo: false,
+          texto: texto?.trim() || null,
+          arquivo: null,
+          mediaId: serve ? midia.id : null,
+          tipo: serve ? tipo : null,
+          nomeArquivo: msg.document?.filename ?? (serve ? 'comprovante.jpg' : null),
+          // Id da mensagem da Meta: estável entre reentregas, que é
+          // exatamente o que a idempotência do sistema de obras precisa.
+          idMensagem: msg.id,
+        }
+      }
+    }
   } catch {}
+
   // Z-API (formato comum)
   if (body?.phone && (body?.text?.message || body?.message)) {
-    return { from: String(body.phone), text: body.text?.message ?? body.message }
+    return {
+      canal: 'zapi',
+      de: String(body.phone),
+      chat: String(body.phone),
+      ehGrupo: Boolean(body.isGroup),
+      texto: body.text?.message ?? body.message,
+      arquivo: null,
+      mediaId: null,
+      tipo: null,
+      nomeArquivo: null,
+      idMensagem: body.messageId ?? body.id ?? null,
+    }
   }
   return null
+}
+
+/**
+ * Baixa uma mídia da Cloud API.
+ *
+ * São duas chamadas de propósito, é assim que a Meta expõe: primeiro se
+ * pergunta a URL do arquivo pelo id, depois se baixa dela — e a segunda
+ * também exige o token, porque a URL é assinada mas não é pública.
+ *
+ * Devolve null se não der: o comprovante não chega ao sistema de obras, mas
+ * quem enviou recebe resposta em vez de silêncio.
+ */
+export async function baixarMidiaCloud(mediaId) {
+  const token = process.env.CLOUD_TOKEN
+  if (!token || !mediaId) return null
+  try {
+    const info = await fetch(`https://graph.facebook.com/v20.0/${mediaId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!info.ok) throw new Error(`HTTP ${info.status} ao pedir a URL`)
+    const { url } = await info.json()
+    if (!url) throw new Error('resposta sem url')
+
+    const r = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(30000),
+    })
+    if (!r.ok) throw new Error(`HTTP ${r.status} ao baixar`)
+    return Buffer.from(await r.arrayBuffer())
+  } catch (e) {
+    console.error('[connector] não consegui baixar a mídia:', e.message)
+    return null
+  }
 }
 
 async function enviarZapi(para, texto) {
