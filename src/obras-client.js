@@ -31,6 +31,19 @@ const OBRAS_API_TOKEN = process.env.OBRAS_API_TOKEN || ''
  */
 const MANDAR_CAMPOS_EXTRA = process.env.OBRAS_CAMPOS_EXTRA !== '0'
 
+/**
+ * O endpoint já recusou os campos extras?
+ *
+ * Descoberto na primeira tentativa e lembrado daí em diante. Sem isso, todo
+ * comprovante seria enviado duas vezes — a primeira para tomar 400 — e o
+ * limite de 30 envios por minuto chegaria na metade do tempo.
+ *
+ * Volta a false quando o serviço reinicia, que é de propósito: é assim que
+ * ele descobre sozinho, sem ninguém mexer em configuração, no dia em que o
+ * DTO do outro lado passar a aceitar os campos.
+ */
+let extrasRecusados = false
+
 /** Acima disso a Meta/Telegram já teriam recusado, mas o limite é do endpoint. */
 const TAMANHO_MAXIMO = 20 * 1024 * 1024
 
@@ -66,11 +79,46 @@ export async function enviarComprovante({ arquivo, nomeArquivo, tipo, texto, idM
     return { ok: false, motivo: `tipo recusado: ${tipo}`, status: 400 }
   }
 
+  const comExtras = MANDAR_CAMPOS_EXTRA && extras && !extrasRecusados
+
+  const r = await postar({ arquivo, nomeArquivo, tipo, texto, idMensagem, extras: comExtras ? extras : null })
+  if (r.ok || r.status !== 400 || !comExtras) return r
+
+  /**
+   * 400 mandando os campos extras: quase sempre é o endpoint recusando o
+   * que ele não conhece.
+   *
+   * O contrato de hoje aceita só `arquivo` e `texto`. Os campos estruturados
+   * vão junto na aposta de que um servidor os ignore em silêncio — e quando
+   * ele valida estrito, recusa tudo, e o comprovante se perde por causa de
+   * um campo que era só bônus.
+   *
+   * Então tenta de novo sem eles. Perder o preenchimento automático é ruim;
+   * perder o comprovante é pior. E a mesma Idempotency-Key garante que, se o
+   * primeiro envio tiver passado por outro motivo, este não duplica.
+   */
+  console.warn('[obras] 400 com os campos estruturados — tentando sem eles.')
+  const semExtras = await postar({ arquivo, nomeArquivo, tipo, texto, idMensagem, extras: null })
+
+  if (semExtras.ok) {
+    extrasRecusados = true
+    console.warn(
+      '[obras] ⚠ O endpoint NÃO aceita valor/data/categoria/obra ainda.\n'
+      + '        Os comprovantes seguem chegando, mas com tudo no campo de texto —\n'
+      + '        quem aprova vai digitar. Para o formulário abrir preenchido, o DTO\n'
+      + '        de /api/comprovantes/receber precisa aceitar esses campos.',
+    )
+  }
+  return semExtras
+}
+
+/** Uma tentativa de envio. Duas de rede; erro do servidor não se repete. */
+async function postar({ arquivo, nomeArquivo, tipo, texto, idMensagem, extras }) {
   const form = new FormData()
   form.append('arquivo', new Blob([arquivo], { type: tipo || 'application/octet-stream' }), nomeArquivo || 'comprovante')
   if (texto) form.append('texto', texto)
 
-  if (MANDAR_CAMPOS_EXTRA && extras) {
+  if (extras) {
     for (const [chave, valor] of Object.entries(extras)) {
       if (valor !== null && valor !== undefined && valor !== '') form.append(chave, String(valor))
     }
@@ -89,14 +137,25 @@ export async function enviarComprovante({ arquivo, nomeArquivo, tipo, texto, idM
         body: form,
         signal: AbortSignal.timeout(30000),   // arquivo grande em 4G leva tempo
       })
-      const j = await r.json().catch(() => ({}))
+
+      const cru = await r.text()
+      let j = {}
+      try { j = cru ? JSON.parse(cru) : {} } catch { j = {} }
 
       if (r.ok) return { ok: true, id: j.id, mensagem: j.mensagem, pendentes: j.pendentes }
 
       // 401 token revogado · 400 sem arquivo ou tipo recusado · 429 acima de
       // 30 envios por minuto. Nenhum melhora repetindo agora.
-      console.error(`[obras] recusou ${r.status}:`, j)
-      return { ok: false, status: r.status, motivo: j.mensagem || j.erro || `HTTP ${r.status}` }
+      //
+      // A resposta CRUA vai para o log, e não só o campo que se espera: num
+      // 400 o que interessa é o que o servidor achou errado, e ele nem sempre
+      // devolve isso no formato combinado.
+      console.error(`[obras] recusou ${r.status}${extras ? ' (com campos extras)' : ''}: ${cru.slice(0, 500)}`)
+      return {
+        ok: false,
+        status: r.status,
+        motivo: j.mensagem || j.erro || j.message || cru.slice(0, 200) || `HTTP ${r.status}`,
+      }
     } catch (e) {
       console.error(`[obras] tentativa ${tentativa} falhou:`, e.message)
       if (tentativa === 2) return { ok: false, motivo: e.message }
@@ -104,4 +163,9 @@ export async function enviarComprovante({ arquivo, nomeArquivo, tipo, texto, idM
     }
   }
   return { ok: false, motivo: 'desconhecido' }
+}
+
+/** Só para teste: esquece o que foi descoberto sobre os campos extras. */
+export function _esquecerDescoberta() {
+  extrasRecusados = false
 }
