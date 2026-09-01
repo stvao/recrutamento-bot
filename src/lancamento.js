@@ -134,8 +134,24 @@ export function acharTipo(pedaco) {
  * "bastos haya", "bastos aia" e "Bastos Haia" caem todos na mesma obra.
  * Quem digita está na obra, no celular, com pressa.
  */
+/**
+ * Teto de palavras examinadas.
+ *
+ * A busca compara cada janela de palavras com cada nome conhecido, e cada
+ * comparação é uma distância de edição: o custo cresce com palavras × obras.
+ * Medido com 200 obras: 10 palavras levam 48ms, 100 levam 0,7s, e 2000
+ * levam 18 SEGUNDOS — e o robô atende uma mensagem por vez, então nesse
+ * tempo ninguém mais é respondido. Bastava alguém colar um texto no grupo.
+ *
+ * Sessenta palavras é muito mais do que qualquer legenda de comprovante, e
+ * o resto do texto continua indo inteiro para a descrição: o corte é só na
+ * BUSCA, não no que se guarda.
+ */
+const MAX_PALAVRAS_BUSCA = 60
+
 export function acharNaFrase(texto, conhecidos, { tolerante = true } = {}) {
-  const palavras = (texto || '').split(/\s+/).filter(Boolean)
+  const todas = (texto || '').split(/\s+/).filter(Boolean)
+  const palavras = todas.slice(0, MAX_PALAVRAS_BUSCA)
   if (!palavras.length || !conhecidos?.length) return { achado: null, resto: texto ?? '' }
 
   const alvos = conhecidos.map(c => ({ original: c, limpo: norm(c) })).filter(a => a.limpo)
@@ -174,7 +190,13 @@ export function acharNaFrase(texto, conhecidos, { tolerante = true } = {}) {
 
   if (!melhor) return { achado: null, resto: texto ?? '' }
 
-  const resto = [...palavras.slice(0, melhor.i), ...palavras.slice(melhor.i + melhor.tamanho)].join(' ').trim()
+  // O que ficou além do teto volta para o resto: cortar a busca não pode
+  // apagar o que a pessoa escreveu.
+  const resto = [
+    ...palavras.slice(0, melhor.i),
+    ...palavras.slice(melhor.i + melhor.tamanho),
+    ...todas.slice(MAX_PALAVRAS_BUSCA),
+  ].join(' ').trim()
   return { achado: melhor.alvo, resto }
 }
 

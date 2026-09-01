@@ -127,8 +127,39 @@ const ESPERA_DESCRICAO_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 600
  */
 const ESPERA_RESPOSTA_MS = Number(process.env.GASTOS_ESPERA_RESPOSTA_MS || 1000 * 60 * 30)
 
+/**
+ * Quantos comprovantes podem ficar esperando resposta ao mesmo tempo.
+ *
+ * Cada um segura o ARQUIVO em memória — até 20 MB — por até meia hora. Sem
+ * teto, um dia movimentado com todo mundo mandando foto e ninguém
+ * respondendo encheria a memória do processo e derrubaria o robô, que é bem
+ * pior que um comprovante ir para a caixa mais cedo.
+ *
+ * Estourado o teto, o mais ANTIGO vai para a caixa: ele é o que tem menos
+ * chance de ainda receber resposta.
+ */
+const MAX_AGUARDANDO = Number(process.env.GASTOS_MAX_AGUARDANDO || 30)
+
 /** remetente -> { pendente, prazo, perguntando } */
 const aguardando = new Map()
+
+/**
+ * Guarda um pendente, abrindo espaço se preciso.
+ *
+ * O Map preserva a ordem de inserção, então o primeiro é o mais antigo.
+ */
+function guardar(de, entrada) {
+  if (aguardando.size >= MAX_AGUARDANDO && !aguardando.has(de)) {
+    const [maisAntigo, velho] = aguardando.entries().next().value ?? []
+    if (velho) {
+      clearTimeout(velho.prazo)
+      aguardando.delete(maisAntigo)
+      console.warn(`[gastos] ${MAX_AGUARDANDO} comprovantes esperando — mandando o mais antigo para a caixa.`)
+      paraCaixa(velho.pendente).then(r => avisar(velho.pendente, r))
+    }
+  }
+  aguardando.set(de, entrada)
+}
 
 export function coringaInvalido() {
   return QUALQUER_UM_DO_GRUPO && GRUPOS.size === 0
@@ -316,7 +347,7 @@ function esperar(pendente, ms) {
       resolve(await processar(pendente, { acabouOTempo: true }))
     }, ms)
     prazo.unref?.()
-    aguardando.set(pendente.de, { pendente, prazo, perguntando: false })
+    guardar(pendente.de, { pendente, prazo, perguntando: false })
   })
 }
 
@@ -498,7 +529,7 @@ function perguntar(pendente, falta, obras) {
     await avisar(pendente, await paraCaixa(pendente))
   }, ESPERA_RESPOSTA_MS)
   prazo.unref?.()
-  aguardando.set(pendente.de, { pendente, prazo, perguntando: true })
+  guardar(pendente.de, { pendente, prazo, perguntando: true })
 
   return linhas.join('\n')
 }
@@ -618,6 +649,31 @@ function respostaDeTeste() {
   linhas.push('_bastos haia, tijolos e areia, material, 2500,00_')
   linhas.push('Se faltar alguma coisa, eu pergunto.')
   return linhas.join('\n')
+}
+
+/**
+ * Manda para a caixa tudo que está esperando, antes de o processo morrer.
+ *
+ * Sem isto, um deploy no meio da tarde perde silenciosamente os
+ * comprovantes que estavam esperando resposta: a pessoa respondeu a
+ * pergunta e não recebe nada, e a foto se foi. Na caixa ela pelo menos
+ * existe, e alguém completa.
+ *
+ * Devolve quantos foram descarregados, para quem chama registrar.
+ */
+export async function encerrar() {
+  const pendentes = [...aguardando.values()]
+  if (!pendentes.length) return 0
+
+  for (const { prazo } of pendentes) clearTimeout(prazo)
+  aguardando.clear()
+
+  console.log(`[gastos] encerrando — mandando ${pendentes.length} comprovante(s) que esperavam para a caixa.`)
+  await Promise.allSettled(pendentes.map(async ({ pendente }) => {
+    const r = await paraCaixa(pendente)
+    await avisar(pendente, `⚠ Precisei reiniciar antes de você responder.\n${r}`)
+  }))
+  return pendentes.length
 }
 
 /** Só para teste: esquece as fotos seguradas. */

@@ -69,7 +69,7 @@ const srv = createServer((req, res) => {
 await new Promise(r => srv.listen(0, '127.0.0.1', r))
 process.env.OBRAS_API_URL = `http://127.0.0.1:${srv.address().port}`
 
-const { tratar, _limparPendentes } = await import('./gastos.js')
+const { tratar, encerrar, _limparPendentes } = await import('./gastos.js')
 const { _limparCacheObras } = await import('./obras-client.js')
 
 const foto = Buffer.from('imagem-do-comprovante')
@@ -224,6 +224,38 @@ const rota = () => chamadas.map(c => c.url.replace(/^.*\/comprovantes\//, '')).f
   const p = novo('5511900000012')
   const r = await p.foto('sao paulo tinta 300')
   ok('cidade de uma obra só resolve direto', r.includes('AGUIA DE HAIA'))
+}
+
+// ── 11. Reinício não engole comprovante ───────────────────────────────────
+// Um deploy no meio da tarde perderia calado o que estava esperando
+// resposta: a pessoa responderia a pergunta e não receberia nada, e a foto
+// teria sumido. Na caixa ela pelo menos existe.
+{
+  const p = novo('5511900000020')
+  const r = await p.foto('nota esperando resposta')
+  ok('está esperando resposta', /obra/i.test(r))
+  ok('e nada foi enviado ainda', rota().length === 0)
+
+  const quantos = await encerrar()
+  ok('encerrar descarrega o que esperava', quantos === 1)
+  ok('foi para a caixa', rota().includes('receber'))
+  ok('e a pessoa foi avisada do reinício', p.ditos.some(t => /reiniciar/i.test(t)))
+}
+
+// ── 12. Legenda enorme não trava o robô ───────────────────────────────────
+// A busca compara palavras × obras, e cada comparação é uma distância de
+// edição: sem teto, 2000 palavras levavam 18 SEGUNDOS — e o robô atende uma
+// mensagem por vez, então nesse tempo ninguém mais é respondido.
+{
+  const p = novo('5511900000021')
+  const enorme = Array.from({ length: 3000 }, (_, i) => `palavra${i}`).join(' ')
+  const t0 = Date.now()
+  const r = await p.foto(`haia ${enorme} 250,00`)
+  const levou = Date.now() - t0
+
+  ok(`legenda de 3000 palavras responde rápido (${levou}ms)`, levou < 5000)
+  ok('e ainda acha a obra', r.includes('AGUIA DE HAIA'))
+  ok('e ainda acha o valor', r.includes('R$ 250,00'))
 }
 
 srv.close()

@@ -127,8 +127,45 @@ app.post('/webhook/:segredo', tratarWebhook)
 // Sem segredo — só funciona quando WEBHOOK_SEGREDO não está definido.
 app.post('/webhook', tratarWebhook)
 
+/**
+ * O simulador é server-to-server, e precisa provar que é.
+ *
+ * A rota não tinha proteção nenhuma. O RH confere a sessão do lado dele,
+ * mas o robô aceitava qualquer um: quem alcançasse a porta conduzia
+ * conversas — gastando a cota do modelo — e, com `persistir: true`, criava
+ * CANDIDATURA no RH em nome de qualquer telefone. O mesmo buraco que o
+ * WEBHOOK_SEGREDO fecha no webhook estava aberto aqui do lado.
+ *
+ * Duas provas, e basta uma:
+ *
+ *  - vir da própria máquina. O RH chama em http://localhost:3100, e é o
+ *    caso normal em produção;
+ *  - trazer o RH_API_TOKEN, que já é o segredo compartilhado entre os dois.
+ *
+ * Aceitar o localhost mantém o simulador funcionando sem mexer no RH — mas
+ * o RH manda o token de qualquer forma, para o dia em que os dois estiverem
+ * em máquinas diferentes.
+ */
+function ehDaPropriaMaquina(req) {
+  const ip = req.socket?.remoteAddress ?? ''
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1'
+}
+
+function simuladorAutorizado(req) {
+  if (ehDaPropriaMaquina(req)) return true
+  const token = process.env.RH_API_TOKEN || ''
+  if (!token) return false
+  const cabecalho = req.headers.authorization ?? ''
+  return cabecalho.startsWith('Bearer ') && cabecalho.slice(7).trim() === token
+}
+
 // Simulador (sem WhatsApp) — mesma lógica, retorna o texto na resposta HTTP
 app.post('/simular', async (req, res) => {
+  if (!simuladorAutorizado(req)) {
+    console.warn(`[simular] recusado — veio de ${req.socket?.remoteAddress} sem token.`)
+    return res.sendStatus(404)   // 404, e não 403: não confirma que existe
+  }
+
   const { estado, mensagem, whatsapp, persistir } = req.body || {}
   if (!estado) return res.json(iniciar(whatsapp))
   const r = await atender(estado, mensagem || '')
@@ -305,6 +342,30 @@ if (gastos.gastosAtivo()) {
   )
 } else if (process.env.OBRAS_API_TOKEN || process.env.GASTOS_AUTORIZADOS) {
   console.warn('[gastos] configuração incompleta — falta OBRAS_API_TOKEN ou GASTOS_AUTORIZADOS. Comprovantes NÃO serão enviados.')
+}
+
+/**
+ * Reinício planejado não pode engolir comprovante.
+ *
+ * O módulo de gastos segura fotos esperando resposta, em memória. Um deploy
+ * no meio da tarde as perderia calado: a pessoa responderia a pergunta e não
+ * receberia nada de volta. Aqui elas vão para a caixa antes de o processo
+ * sair — na caixa pelo menos existem.
+ *
+ * O prazo é curto de propósito: se o envio ao sistema de obras estiver
+ * lento, é melhor sair do que travar o deploy.
+ */
+let saindo = false
+for (const sinal of ['SIGINT', 'SIGTERM']) {
+  process.on(sinal, async () => {
+    if (saindo) process.exit(0)
+    saindo = true
+    await Promise.race([
+      gastos.encerrar().catch(e => console.error('[gastos] falha ao encerrar:', e.message)),
+      new Promise(r => setTimeout(r, 8000)),
+    ])
+    process.exit(0)
+  })
 }
 
 const PORT = process.env.PORT || 3100
