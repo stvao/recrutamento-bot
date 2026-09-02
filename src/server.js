@@ -24,6 +24,20 @@ import * as gastos from './gastos.js'
 const app = express()
 app.use(express.json({ limit: '1mb' }))
 
+/**
+ * O recrutamento está ligado?
+ *
+ * Existe porque os dois módulos dividem o mesmo número, e há situação em que
+ * só um deles deve responder. A que motivou isto: o robô rodando na máquina
+ * de quem cuida dos gastos, sem alcançar o RH — a Maria Vitória atendia o
+ * candidato normalmente e a candidatura não era registrada em lugar nenhum.
+ * A pessoa saía achando que tinha se candidatado.
+ *
+ * Ligado por padrão: quem não configurou nada tem o comportamento de sempre.
+ */
+const RECRUTAMENTO_LIGADO = (process.env.RECRUTAMENTO ?? 'on').toLowerCase() !== 'off'
+
+
 app.get('/health', (_req, res) => res.json({ ok: true, servico: 'recrutamento-bot' }))
 
 /**
@@ -63,9 +77,38 @@ async function atualizarVagas() {
   setTimeout(atualizarVagas, intervaloDeAtualizacao()).unref?.()
 }
 atualizarVagas()
-console.log(iaDisponivel()
-  ? '[atendimento] Maria Vitória no ar (com queda para o roteiro)'
-  : '[atendimento] sem GEMINI_API_KEY — atendendo pelo roteiro')
+if (!RECRUTAMENTO_LIGADO) {
+  console.log('[atendimento] recrutamento DESLIGADO (RECRUTAMENTO=off) — só o módulo de gastos responde.')
+} else {
+  console.log(iaDisponivel()
+    ? '[atendimento] Maria Vitória no ar (com queda para o roteiro)'
+    : '[atendimento] sem GEMINI_API_KEY — atendendo pelo roteiro')
+
+  /*
+    Confere o RH ANTES de alguém escrever.
+
+    Sem isto o problema só aparecia no log de uma linha ("[vagas] não
+    consegui falar com o RH") no meio do arranque, e o robô seguia atendendo
+    candidato sem ter onde gravar a ficha. Quem escreve conversa, responde
+    tudo, e a candidatura não existe em lugar nenhum.
+  */
+  const rhUrl = process.env.RH_API_URL || ''
+  fetch(`${rhUrl}/api/integracao/vagas`, {
+    headers: { Authorization: `Bearer ${process.env.RH_API_TOKEN || ''}` },
+    signal: AbortSignal.timeout(8000),
+  }).then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    console.log(`[atendimento] RH respondendo em ${rhUrl}`)
+  }).catch((e) => {
+    console.error(
+      `\n⚠️  O RECRUTAMENTO ESTÁ LIGADO E O RH NÃO RESPONDE (${rhUrl}: ${e.message}).\n`
+      + '   A Maria Vitória vai atender quem escrever, e a CANDIDATURA NÃO SERÁ\n'
+      + '   REGISTRADA — a pessoa sai achando que se candidatou.\n\n'
+      + '   Aponte RH_API_URL para o servidor do RH, ou desligue o recrutamento\n'
+      + '   com RECRUTAMENTO=off enquanto só o módulo de gastos estiver em uso.\n',
+    )
+  })
+}
 
 // Verificação do webhook (WhatsApp Cloud API oficial)
 app.get('/webhook', (req, res) => {
@@ -212,6 +255,17 @@ async function rotear(msg) {
   }
 
   if (msg.ehGrupo) return null
+
+  // Recrutamento desligado: fica calado em vez de atender e perder a ficha.
+  //
+  // Calado, e não "estamos fora do ar": o número pode estar em anúncio, e
+  // uma resposta automática dizendo que o sistema caiu é pior para a empresa
+  // do que nenhuma resposta — quem não recebe resposta liga; quem recebe
+  // "estamos com problema" desiste.
+  if (!RECRUTAMENTO_LIGADO) {
+    console.log(`[recrutamento] desligado — ignorando mensagem de ${msg.de}`)
+    return null
+  }
 
   // Arquivo de candidato: ela não lê, mas ficar muda faz a pessoa achar que
   // não chegou.

@@ -119,15 +119,6 @@ const OBRAS_RESERVA = (process.env.GASTOS_OBRAS || '')
  */
 const ESPERA_DESCRICAO_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 60000)
 
-/**
- * Quanto esperar pela RESPOSTA a uma pergunta.
- *
- * Bem mais longo que a espera pela legenda: aqui a pessoa já foi
- * interpelada, e no canteiro ela larga o celular no bolso e volta meia hora
- * depois. Passado o prazo, o comprovante vai para a caixa em vez de sumir.
- */
-const ESPERA_RESPOSTA_MS = Number(process.env.GASTOS_ESPERA_RESPOSTA_MS || 1000 * 60 * 30)
-
 export function coringaInvalido() {
   return QUALQUER_UM_DO_GRUPO && GRUPOS.size === 0
 }
