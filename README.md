@@ -32,6 +32,10 @@ cp .env.example .env     # preencha
 npm start
 ```
 
+**Em produção ele mora no servidor do RH**, e não na máquina de ninguém — o
+auto-deploy de lá já o atualiza sozinho. O passo a passo está em
+[COLOCAR-NO-AR.md](COLOCAR-NO-AR.md).
+
 Sobe na porta 3100. `GET /health` responde se está de pé, `GET /metricas`
 mostra quantas conversas começaram, terminaram e onde as pessoas desistem.
 
