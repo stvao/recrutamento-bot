@@ -38,14 +38,19 @@ import { chamarModelo, iaDisponivel } from './ia.js'
  * Batendo antes de chamar o modelo, a pergunta nem chega nele.
  */
 const ASSUNTO_PESSOAL = new RegExp([
-  'salari', 'salári', 'quanto (eu )?(ganho|recebo|vou receber)', 'meu pagamento',
-  'holerite', 'contra ?cheque', 'contracheque', 'demonstrativo',
-  'ferias', 'férias', 'decimo terceiro', 'décimo terceiro', '13o', '13º',
-  'fgts', 'inss', 'imposto de renda', 'irrf',
-  'desconto', 'descontaram', 'vale', 'adiantamento',
-  'rescis', 'acerto', 'verbas',
+  // Radicais: pegam as variações sem precisar listar todas.
+  'salari', 'salári', 'holerite', 'contra ?cheque', 'rescis', 'adiantament',
+  'fgts', 'inss', 'irrf', 'imposto de renda', 'demonstrativo',
+  'decimo terceiro', 'décimo terceiro',
+  // Palavras inteiras. Sem a fronteira, "vale" casava com "valeu" e com
+  // "cavalete" — alguém agradecendo virava alerta para o RH, e alerta falso
+  // repetido faz quem recebe parar de olhar o sino.
+  '\\b(vale|vales)\\b', '\\b(ferias|férias)\\b', '\\b(desconto|descontos|descontaram)\\b',
+  '\\b(acerto|verbas)\\b', '\\b(saldo)\\b', '\\b13[oº]\\b',
+  // Frases: só como frase mesmo, para não pegar conversa comum.
+  'quanto (eu )?(ganho|recebo|vou receber)', 'meu pagamento',
   'meu cpf', 'minha conta', 'minha chave', 'meu pix', 'meu banco',
-  'saldo', 'quanto (tem|falta|sobrou)',
+  'quanto (tem|falta|sobrou)',
 ].join('|'), 'i')
 
 /**

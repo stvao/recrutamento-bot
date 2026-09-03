@@ -28,7 +28,15 @@ const EMPRESA = process.env.EMPRESA_NOME || 'KE Engenharia'
  * Quem escreve "quero trabalhar" não precisa de IA para ser entendido, e
  * uma regra fixa aqui responde na hora, de graça, e sempre igual.
  */
-const QUER_VAGA = /\b(vaga|vagas|emprego|trabalhar|contrata|contratando|curr[ií]culo|curriculo|servi[çc]o|oportunidade|estou procurando|preciso de trabalho|t[oô] procurando)\b/i
+/*
+  "serviço" saiu daqui.
+
+  "Preciso falar sobre um serviço que prestei" é um prestador cobrando, e ia
+  parar no recrutamento — que perguntava a ele qual vaga procurava. A palavra
+  serve para os dois lados e não decide nada; quem decide, nesses casos, é o
+  modelo, que lê a frase inteira.
+*/
+const QUER_VAGA = /\b(vaga|vagas|emprego|trabalhar|contrata|contratando|curr[ií]culo|curriculo|oportunidade|estou procurando|preciso de trabalho|t[oô] procurando)\b/i
 
 const JA_TRABALHA = /\b(j[áa] trabalho|eu trabalho|sou funcion[áa]rio|trabalho (a[íi]|na obra|com voc[êe]s|pra voc[êe]s|na empresa)|sou da obra|estou na obra|sou o pedreiro|meu encarregado)\b/i
 

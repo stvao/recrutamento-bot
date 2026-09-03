@@ -32,6 +32,7 @@ import { lerComprovante, visaoDisponivel } from './ia-visao.js'
 import {
   enviarComprovante, lancarGasto, obrasDoSistema, obrasConfigurado,
 } from './obras-client.js'
+import { enviarMensagem } from './connectors.js'
 import { interpretar, combinar, nomesDe, ehVocabularioConhecido } from './lancamento.js'
 import { norm } from './texto.js'
 import * as pendentes from './pendentes.js'
@@ -321,6 +322,21 @@ async function avisar(pendente, texto) {
       const r = await pendente.enviar(texto)
       return r?.id ?? null
     }
+
+    /*
+      Sem a função de envio, mas com o endereço da conversa.
+
+      É o caso do comprovante recuperado do DISCO depois de um reinício: a
+      ficha sobrevive, a função não — ela é um fecho sobre a mensagem que
+      chegou. Sem esta saída, a cobrança e o aviso de prazo desses ficariam
+      só no log, e a pessoa nunca saberia que o comprovante dela foi para a
+      caixa.
+    */
+    if (pendente?.chat) {
+      await enviarMensagem(pendente.chat, texto)
+      return null
+    }
+
     console.log(`[gastos] (sem canal para avisar) ${pendente?.de}: ${String(texto).replace(/\n/g, ' / ')}`)
   } catch (e) {
     console.warn('[gastos] não consegui avisar:', e.message)
@@ -357,6 +373,10 @@ export async function tratar(msg) {
   if (msg.ehGrupo && chat) memoria.lembrarGrupo(chat)
 
   const p = pendentes.guardar({
+    // O endereço da conversa vai para o disco junto: é por ele que o robô
+    // consegue falar depois de um reinício, quando a função de envio já não
+    // existe mais.
+    chat,
     de, arquivo, nomeArquivo, tipo,
     descricao: texto || null,
     respostas: [],

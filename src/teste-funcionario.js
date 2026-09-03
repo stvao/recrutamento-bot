@@ -64,6 +64,22 @@ for (const comum of ['que horas começa?', 'onde fica a obra?', 'como peço bota
   ok(`"${comum}" não é barrado como pessoal`, !ehAssuntoPessoal(comum))
 }
 
+/*
+  Palavra dentro de outra palavra não conta.
+
+  "vale" sem fronteira casava com "valeu" e com "cavalete": alguém
+  agradecendo virava alerta para o RH. Alerta falso repetido faz quem recebe
+  parar de olhar o sino — e aí os alertas de verdade se perdem junto.
+*/
+for (const inocente of ['valeu, obrigado', 'valeu demais', 'vou pegar o cavalete', 'me passa a chave de fenda']) {
+  ok(`"${inocente}" não vira alerta`, !ehAssuntoPessoal(inocente))
+}
+
+// E o que É sobre o dinheiro dele continua sendo barrado.
+for (const pessoal of ['vale transporte tem?', 'e o meu vale?', 'quantos dias de férias eu tenho?']) {
+  ok(`"${pessoal}" continua sendo pessoal`, ehAssuntoPessoal(pessoal))
+}
+
 // ── 2. A conferência da resposta do modelo ────────────────────────────────
 // Última barreira. O prompt manda não falar de dinheiro; isto GARANTE.
 {

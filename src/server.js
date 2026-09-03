@@ -308,8 +308,14 @@ async function rotear(msg) {
 async function atenderCandidatoConhecido(msg, ficha) {
   const anterior = getEstado(msg.de)
 
-  // Já está numa conversa em andamento: segue nela, sem recomeçar.
-  if (anterior && anterior.modo !== 'candidato-conhecido') {
+  /*
+    Já está numa conversa de CANDIDATURA em andamento: segue nela.
+
+    Só 'ia' e 'roteiro' valem. Um estado de triagem ou de funcionário tem
+    outro formato, e entregá-lo ao cérebro do recrutamento faria ele procurar
+    campos que não existem — e responder de acordo.
+  */
+  if (anterior && (anterior.modo === 'ia' || anterior.modo === 'roteiro')) {
     return aplicarResultado(msg.de, await atender(anterior, msg.texto), msg.texto)
   }
 
@@ -341,9 +347,11 @@ async function atenderCandidatoConhecido(msg, ficha) {
 async function primeiroContato(msg) {
   const anterior = getEstado(msg.de)
 
-  // Já foi identificada como candidato numa mensagem anterior: segue no
-  // recrutamento, sem passar pela triagem de novo.
-  if (anterior && anterior.modo !== 'triagem') return processar(msg.de, msg.texto)
+  // Já está numa candidatura em andamento: segue nela, sem passar pela
+  // triagem de novo. Mesma checagem de formato de acima.
+  if (anterior && (anterior.modo === 'ia' || anterior.modo === 'roteiro')) {
+    return processar(msg.de, msg.texto)
+  }
 
   const historico = (anterior?.historico ?? []).slice(-8)
   const r = await triagem.atender({
@@ -380,11 +388,20 @@ async function primeiroContato(msg) {
     return 'Não achei seu cadastro com esse nome. Já avisei a equipe, alguém vai falar com você. 🙂'
   }
 
-  // Ficou claro que procura vaga: entrega para o recrutamento, que assume a
-  // partir daqui.
+  /*
+    Ficou claro que procura vaga: entrega para o recrutamento.
+
+    E entrega COM o que a pessoa já disse. Antes isto abria uma conversa nova
+    e devolvia a mensagem de boas-vindas, descartando o texto: quem escrevia
+    "quero uma vaga de pedreiro em Buritama" recebia "para qual vaga você
+    quer se candidatar?" — com a vaga e a cidade que ela acabou de informar
+    jogadas fora.
+  */
   if (r.intencao === 'procura_vaga') {
     limpar(msg.de)
-    return processar(msg.de, msg.texto)
+    const ini = iniciar(msg.de)
+    setEstado(msg.de, ini.estado)
+    return aplicarResultado(msg.de, await atender(ini.estado, msg.texto), msg.texto)
   }
 
   setEstado(msg.de, {

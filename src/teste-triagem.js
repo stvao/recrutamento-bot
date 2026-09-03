@@ -122,5 +122,43 @@ ok('pareceNome recusa frase longa', pareceNome('eu não sei o que dizer agora so
   ok('sem prometer nada', !/vaga|salário|contrat/i.test(r.resposta))
 }
 
+/*
+  Quem PRESTA serviço não está procurando vaga.
+
+  "serviço" servia para os dois lados e decidia errado: um prestador
+  cobrando ia parar no recrutamento, e era perguntado qual vaga procurava.
+  A palavra saiu das regras fixas — quem lê a frase inteira é o modelo.
+*/
+for (const frase of [
+  'preciso falar sobre um serviço que prestei',
+  'fiz um serviço aí e não recebi',
+  'presto serviço de terraplenagem, quero oferecer',
+]) {
+  const r = await atender({ texto: frase })
+  ok(`"${frase}" NÃO vira candidatura`, r.intencao !== 'procura_vaga')
+}
+
+// Mas o que é procura de vaga de verdade continua sendo reconhecido na hora.
+for (const frase of ['tem vaga?', 'quero trabalhar com vocês', 'mando o currículo pra onde?']) {
+  const r = await atender({ texto: frase })
+  ok(`"${frase}" continua indo para o recrutamento`, r.intencao === 'procura_vaga')
+}
+
+/*
+  A entrega ao recrutamento não pode perder o que a pessoa disse.
+
+  Quem escrevia "quero uma vaga de pedreiro em Buritama" abria uma conversa
+  nova e recebia "para qual vaga você quer se candidatar?" — com a vaga e a
+  cidade que acabara de informar jogadas fora. Aqui se prova que o cérebro do
+  recrutamento aproveita a primeira mensagem.
+*/
+{
+  const atendimento = await import('./atendimento.js')
+  const ini = atendimento.iniciarAtendimento('5511900000099')
+  const r = await atendimento.atender(ini.estado, 'quero uma vaga de pedreiro em Buritama')
+  ok('a vaga informada na primeira mensagem é aproveitada', r.estado.vaga === 'Pedreiro')
+  ok('e ele não pergunta a vaga de novo', !/para qual vaga/i.test(r.resposta))
+}
+
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exitCode = falhas ? 1 : 0
