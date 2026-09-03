@@ -18,7 +18,8 @@ import {
 } from './store.js'
 import { getVagas, origemDaLista, intervaloDeAtualizacao } from './catalogo.js'
 import { enviarMensagem, parseWebhook, baixarMidiaCloud } from './connectors.js'
-import { enviarCandidatura, avisarRH } from './rh-client.js'
+import { enviarCandidatura, avisarRH, buscarFuncionario } from './rh-client.js'
+import * as funcionario from './funcionario.js'
 import * as gastos from './gastos.js'
 
 const app = express()
@@ -274,7 +275,58 @@ async function rotear(msg) {
   }
   if (!msg.texto) return null
 
+  /*
+    Quem JÁ TRABALHA na empresa é atendido de outro jeito.
+
+    Antes do recrutamento porque a conversa é outra: perguntar "qual vaga
+    você procura?" a quem está na obra há dois anos é o tipo de coisa que faz
+    a pessoa desistir de escrever de novo.
+
+    Consultado a cada mensagem, mas guardado por meia hora no rh-client —
+    e quando o RH não responde, a pessoa é atendida como candidato, que é o
+    comportamento de sempre e não expõe nada.
+  */
+  const ficha = await buscarFuncionario(msg.de).catch(() => null)
+  if (ficha) return atenderFuncionario(msg, ficha)
+
   return processar(msg.de, msg.texto)
+}
+
+/**
+ * Conversa com quem trabalha na empresa.
+ *
+ * O histórico fica no mesmo store das conversas, com uma marca de modo: sem
+ * ele a pessoa repetiria o contexto a cada mensagem, e o robô responderia
+ * "de qual obra?" para quem acabou de dizer.
+ *
+ * Toda escalada vira alerta no sino do RH — inclusive as de assunto pessoal,
+ * que são a maioria e o motivo de o módulo existir. Alerta que exige alguém
+ * lembrar de ir procurar não é alerta.
+ */
+async function atenderFuncionario(msg, ficha) {
+  const anterior = getEstado(msg.de)
+  const historico = (anterior?.modo === 'funcionario' ? anterior.historico ?? [] : []).slice(-10)
+
+  const r = await funcionario.atender({ ficha, texto: msg.texto, historico })
+
+  setEstado(msg.de, {
+    modo: 'funcionario',
+    whatsapp: msg.de,
+    historico: [...historico, { de: 'pessoa', texto: msg.texto }, { de: 'rh', texto: r.resposta }].slice(-10),
+  })
+
+  if (r.escalarHumano) {
+    marcarEscalada(msg.de)
+    console.log(`[FUNCIONÁRIO → RH] ${ficha.primeiroNome} (${msg.de}): ${r.motivoEscalada} — "${msg.texto}"`)
+    // Sem await: a pessoa não espera o RH ser avisado para receber a resposta.
+    avisarRH({
+      whatsapp: msg.de,
+      motivo: `funcionário ${ficha.primeiroNome}: ${r.motivoEscalada}`,
+      trecho: msg.texto,
+    })
+  }
+
+  return r.resposta
 }
 
 /**

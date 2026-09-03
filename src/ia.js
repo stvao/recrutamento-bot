@@ -220,17 +220,40 @@ export async function conversar({ historico, fatos }) {
   return null
 }
 
-async function umaTentativa({ historico, fatos }) {
+/**
+ * Uma conversa qualquer com o modelo, com instruções e esquema próprios.
+ *
+ * Existe para o atendimento a FUNCIONÁRIO reusar toda a plumbing que já
+ * estava aqui — prazo, tentativa, filtros de segurança, tratamento de cota
+ * estourada — sem herdar o prompt da Maria Vitória, que é de recrutamento e
+ * fala de salário de vaga. Misturar os dois seria o caminho mais curto para
+ * o robô informar um salário a um funcionário.
+ *
+ * Devolve null em qualquer problema, como o resto deste arquivo.
+ */
+export async function chamarModelo({ instrucoes: texto, esquema, historico }) {
+  if (!CHAVE) return null
+
+  for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
+    const r = await umaTentativa({ historico, instrucoesProntas: texto, esquemaProprio: esquema })
+    if (r) return r
+    if (tentativa < TENTATIVAS) console.warn(`[ia] tentando de novo (${tentativa + 1}/${TENTATIVAS})`)
+  }
+  return null
+}
+
+async function umaTentativa({ historico, fatos, instrucoesProntas, esquemaProprio }) {
 
   const corpo = {
-    systemInstruction: { parts: [{ text: instrucoes(fatos) }] },
+    systemInstruction: { parts: [{ text: instrucoesProntas ?? instrucoes(fatos) }] },
     contents: historico.map(m => ({
-      role: m.de === 'candidato' ? 'user' : 'model',
+      // "candidato" e "pessoa" são quem escreve; o resto é o robô.
+      role: (m.de === 'candidato' || m.de === 'pessoa') ? 'user' : 'model',
       parts: [{ text: m.texto }],
     })),
     generationConfig: {
       responseMimeType: 'application/json',
-      responseSchema: ESQUEMA,
+      responseSchema: esquemaProprio ?? ESQUEMA,
       // Baixa de propósito: aqui não se quer criatividade, se quer uma
       // atendente consistente que não invente condição de trabalho.
       temperature: 0.4,

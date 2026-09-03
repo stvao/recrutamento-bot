@@ -47,7 +47,11 @@ mostra quantas conversas começaram, terminaram e onde as pessoas desistem.
 | `store.js` | Estado das conversas, em arquivo. Sobrevive ao reinício. |
 | `baileys.js` | Conexão com o WhatsApp pela via não oficial (QR code). |
 | `connectors.js` | Troca de conector: `none`, `baileys`, `zapi`, `cloud`. |
-| `rh-client.js` | Envia candidatura e alerta ao RH. |
+| `rh-client.js` | Envia candidatura e alerta ao RH, e pergunta quem é funcionário. |
+| `funcionario.js` | Atende quem já trabalha aqui — **sem dado pessoal e sem link**. |
+| `memoria.js` | O que já foi lançado e os apelidos de obra que você usa. |
+| `resumo-diario.js` | O fechamento do dia no grupo dos comprovantes. |
+| `pendentes.js` | Comprovantes esperando resposta, em disco. |
 | `telegram.js` | Conexão com o Telegram (long polling — sem webhook nem domínio). |
 | `gastos.js` | O módulo de comprovantes: quem pode lançar, e o que vira envio. |
 | `ia-visao.js` | Lê o comprovante e **confere** o que o modelo diz ter lido. |
@@ -67,6 +71,7 @@ do outro** — é o preço de estarem em repositórios separados.
 | | |
 |---|---|
 | `GET /api/integracao/vagas` | Vagas, salários, apelidos e cidades com alojamento. |
+| `GET /api/integracao/funcionario` | Este telefone é de quem já trabalha aqui? Devolve só primeiro nome, cargo e obra. |
 | `POST /api/integracao/candidatura` | Cria a candidatura. Chamada de novo com o mesmo telefone, **atualiza** em vez de duplicar. |
 | `POST /api/integracao/alerta` | Avisa o RH que uma conversa precisa de gente. |
 | Token | `RH_API_TOKEN` aqui = `RECRUTAMENTO_BOT_TOKEN` no RH. |

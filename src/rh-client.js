@@ -112,6 +112,58 @@ export async function avisarRH({ whatsapp, motivo, trecho }) {
   }
 }
 
+/**
+ * Este telefone é de alguém que trabalha na empresa?
+ *
+ * Devolve { primeiroNome, funcao, obra, obraEndereco } ou null. É de
+ * propósito que não venha mais nada: número de WhatsApp é identificação
+ * fraca — celular emprestado é rotina em obra — e o que o robô escreve vira
+ * prova. Dado pessoal se resolve com gente.
+ *
+ * Guardado por um tempo: a pergunta se repete a cada mensagem da conversa, e
+ * consultar o RH em todas acrescentaria a latência da rede a cada frase.
+ *
+ * Nunca lança. Sem resposta, a pessoa é atendida como candidato — que é o
+ * comportamento de sempre e não expõe nada.
+ */
+const VALIDADE_FUNCIONARIO_MS = 1000 * 60 * 30
+const cacheFuncionarios = new Map()   // telefone -> { ficha, buscadoEm }
+
+export async function buscarFuncionario(whatsapp) {
+  const chave = String(whatsapp ?? '').replace(/\D/g, '')
+  if (!chave || !RH_API_URL || !RH_API_TOKEN) return null
+
+  const guardado = cacheFuncionarios.get(chave)
+  if (guardado && Date.now() - guardado.buscadoEm < VALIDADE_FUNCIONARIO_MS) {
+    return guardado.ficha
+  }
+
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/funcionario?whatsapp=${encodeURIComponent(chave)}`, {
+      headers: { Authorization: `Bearer ${RH_API_TOKEN}` },
+      signal: AbortSignal.timeout(6000),
+    })
+    if (!r.ok) {
+      // 404 = RH numa versão sem esta rota. Não é erro de configuração, e
+      // atender como candidato continua sendo seguro.
+      if (r.status !== 404) console.warn(`[rh-client] consulta de funcionário: HTTP ${r.status}`)
+      return null
+    }
+    const j = await r.json()
+    const ficha = j?.encontrado ? j : null
+    cacheFuncionarios.set(chave, { ficha, buscadoEm: Date.now() })
+    return ficha
+  } catch (e) {
+    console.warn('[rh-client] não consegui consultar funcionário:', e.message)
+    return null
+  }
+}
+
+/** Só para teste: esquece quem já foi consultado. */
+export function _limparCacheFuncionarios() {
+  cacheFuncionarios.clear()
+}
+
 /** Só para teste: o corpo que sairia daqui, sem enviar nada. */
 export function _corpoDaCandidatura(dados) {
   return JSON.parse(montarCorpo(dados))
