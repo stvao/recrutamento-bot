@@ -48,6 +48,7 @@ mostra quantas conversas começaram, terminaram e onde as pessoas desistem.
 | `baileys.js` | Conexão com o WhatsApp pela via não oficial (QR code). |
 | `connectors.js` | Troca de conector: `none`, `baileys`, `zapi`, `cloud`. |
 | `rh-client.js` | Envia candidatura e alerta ao RH, e pergunta quem é funcionário. |
+| `triagem.js` | O primeiro contato de quem o sistema não conhece. Não presume nada. |
 | `funcionario.js` | Atende quem já trabalha aqui — **sem dado pessoal e sem link**. |
 | `memoria.js` | O que já foi lançado e os apelidos de obra que você usa. |
 | `resumo-diario.js` | O fechamento do dia no grupo dos comprovantes. |
@@ -71,7 +72,7 @@ do outro** — é o preço de estarem em repositórios separados.
 | | |
 |---|---|
 | `GET /api/integracao/vagas` | Vagas, salários, apelidos e cidades com alojamento. |
-| `GET /api/integracao/funcionario` | Este telefone é de quem já trabalha aqui? Devolve só primeiro nome, cargo e obra. |
+| `GET /api/integracao/quem` | Quem é este número: funcionário, candidato já inscrito, ou ninguém. Só primeiro nome, cargo e obra — nada pessoal. |
 | `POST /api/integracao/candidatura` | Cria a candidatura. Chamada de novo com o mesmo telefone, **atualiza** em vez de duplicar. |
 | `POST /api/integracao/alerta` | Avisa o RH que uma conversa precisa de gente. |
 | Token | `RH_API_TOKEN` aqui = `RECRUTAMENTO_BOT_TOKEN` no RH. |

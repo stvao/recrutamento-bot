@@ -113,55 +113,69 @@ export async function avisarRH({ whatsapp, motivo, trecho }) {
 }
 
 /**
- * Este telefone é de alguém que trabalha na empresa?
+ * Quem é este número — funcionário, candidato já inscrito, ou ninguém.
  *
- * Devolve { primeiroNome, funcao, obra, obraEndereco } ou null. É de
- * propósito que não venha mais nada: número de WhatsApp é identificação
- * fraca — celular emprestado é rotina em obra — e o que o robô escreve vira
- * prova. Dado pessoal se resolve com gente.
+ * Existe porque o robô tratava todo desconhecido como candidato, e
+ * perguntava "qual vaga você procura?" para quem só queria uma informação.
+ *
+ * Também busca por NOME, quando o telefone não diz nada: alguém escreve de
+ * um número novo e conta que trabalha na empresa. Isso é identificação MAIS
+ * FRACA que o telefone e vem marcado como tal na resposta — é aceitável
+ * porque reconhecer alguém aqui não libera dado pessoal nenhum, só libera
+ * ser chamado pelo nome.
  *
  * Guardado por um tempo: a pergunta se repete a cada mensagem da conversa, e
  * consultar o RH em todas acrescentaria a latência da rede a cada frase.
  *
- * Nunca lança. Sem resposta, a pessoa é atendida como candidato — que é o
- * comportamento de sempre e não expõe nada.
+ * Nunca lança. Sem resposta, a pessoa cai na triagem, que não presume nada.
  */
-const VALIDADE_FUNCIONARIO_MS = 1000 * 60 * 30
-const cacheFuncionarios = new Map()   // telefone -> { ficha, buscadoEm }
+const VALIDADE_QUEM_MS = 1000 * 60 * 30
+const cacheQuem = new Map()   // chave -> { ficha, buscadoEm }
 
-export async function buscarFuncionario(whatsapp) {
-  const chave = String(whatsapp ?? '').replace(/\D/g, '')
-  if (!chave || !RH_API_URL || !RH_API_TOKEN) return null
+export async function quemE({ whatsapp, nome } = {}) {
+  if (!RH_API_URL || !RH_API_TOKEN) return null
 
-  const guardado = cacheFuncionarios.get(chave)
-  if (guardado && Date.now() - guardado.buscadoEm < VALIDADE_FUNCIONARIO_MS) {
+  const telefone = String(whatsapp ?? '').replace(/\D/g, '')
+  const chave = nome ? `nome:${nome}` : `tel:${telefone}`
+  if (!telefone && !nome) return null
+
+  const guardado = cacheQuem.get(chave)
+  if (guardado && Date.now() - guardado.buscadoEm < VALIDADE_QUEM_MS) {
     return guardado.ficha
   }
 
+  const params = new URLSearchParams()
+  if (telefone) params.set('whatsapp', telefone)
+  if (nome) params.set('nome', nome)
+
   try {
-    const r = await fetch(`${RH_API_URL}/api/integracao/funcionario?whatsapp=${encodeURIComponent(chave)}`, {
+    const r = await fetch(`${RH_API_URL}/api/integracao/quem?${params}`, {
       headers: { Authorization: `Bearer ${RH_API_TOKEN}` },
       signal: AbortSignal.timeout(6000),
     })
     if (!r.ok) {
-      // 404 = RH numa versão sem esta rota. Não é erro de configuração, e
-      // atender como candidato continua sendo seguro.
-      if (r.status !== 404) console.warn(`[rh-client] consulta de funcionário: HTTP ${r.status}`)
+      // 404 = RH numa versão sem esta rota. Não é erro de configuração: a
+      // pessoa cai na triagem, que funciona sem saber quem ela é.
+      if (r.status !== 404) console.warn(`[rh-client] consulta "quem": HTTP ${r.status}`)
       return null
     }
     const j = await r.json()
-    const ficha = j?.encontrado ? j : null
-    cacheFuncionarios.set(chave, { ficha, buscadoEm: Date.now() })
+    const ficha = j?.tipo && j.tipo !== 'desconhecido' ? j : null
+
+    // Busca por nome NÃO é guardada: a próxima mensagem vem do mesmo
+    // telefone, e guardar por nome faria o resultado de uma pessoa valer
+    // para quem escrevesse o mesmo nome depois.
+    if (!nome) cacheQuem.set(chave, { ficha, buscadoEm: Date.now() })
     return ficha
   } catch (e) {
-    console.warn('[rh-client] não consegui consultar funcionário:', e.message)
+    console.warn('[rh-client] não consegui consultar quem é:', e.message)
     return null
   }
 }
 
 /** Só para teste: esquece quem já foi consultado. */
-export function _limparCacheFuncionarios() {
-  cacheFuncionarios.clear()
+export function _limparCacheQuem() {
+  cacheQuem.clear()
 }
 
 /** Só para teste: o corpo que sairia daqui, sem enviar nada. */

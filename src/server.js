@@ -18,8 +18,9 @@ import {
 } from './store.js'
 import { getVagas, origemDaLista, intervaloDeAtualizacao } from './catalogo.js'
 import { enviarMensagem, parseWebhook, baixarMidiaCloud } from './connectors.js'
-import { enviarCandidatura, avisarRH, buscarFuncionario } from './rh-client.js'
+import { enviarCandidatura, avisarRH, quemE } from './rh-client.js'
 import * as funcionario from './funcionario.js'
+import * as triagem from './triagem.js'
 import * as gastos from './gastos.js'
 
 const app = express()
@@ -276,20 +277,130 @@ async function rotear(msg) {
   if (!msg.texto) return null
 
   /*
-    Quem JÁ TRABALHA na empresa é atendido de outro jeito.
+    ANTES de qualquer coisa: quem é essa pessoa?
 
-    Antes do recrutamento porque a conversa é outra: perguntar "qual vaga
-    você procura?" a quem está na obra há dois anos é o tipo de coisa que faz
-    a pessoa desistir de escrever de novo.
+    O robô tratava todo desconhecido como candidato, e perguntava "qual vaga
+    você procura?" para quem só queria uma informação — ou para quem trabalha
+    na obra há dois anos.
 
-    Consultado a cada mensagem, mas guardado por meia hora no rh-client —
-    e quando o RH não responde, a pessoa é atendida como candidato, que é o
-    comportamento de sempre e não expõe nada.
+    Consultado a cada mensagem, mas guardado por meia hora no rh-client. E
+    quando o RH não responde, cai na triagem, que funciona sem saber quem é.
   */
-  const ficha = await buscarFuncionario(msg.de).catch(() => null)
-  if (ficha) return atenderFuncionario(msg, ficha)
+  const ficha = await quemE({ whatsapp: msg.de }).catch(() => null)
 
-  return processar(msg.de, msg.texto)
+  if (ficha?.tipo === 'funcionario') return atenderFuncionario(msg, ficha)
+  if (ficha?.tipo === 'candidato') return atenderCandidatoConhecido(msg, ficha)
+
+  return primeiroContato(msg)
+}
+
+/**
+ * Quem já se inscreveu, e voltou.
+ *
+ * Sem isto ele recomeçaria a ficha do zero com quem já respondeu tudo — que
+ * é a forma mais rápida de a pessoa achar que ninguém está prestando
+ * atenção. E a pergunta que ela faz ao voltar é sempre a mesma: "e aí, saiu
+ * alguma coisa?".
+ *
+ * O andamento é dito por FAIXA, e nunca "reprovado". Essa notícia não é o
+ * robô que dá; quando a candidatura foi encerrada, ele chama gente.
+ */
+async function atenderCandidatoConhecido(msg, ficha) {
+  const anterior = getEstado(msg.de)
+
+  // Já está numa conversa em andamento: segue nela, sem recomeçar.
+  if (anterior && anterior.modo !== 'candidato-conhecido') {
+    return aplicarResultado(msg.de, await atender(anterior, msg.texto), msg.texto)
+  }
+
+  setEstado(msg.de, { modo: 'candidato-conhecido', whatsapp: msg.de })
+
+  if (ficha.situacao === 'encerrada') {
+    marcarEscalada(msg.de)
+    avisarRH({
+      whatsapp: msg.de,
+      motivo: `candidato ${ficha.primeiroNome} voltou (candidatura encerrada)`,
+      trecho: msg.texto,
+    })
+    return `Oi, ${ficha.primeiroNome}! Deixa eu chamar alguém da equipe pra falar com você. 🙂`
+  }
+
+  const onde = [ficha.vaga, ficha.cidade].filter(Boolean).join(' em ')
+  return `Oi de novo, ${ficha.primeiroNome}! 👋\n`
+    + `Sua ficha${onde ? ` para ${onde}` : ''} está com a gente (protocolo ${ficha.protocolo}).\n`
+    + 'A equipe chama assim que houver novidade. Precisa de mais alguma coisa?'
+}
+
+/**
+ * Primeiro contato de quem o sistema não conhece.
+ *
+ * Não presume nada. Responde ao que a pessoa falou e vai entendendo pelo
+ * caminho — e só passa para o recrutamento quando fica claro que é disso que
+ * se trata.
+ */
+async function primeiroContato(msg) {
+  const anterior = getEstado(msg.de)
+
+  // Já foi identificada como candidato numa mensagem anterior: segue no
+  // recrutamento, sem passar pela triagem de novo.
+  if (anterior && anterior.modo !== 'triagem') return processar(msg.de, msg.texto)
+
+  const historico = (anterior?.historico ?? []).slice(-8)
+  const r = await triagem.atender({
+    texto: msg.texto,
+    historico,
+    esperandoNome: Boolean(anterior?.esperandoNome),
+  })
+
+  /*
+    Disse o nome depois de a gente perguntar: procura no RH.
+
+    Identificação por nome é MAIS FRACA que por telefone — qualquer um
+    digita um nome. Vale porque reconhecer alguém aqui não libera dado
+    pessoal nenhum: libera ser chamado pelo nome e receber respostas que
+    valem para todo mundo igual.
+  */
+  if (r.nomeInformado) {
+    const achado = await quemE({ nome: r.nomeInformado }).catch(() => null)
+    if (achado?.tipo === 'funcionario') {
+      limpar(msg.de)
+      console.log(`[triagem] ${msg.de} identificado como ${achado.primeiroNome} pelo NOME (não pelo telefone)`)
+      return `Achei aqui, ${achado.primeiroNome}! 👍 Em que posso ajudar?`
+    }
+    // Não achou: chama gente em vez de insistir. Quem diz que trabalha na
+    // empresa e não está no cadastro é exatamente o caso que precisa de
+    // alguém olhando.
+    limpar(msg.de)
+    marcarEscalada(msg.de)
+    avisarRH({
+      whatsapp: msg.de,
+      motivo: `disse que trabalha na empresa mas não achei no cadastro: "${r.nomeInformado}"`,
+      trecho: msg.texto,
+    })
+    return 'Não achei seu cadastro com esse nome. Já avisei a equipe, alguém vai falar com você. 🙂'
+  }
+
+  // Ficou claro que procura vaga: entrega para o recrutamento, que assume a
+  // partir daqui.
+  if (r.intencao === 'procura_vaga') {
+    limpar(msg.de)
+    return processar(msg.de, msg.texto)
+  }
+
+  setEstado(msg.de, {
+    modo: 'triagem',
+    whatsapp: msg.de,
+    esperandoNome: Boolean(r.pedindoNome),
+    historico: [...historico, { de: 'pessoa', texto: msg.texto }, { de: 'rh', texto: r.resposta ?? '' }].slice(-8),
+  })
+
+  if (r.escalarHumano) {
+    marcarEscalada(msg.de)
+    console.log(`[TRIAGEM → RH] ${msg.de}: ${r.motivoEscalada} — "${msg.texto}"`)
+    avisarRH({ whatsapp: msg.de, motivo: r.motivoEscalada, trecho: msg.texto })
+  }
+
+  return r.resposta ?? triagem.saudacao()
 }
 
 /**
