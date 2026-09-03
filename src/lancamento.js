@@ -253,6 +253,20 @@ const GENERICAS = new Set([
  * A vantagem sobre uma lista de apelidos no .env é não precisar de
  * manutenção: obra nova entra no sistema e o apelido dela sai daí sozinho.
  */
+/**
+ * Esta palavra ja quer dizer outra coisa?
+ *
+ * Usado antes de aprender um apelido novo. "areia" e "cimento" descrevem o
+ * que foi comprado, nao a obra — guardar um deles como apelido faria TODA
+ * compra de areia cair naquela obra, e ninguem entenderia por que.
+ */
+export function ehVocabularioConhecido(palavra) {
+  const p = norm(palavra)
+  if (!p) return true
+  return p.split(' ').some(x =>
+    TERMO_EXATO.has(x) || TODOS_OS_CLASSIFICADORES.some(c => c.termo === x))
+}
+
 export function apelidosDe(obras) {
   const donasDe = new Map()   // palavra -> [obras que a contêm]
 
@@ -304,6 +318,22 @@ export function acharObra(texto, obras) {
 
   const porNome = acharNaFrase(texto, nomes)
   if (porNome.achado) return porNome
+
+  /*
+    Os APELIDOS APRENDIDOS, como frase inteira.
+
+    Vêm logo depois do nome oficial e antes de qualquer palpite: a pessoa
+    disse, com todas as letras, que "escola do ze" é aquela obra, e isso vale
+    mais que qualquer semelhança que o código consiga inventar.
+  */
+  const deApelido = new Map()
+  for (const o of obras ?? []) {
+    for (const ap of (typeof o === 'object' ? o.apelidos ?? [] : [])) deApelido.set(ap, o.nome)
+  }
+  if (deApelido.size) {
+    const r = acharNaFrase(texto, [...deApelido.keys()])
+    if (r.achado) return { achado: deApelido.get(r.achado), resto: r.resto }
+  }
 
   const apelidos = apelidosDe(obras)
 

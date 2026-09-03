@@ -390,6 +390,11 @@ if (process.env.TELEGRAM_TOKEN) {
 */
 gastos.iniciarRonda()
 
+// Fechamento do dia no grupo dos comprovantes. Desligado por padrão — uma
+// mensagem automática diária é decisão de quem usa, não do código.
+const { agendar: agendarResumo } = await import('./resumo-diario.js')
+agendarResumo()
+
 if (gastos.gastosAtivo()) {
   const s = gastos.situacao()
   console.log(

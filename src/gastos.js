@@ -32,9 +32,10 @@ import { lerComprovante, visaoDisponivel } from './ia-visao.js'
 import {
   enviarComprovante, lancarGasto, obrasDoSistema, obrasConfigurado,
 } from './obras-client.js'
-import { interpretar, combinar, nomesDe } from './lancamento.js'
+import { interpretar, combinar, nomesDe, ehVocabularioConhecido } from './lancamento.js'
 import { norm } from './texto.js'
 import * as pendentes from './pendentes.js'
+import * as memoria from './memoria.js'
 
 /**
  * Quem pode lançar.
@@ -154,9 +155,28 @@ export function origemAceita(chat, chatNome) {
   return false
 }
 
-/** As obras conhecidas agora: as do sistema, ou a reserva do .env. */
+/**
+ * As obras conhecidas agora: as do sistema, ou a reserva do .env.
+ *
+ * Os apelidos APRENDIDOS entram junto. Eles vêm no campo do endereço, que a
+ * busca por palavra distintiva já varre — assim "escola do zé", uma vez
+ * confirmado por você, passa a achar a obra sozinho, sem caminho novo.
+ */
 async function obrasConhecidas() {
-  return (await obrasDoSistema()) ?? OBRAS_RESERVA
+  const doSistema = (await obrasDoSistema()) ?? OBRAS_RESERVA
+  const aprendidos = memoria.apelidosPorObra(doSistema)
+  if (!aprendidos.size) return doSistema
+
+  return doSistema.map((o) => {
+    const nome = typeof o === 'string' ? o : o.nome
+    const apelidos = aprendidos.get(nome)
+    if (!apelidos?.length) return o
+    return {
+      nome,
+      endereco: typeof o === 'string' ? '' : (o.endereco ?? ''),
+      apelidos,
+    }
+  })
 }
 
 /** Diagnóstico, para o /metricas. */
@@ -332,6 +352,10 @@ export async function tratar(msg) {
     return `⚠ Já tenho ${MAX_ESPERANDO} comprovantes seus esperando. Responde alguns antes de mandar mais, ou escreve *cancelar tudo*.`
   }
 
+  // De onde vêm os comprovantes — o resumo do dia sai por conta própria e
+  // precisa saber para onde mandar.
+  if (msg.ehGrupo && chat) memoria.lembrarGrupo(chat)
+
   const p = pendentes.guardar({
     de, arquivo, nomeArquivo, tipo,
     descricao: texto || null,
@@ -464,6 +488,33 @@ function aplicarResposta(p, texto) {
     return paraCaixa(p).then((r) => { pendentes.remover(p.id); return r })
   }
 
+  /*
+    Respondendo à pergunta de DUPLICATA.
+
+    Descartar aqui é a única coisa que o robô faz que não deixa rastro em
+    lugar nenhum — por isso só acontece com a pessoa dizendo, com todas as
+    letras, que é o mesmo comprovante.
+  */
+  if (p.esperandoDuplicata) {
+    if (MESMO_PAGAMENTO.test(texto)) {
+      console.log(`[gastos] ${p.de} → duplicata confirmada, descartado`)
+      pendentes.remover(p.id)
+      return Promise.resolve('👍 Beleza, não lancei — era o mesmo que já tinha entrado.')
+    }
+    if (OUTRO_PAGAMENTO.test(texto)) {
+      p.esperandoDuplicata = false
+      p.duplicataConfirmada = true
+      p.jaPerguntou = false
+      p.perguntadoEm = null
+      pendentes.atualizar(p)
+      return resolveDireto(p)
+    }
+    // Respondeu outra coisa: trata como informação nova (pode estar
+    // corrigindo o valor, que é o que faria os dois deixarem de ser iguais).
+    p.esperandoDuplicata = false
+    p.duplicataConfirmada = true
+  }
+
   const so = texto.trim().replace(/[).\s]+$/, '')
 
   // Escolheu um COMPROVANTE pelo número, quando havia vários sem citação.
@@ -487,8 +538,49 @@ function aplicarResposta(p, texto) {
   */
   if (/^\d{1,2}$/.test(so) && p.opcoes?.length) {
     const i = Number(so) - 1
-    if (i >= 0 && i < p.opcoes.length) p.obraEscolhida = p.opcoes[i]
-    else p.respostas.push(texto.trim())
+    if (i >= 0 && i < p.opcoes.length) {
+      p.obraEscolhida = p.opcoes[i]
+
+      /*
+        APRENDE.
+
+        A pessoa escreveu um nome que o robô não reconheceu, ele perguntou, e
+        ela apontou qual era. Esse é o único momento em que se sabe, com
+        certeza, o que aquela palavra quer dizer — e é por isso que só se
+        aprende aqui. Aprender de um palpite propagaria o erro: bastaria ele
+        guardar "areia" como apelido de uma obra para toda compra de areia ir
+        parar lá.
+      */
+      if (!p.dados?.obra) {
+        /*
+          O que sobrou depois de tirar valor, tipo e obra e a DESCRICAO — e e
+          dentro dela que esta o nome que ele nao reconheceu, misturado com o
+          que foi comprado ("escola do ze cimento").
+
+          Tenta as tres primeiras palavras, depois as duas, depois a
+          primeira: nome de obra vem no comeco do jeito que as pessoas
+          escrevem, e o que sobra atras e a compra.
+        */
+        const sobra = (p.dados?.descricao ?? p.descricao ?? '').trim()
+        const palavras = sobra.split(/\s+/).filter(Boolean)
+
+        for (const quantas of [3, 2, 1]) {
+          if (palavras.length < quantas) continue
+          const candidato = palavras.slice(0, quantas).join(' ')
+
+          // "areia", "cimento", "material" descrevem a compra. Guardar um
+          // deles como apelido faria toda compra de areia cair nesta obra.
+          if (ehVocabularioConhecido(candidato)) continue
+
+          if (memoria.aprenderApelido(candidato, p.obraEscolhida)) {
+            p.apelidoAprendido = candidato
+            break
+          }
+        }
+      }
+    } else {
+      p.respostas.push(texto.trim())
+    }
   } else {
     p.respostas.push(texto.trim())
   }
@@ -618,6 +710,18 @@ function respostaDeTeste() {
   return linhas.join('\n')
 }
 
+/**
+ * "É outro pagamento" — segue e lança.
+ *
+ * "de novo" e "comprei de novo" entram porque é como se responde na prática:
+ * a pergunta foi "é outro ou é o mesmo?", e ninguém repete a palavra da
+ * pergunta.
+ */
+const OUTRO_PAGAMENTO = /^\s*(outro|outro pagamento|e outro|é outro|nao e o mesmo|não é o mesmo|de novo|comprei de novo|sim,? e outro|pode lancar|pode lançar|lanca|lança)\s*[!.]*\s*$/i
+
+/** "É o mesmo comprovante" — descarta sem lançar. */
+const MESMO_PAGAMENTO = /^\s*(mesmo|o mesmo|e o mesmo|é o mesmo|duplicado|duplicata|repetido|ja lancou|já lançou|ja mandei|já mandei|descarta|ignora)\s*[!.]*\s*$/i
+
 /** Quem desiste de responder. */
 const DESISTENCIA = /^\s*(cancelar|cancela|deixa|deixa pra la|deixa pra lá|esquece|nao sei|não sei|depois)\s*[!.]*\s*$/i
 
@@ -671,6 +775,39 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
     return { perguntando: true, texto: perguntar(pendente, falta, obras) }
   }
   if (falta.length) return { perguntando: false, texto: await paraCaixa(pendente) }
+
+  /*
+    Mesma obra e mesmo valor de um lançamento recente: pode ser duplicata.
+
+    PERGUNTA, não recusa. Valor repetido é comum de verdade — dois sacos de
+    cimento no mesmo dia, a diária do mesmo pedreiro na semana seguinte. Quem
+    sabe se é o mesmo pagamento é quem pagou, e barrar sozinho faria o robô
+    engolir gasto legítimo em silêncio, que é o pior erro que ele pode
+    cometer aqui.
+  */
+  if (!pendente.duplicataConfirmada) {
+    const igual = memoria.parecidoCom(
+      { obra: dados.obra, valor: dados.valor }, pendente.idMensagem,
+    )
+    if (igual) {
+      pendente.esperandoDuplicata = true
+      pendente.jaPerguntou = true
+      const quando = new Date(igual.quando)
+      const quandoTexto = quando.toDateString() === new Date().toDateString()
+        ? `hoje às ${quando.getHours()}h${String(quando.getMinutes()).padStart(2, '0')}`
+        : `em ${quando.getDate()}/${quando.getMonth() + 1}`
+      return {
+        perguntando: true,
+        texto: [
+          `⚠ Já lancei um igual a este ${quandoTexto}:`,
+          `   ${igual.obra} · ${igual.descricao ?? 'sem descrição'} · ${moeda(igual.valor)}`,
+          '',
+          'É outro pagamento, ou é o mesmo comprovante?',
+          'Responde *outro* para lançar, ou *mesmo* para descartar.',
+        ].join('\n'),
+      }
+    }
+  }
 
   return lancar(pendente, dados)
 }
@@ -754,6 +891,11 @@ async function lancar(pendente, dados) {
 
   if (r.ok) {
     console.log(`[gastos] ${pendente.de} → LANÇADO em ${r.obra} (${moeda(dados.valor)})`)
+    memoria.anotarLancamento({
+      obra: r.obra, valor: dados.valor, descricao: dados.descricao,
+      categoria: dados.tipo, de: pendente.de, resultado: 'lancado',
+      idMensagem: pendente.idMensagem,
+    })
     const linhas = [`✅ ${r.mensagem || 'Lançado, aguardando aprovação.'}`]
     linhas.push([
       r.rateio?.length > 1 ? null : r.obra,
@@ -769,6 +911,13 @@ async function lancar(pendente, dados) {
     }
 
     if (!dados.valorDigitado) linhas.push('⚠ Esse valor eu li da imagem. Confere ao aprovar.')
+
+    // Dizer que aprendeu não é enfeite: é o que faz a pessoa confiar em
+    // escrever daquele jeito de novo, em vez de achar que deu sorte.
+    if (pendente.apelidoAprendido) {
+      linhas.push(`_(anotei que "${pendente.apelidoAprendido}" é essa obra — da próxima vez já sei)_`)
+    }
+
     return { perguntando: false, texto: linhas.join('\n') }
   }
 
@@ -811,6 +960,13 @@ async function paraCaixa(pendente) {
   })
 
   console.log(`[gastos] ${pendente.de} → caixa: ${envio.ok ? 'ok' : envio.motivo}`)
+  if (envio.ok) {
+    memoria.anotarLancamento({
+      obra: dados.obra, valor: dados.valor, descricao: dados.descricao,
+      categoria: dados.tipo, de: pendente.de, resultado: 'caixa',
+      idMensagem: pendente.idMensagem,
+    })
+  }
 
   if (!envio.ok) {
     if (envio.status === 401) return '❌ Meu acesso ao sistema de obras foi recusado (token inválido ou revogado). Avisa quem cuida do sistema.'

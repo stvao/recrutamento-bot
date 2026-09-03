@@ -91,6 +91,8 @@ process.env.OBRAS_API_URL = `http://127.0.0.1:${srv.address().port}`
 
 const { tratar, iniciarRonda, _limparPendentes } = await import('./gastos.js')
 const { _limparCacheObras } = await import('./obras-client.js')
+const memoria = await import('./memoria.js')
+const resumo = await import('./resumo-diario.js')
 iniciarRonda()
 
 const foto = Buffer.from('imagem-do-comprovante')
@@ -108,6 +110,9 @@ function pessoa(de) {
   chamadas.length = 0
   _limparPendentes()
   _limparCacheObras()
+  // Sem isto um teste veria o lançamento do anterior como duplicata — os
+  // valores e obras se repetem de propósito ao longo do arquivo.
+  memoria._limpar()
   const ditos = []
   let n = 0
 
@@ -317,6 +322,143 @@ const enviados = () => lancados() + naCaixa()
   const recuperado = outro.todos().find(x => x.idMensagem === 'foto-sobrevive')
   ok('com a ficha inteira', Boolean(recuperado))
   ok('e o arquivo ainda lá', outro.arquivoDe(recuperado)?.length === foto.length)
+}
+
+// ── 14. Comprovante repetido: PERGUNTA, não recusa ────────────────────────
+// Valor repetido é comum de verdade — dois sacos de cimento no mesmo dia, a
+// diária do mesmo pedreiro na semana seguinte. Quem sabe se é o mesmo
+// pagamento é quem pagou.
+{
+  const p = pessoa('5511900000040')
+  await p.foto('haia cimento 250')
+  ok('o primeiro entra normal', lancados() === 1)
+
+  await p.foto('haia cimento 250')
+  await espera(20)
+  const aviso = p.ditos.find(t => /já lancei um igual/i.test(t)) ?? ''
+  ok('o segundo igual vira PERGUNTA', aviso.length > 0)
+  ok('mostrando o que já tinha entrado', aviso.includes('R$ 250,00'))
+  ok('e não lança sozinho', lancados() === 1)
+
+  await p.diz('outro')
+  await espera(20)
+  ok('"outro" faz lançar', p.ditos.some(t => /aguardando sua aprovação/i.test(t)))
+  ok('agora são dois', lancados() === 2)
+}
+
+// "Mesmo" descarta — e é a única coisa que o robô faz sem deixar rastro, por
+// isso exige a pessoa dizendo com todas as letras.
+{
+  const p = pessoa('5511900000041')
+  await p.foto('tsuya areia 400')
+  await espera(20)
+  await p.foto('tsuya areia 400')
+  await espera(20)
+  const r = await p.diz('mesmo')
+  ok('"mesmo" descarta', /não lancei/i.test(r ?? ''))
+  ok('sem lançar o segundo', lancados() === 1)
+  ok('e sem mandar para a caixa', naCaixa() === 0)
+}
+
+// Valor diferente na mesma obra não é duplicata.
+{
+  const p = pessoa('5511900000042')
+  await p.foto('haia cimento 100'); await espera(20)
+  await p.foto('haia cimento 200'); await espera(20)
+  ok('valores diferentes não viram suspeita', lancados() === 2)
+}
+
+// Mesmo valor em obra diferente também não.
+{
+  const p = pessoa('5511900000043')
+  await p.foto('haia cimento 300'); await espera(20)
+  await p.foto('tsuya cimento 300'); await espera(20)
+  ok('obras diferentes não viram suspeita', lancados() === 2)
+}
+
+// ── 15. Aprender o apelido que você usa ───────────────────────────────────
+// Sem isto ele erraria igual para sempre, e a mesma pergunta voltaria toda
+// semana.
+{
+  const p = pessoa('5511900000044')
+
+  await p.foto('escola do ze cimento 150')
+  await espera(20)
+  ok('não reconhece um nome novo', p.ditos.some(t => /obra/i.test(t)))
+
+  // Escolhe da lista — é aqui que ele aprende, porque aqui há certeza.
+  const pergunta = p.ditos.find(t => /obra/i.test(t)) ?? ''
+  const linha = pergunta.split('\n').find(l => /^\d\)/.test(l)) ?? ''
+  const numero = linha.slice(0, 1)
+  await p.diz(numero || '1')
+  await espera(20)
+  ok('escolher da lista lança', lancados() === 1)
+  ok('e ele avisa que aprendeu', p.ditos.some(t => t.includes('anotei')))
+
+  const aprendidos = memoria.apelidosAprendidos()
+  ok('o apelido ficou guardado', Object.keys(aprendidos).some(k => k.includes('escola do ze')))
+
+  // Da próxima vez ele acerta sozinho — sem limpar a memória, que é onde o
+  // apelido ficou.
+  _limparPendentes()
+  _limparCacheObras()
+  chamadas.length = 0
+  p.ditos.length = 0
+  await p.foto('escola do ze areia 175')
+  await espera(20)
+  ok('da próxima vez acerta sozinho', p.ditos.some(t => /aguardando sua aprovação/i.test(t)))
+  ok('sem perguntar de novo', !p.ditos.some(t => /de qual \*?obra/i.test(t)))
+}
+
+// Não aprende de palpite: só quando a pessoa APONTA qual era.
+{
+  memoria._limpar()
+  const p = pessoa('5511900000045')
+  await p.foto('haia areia 90'); await espera(20)
+  ok('nome já reconhecido lança direto', lancados() === 1)
+  ok('e não vira apelido novo', Object.keys(memoria.apelidosAprendidos()).length === 0)
+}
+
+// Frase longa demais não vira apelido: casaria com qualquer coisa depois.
+{
+  memoria._limpar()
+  ok('frase longa não é aprendida',
+    memoria.aprenderApelido('comprei areia para a obra nova do centro', 'X') === false)
+  ok('palavra curta demais também não', memoria.aprenderApelido('ab', 'X') === false)
+  ok('mas duas ou três palavras valem', memoria.aprenderApelido('escola do ze', 'X') === true)
+}
+
+// ── 16. Resumo do fim do dia ──────────────────────────────────────────────
+{
+  memoria._limpar()
+  ok('dia sem nada não vira mensagem', resumo.montar({ esperando: 0 }) === null)
+
+  memoria.anotarLancamento({ obra: 'EE/ETEC AGUIA DE HAIA', valor: 300, descricao: 'cimento', resultado: 'lancado' })
+  memoria.anotarLancamento({ obra: 'EE/ETEC AGUIA DE HAIA', valor: 200, descricao: 'areia', resultado: 'lancado' })
+  memoria.anotarLancamento({ obra: 'EE PROFA TSUYA OHNO KIMURA', valor: 150, descricao: 'tinta', resultado: 'lancado' })
+  memoria.anotarLancamento({ obra: null, valor: null, resultado: 'caixa' })
+
+  const texto = resumo.montar({ esperando: 2 })
+  ok('conta os lançados', texto.includes('3 comprovante'))
+  ok('soma o total do dia', texto.includes('R$ 650,00'))
+  ok('separa por obra', texto.includes('R$ 500,00') && texto.includes('R$ 150,00'))
+  ok('a obra maior vem primeiro', texto.indexOf('AGUIA') < texto.indexOf('TSUYA'))
+  ok('diz o que espera resposta no grupo', /2 esperando você responder/i.test(texto))
+  ok('e o que foi para a caixa', /1 foram para a caixa|1 foi para a caixa/i.test(texto))
+  ok('lembra onde aprovar', /Aprovar gastos/i.test(texto))
+
+  // Nada acontecido é silêncio: a mensagem diária de "nada" faz as pessoas
+  // silenciarem o robô, e aí ele perde os dias em que teria o que dizer.
+  memoria._limpar()
+  ok('dia vazio segue em silêncio', resumo.montar({ esperando: 0 }) === null)
+  ok('mas fala se há alguém esperando', resumo.montar({ esperando: 1 }) !== null)
+}
+
+// O horário do fechamento é sempre o próximo, nunca no passado.
+{
+  const daqui = resumo.proximoEm(new Date())
+  ok('o próximo fechamento está no futuro', daqui > 0)
+  ok('e dentro de 24 horas', daqui <= 24 * 60 * 60 * 1000)
 }
 
 srv.close()
