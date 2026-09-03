@@ -29,18 +29,18 @@ atravessar quando se chegar nela.
 
 # Antes de tudo: as duas chaves queimadas
 
-As duas apareceram em conversa e continuam válidas. Gere as novas **agora**,
-antes de escrever o `.env` — assim você não mexe nele duas vezes.
+A chave do **Gemini** e o token do **sistema de obras** apareceram em
+conversa e continuam válidas. Enquanto isto é teste, dá para seguir com elas
+— o passo 3 tem um caminho que reaproveita as que já estão no seu PC.
 
-**1. Gemini** — entre em <https://aistudio.google.com/apikey>, apague a chave
-antiga e crie uma nova. Deixe a janela aberta, você vai colar daqui a pouco.
+**Antes de o robô atender gente de verdade, troque as duas.** São dois
+cliques cada:
 
-**2. Sistema de obras** — entre em
-<https://novagestaoobras.duckdns.org/m/atalho>, revogue o token atual e gere
-outro. Ele aparece **uma vez só**.
+- Gemini: <https://aistudio.google.com/apikey>
+- Obras: <https://novagestaoobras.duckdns.org/m/atalho> (aparece uma vez só)
 
-O terceiro segredo (`RH_API_TOKEN`) você **não precisa procurar**: ele já está
-no servidor, e o comando do passo 3 o pega sozinho.
+O terceiro segredo (`RH_API_TOKEN`) você **nunca** precisa procurar: ele já
+está no servidor, e os dois caminhos do passo 3 o pegam de lá sozinhos.
 
 ---
 
@@ -77,8 +77,45 @@ cd ~ && git clone https://github.com/stvao/recrutamento-bot.git && cd recrutamen
 
 # Passo 3 — Escrever o `.env`
 
-Cole o bloco inteiro. Ele pega o token do RH sozinho, gera o segredo do
-webhook, e pergunta só as duas chaves novas que você acabou de criar:
+Dois caminhos. **Em fase de teste, use o A.**
+
+## 3A — Reaproveitar as chaves que você já tem
+
+O `.env` do seu PC já tem tudo: Gemini, obras, grupo, obras conhecidas. Leve
+esse arquivo para o servidor e ajuste o que muda de lugar.
+
+**No PowerShell do seu PC** (numa janela nova, sem fechar a do servidor):
+
+```powershell
+scp -i "D:\Projetos-de-Codigos\Chaves de acesso\AWS RH\chave-rh.pem" "D:\Projetos-de-Codigos\LexDocs VAdvocacia\recrutamento-bot\.env" ubuntu@56.126.66.124:~/recrutamento-bot/.env
+```
+
+**De volta no servidor**, cole o bloco inteiro:
+
+```bash
+cd ~/recrutamento-bot
+sed -i 's|^RH_API_URL=.*|RH_API_URL=http://localhost:3000|' .env
+TOKEN_RH=$(grep -m1 '^RECRUTAMENTO_BOT_TOKEN=' ~/nova-gestao-rh/.env | cut -d= -f2- | tr -d "\"' ")
+sed -i "s|^RH_API_TOKEN=.*|RH_API_TOKEN=$TOKEN_RH|" .env
+grep -q '^GASTOS_RESUMO=' .env || printf '\n# Fechamento do dia no grupo\nGASTOS_RESUMO=on\nGASTOS_RESUMO_HORA=18:00\n' >> .env
+chmod 600 .env
+echo "--- .env do servidor, com os valores encurtados: ---"
+grep -v '^\s*#' .env | grep . | sed 's/=\(.\{8\}\).*/=\1…/'
+grep -q "RH_API_TOKEN=$TOKEN_RH" .env && [ ${#TOKEN_RH} -gt 10 ] && echo "✅ token do RH veio do .env do RH" || echo "❌ token do RH VAZIO — pare aqui e me avise"
+```
+
+**Repare nas duas linhas que ele troca**, e por que:
+
+- `RH_API_URL` vira `localhost`, porque no servidor o RH está na mesma
+  máquina;
+- `RH_API_TOKEN` é **substituído pelo do próprio RH**. O que está no seu PC é
+  `token-de-…`, um valor de exemplo que nunca funcionou — o RH devolveria 401
+  em tudo, e você passaria a tarde procurando o motivo.
+
+## 3B — Com chaves novas (quando for para valer)
+
+Gere as duas novas nos endereços lá de cima e cole este bloco. Ele pergunta
+as duas e resolve o resto sozinho:
 
 ```bash
 cd ~/recrutamento-bot
