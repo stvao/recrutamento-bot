@@ -153,3 +153,20 @@ export function contemAlgum(mensagem, termos) {
     return pedacos.some(p => pareceCom(p, termo))
   })
 }
+
+/**
+ * O telefone como ele deve aparecer no log: sem o meio.
+ *
+ * O log gravava o número inteiro de quem escreve — candidato, funcionário,
+ * qualquer um. Fica em disco no servidor por tempo indeterminado, e é dado
+ * pessoal de gente que só perguntou de uma vaga. Não há razão operacional
+ * para o número inteiro estar ali: o que se faz com o log é achar o rastro de
+ * um atendimento, e os quatro últimos dígitos bastam para isso.
+ *
+ * "5511958267769" vira "55119****7769".
+ */
+export function discreto(numero) {
+  const so = String(numero ?? '').replace(/\D/g, '')
+  if (so.length < 8) return so ? '***' : ''
+  return `${so.slice(0, 5)}${'*'.repeat(so.length - 9)}${so.slice(-4)}`
+}

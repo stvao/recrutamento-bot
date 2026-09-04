@@ -28,6 +28,7 @@ import * as funcionario from './funcionario.js'
 import * as triagem from './triagem.js'
 import * as gastos from './gastos.js'
 import * as limite from './limite.js'
+import { discreto } from './texto.js'
 
 const app = express()
 app.use(express.json({ limit: '1mb' }))
@@ -283,7 +284,7 @@ async function rotear(msg) {
     // Um aviso por janela. Repetir a cada mensagem faria do robô exatamente
     // o que se quer evitar: uma máquina respondendo sem parar.
     if (vez.avisar) {
-      console.warn(`[limite] ${msg.de} passou do limite de mensagens — avisado uma vez.`)
+      console.warn(`[limite] ${discreto(msg.de)} passou do limite de mensagens — avisado uma vez.`)
       return limite.textoDoAviso()
     }
     return null
@@ -296,7 +297,7 @@ async function rotear(msg) {
   // do que nenhuma resposta — quem não recebe resposta liga; quem recebe
   // "estamos com problema" desiste.
   if (!RECRUTAMENTO_LIGADO) {
-    console.log(`[recrutamento] desligado — ignorando mensagem de ${msg.de}`)
+    console.log(`[recrutamento] desligado — ignorando mensagem de ${discreto(msg.de)}`)
     return null
   }
 
@@ -403,7 +404,7 @@ async function primeiroContato(msg) {
     const achado = await quemE({ nome: r.nomeInformado }).catch(() => null)
     if (achado?.tipo === 'funcionario') {
       limpar(msg.de)
-      console.log(`[triagem] ${msg.de} identificado como ${achado.primeiroNome} pelo NOME (não pelo telefone)`)
+      console.log(`[triagem] ${discreto(msg.de)} identificado como ${achado.primeiroNome} pelo NOME (não pelo telefone)`)
       return `Achei aqui, ${achado.primeiroNome}! 👍 Em que posso ajudar?`
     }
     // Não achou: chama gente em vez de insistir. Quem diz que trabalha na
@@ -444,7 +445,7 @@ async function primeiroContato(msg) {
 
   if (r.escalarHumano) {
     marcarEscalada(msg.de)
-    console.log(`[TRIAGEM → RH] ${msg.de}: ${r.motivoEscalada} — "${msg.texto}"`)
+    console.log(`[TRIAGEM → RH] ${discreto(msg.de)}: ${r.motivoEscalada} — "${msg.texto}"`)
     avisarRH({ whatsapp: msg.de, motivo: r.motivoEscalada, trecho: msg.texto })
   }
 
@@ -476,7 +477,7 @@ async function atenderFuncionario(msg, ficha) {
 
   if (r.escalarHumano) {
     marcarEscalada(msg.de)
-    console.log(`[FUNCIONÁRIO → RH] ${ficha.primeiroNome} (${msg.de}): ${r.motivoEscalada} — "${msg.texto}"`)
+    console.log(`[FUNCIONÁRIO → RH] ${ficha.primeiroNome} (${discreto(msg.de)}): ${r.motivoEscalada} — "${msg.texto}"`)
     // Sem await: a pessoa não espera o RH ser avisado para receber a resposta.
     avisarRH({
       whatsapp: msg.de,

@@ -34,7 +34,7 @@ import {
 } from './obras-client.js'
 import { enviarMensagem } from './connectors.js'
 import { interpretar, combinar, nomesDe, ehVocabularioConhecido } from './lancamento.js'
-import { norm } from './texto.js'
+import { norm, discreto } from './texto.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 
@@ -354,7 +354,7 @@ export async function tratar(msg) {
   if (!autorizado(de, daOrigemCerta && Boolean(msg.ehGrupo))) {
     // Nem responde. Dizer "você não pode" a quem mandou foto num grupo
     // confirma que existe um robô ouvindo e convida a insistir.
-    if (arquivo) console.warn(`[gastos] comprovante ignorado: ${de} não está em GASTOS_AUTORIZADOS`)
+    if (arquivo) console.warn(`[gastos] comprovante ignorado: ${discreto(de)} não está em GASTOS_AUTORIZADOS`)
     return null
   }
 

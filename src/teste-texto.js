@@ -7,7 +7,7 @@
  *
  *   node src/teste-texto.js
  */
-import { melhorMatch, contemAlgum } from './texto.js'
+import { melhorMatch, contemAlgum, discreto } from './texto.js'
 
 const VAGAS = [
   { valor: 'Servente',    termos: ['servente', 'ajudante', 'auxiliar', 'meio oficial', 'servico geral'] },
@@ -77,6 +77,20 @@ for (const [msg, termos, esperado] of [
   ['nao tenho', TERMOS_NAO, true],
   ['sou ajudante', TERMOS_SIM, false],
 ]) conf(`"${msg}"`, contemAlgum(msg, termos), esperado)
+
+// ── O telefone no log ────────────────────────────────────
+//
+// O log grava em disco no servidor por tempo indeterminado. Número inteiro
+// de quem só perguntou de uma vaga é dado pessoal sem razão operacional para
+// estar ali — os quatro últimos bastam para achar um atendimento.
+
+conf('esconde o meio do número', discreto('5511958267769'), '55119****7769')
+conf('não sobra o miolo do número', discreto('5511958267769').includes('9582'), false)
+conf('aceita com pontuação', discreto('+55 (11) 95826-7769'), '55119****7769')
+conf('vazio não quebra', discreto(''), '')
+conf('nulo não quebra', discreto(null), '')
+conf('número curto não vaza', discreto('1234'), '***')
+
 
 console.log(falhas ? `\n${falhas} FALHA(S)` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)
