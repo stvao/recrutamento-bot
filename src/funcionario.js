@@ -173,7 +173,15 @@ export function conferir(saida) {
   const temSenha = /senha|token|código de acesso|codigo de acesso/i.test(r)
 
   if (temValor || temLink || temSenha) {
-    console.warn('[funcionario] resposta DESCARTADA (valor/link/senha):', r.slice(0, 120))
+    // O TEXTO não vai para o log.
+    //
+    // Ele está sendo descartado justamente por conter valor, link ou senha
+    // — escrevê-lo aqui só mudaria o lugar do vazamento, do WhatsApp do
+    // funcionário para o arquivo de log do servidor, que é lido por mais
+    // gente e guardado por mais tempo. O motivo basta para investigar.
+    console.warn(`[funcionario] resposta descartada — continha ${[
+      temValor && 'valor', temLink && 'link', temSenha && 'senha',
+    ].filter(Boolean).join(', ')}`)
     return {
       resposta: 'Isso aí eu prefiro que uma pessoa do RH veja com você — já avisei a equipe, alguém te chama.',
       precisaHumano: true,

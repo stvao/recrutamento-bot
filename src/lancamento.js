@@ -431,6 +431,32 @@ export function acharObras(texto, obras, limite = 6) {
 }
 
 /**
+ * Quais dos sócios conhecidos servem para o nome escrito.
+ *
+ * Nome inteiro, ou um pedaço dele: "joao" e "joao carlos" acham "João Carlos
+ * Silva". Basta que TODAS as palavras escritas estejam no nome — ninguém
+ * digita o nome completo de cadastro numa legenda de foto.
+ *
+ * Devolve a LISTA, e não um escolhido, de propósito: quem chama decide o que
+ * fazer com dois candidatos. Na legenda, dois significa desistir; numa
+ * resposta à pergunta "quem pagou?", significa perguntar de novo entre esses
+ * dois. A regra de casar é a mesma nos dois casos, e fica num lugar só.
+ */
+export function pagadoresQueServem(escrito, pagadores) {
+  const alvo = norm(escrito ?? '')
+  if (!alvo || !pagadores?.length) return []
+
+  const iguais = pagadores.filter(p => norm(p) === alvo)
+  if (iguais.length) return iguais
+
+  const partes = alvo.split(' ').filter(Boolean)
+  return pagadores.filter(p => {
+    const doNome = norm(p).split(' ')
+    return partes.every(x => doNome.includes(x))
+  })
+}
+
+/**
  * Acha quem BANCOU o gasto: "pago por João", "quem pagou foi a Ana".
  *
  * Procurado ANTES de tudo, e por uma razão prática: o nome do pagador é um
@@ -454,20 +480,7 @@ export function acharPagador(texto, pagadores) {
   const alvo = norm(escrito)
   if (!alvo) return { achado: null, resto: texto }
 
-  // Nome inteiro, ou um pedaço dele: "joao" e "joao carlos" acham "João
-  // Carlos Silva". Basta que TODAS as palavras escritas estejam no nome —
-  // ninguém digita o nome completo de cadastro numa legenda de foto.
-  //
-  // Havendo dois que servem, não escolhe nenhum: pôr o gasto no nome do
-  // sócio errado é problema de dinheiro entre sócios, e ninguém percebe
-  // olhando o relatório.
-  const iguais = pagadores.filter(p => norm(p) === alvo)
-  const partes = alvo.split(' ').filter(Boolean)
-  const porParte = pagadores.filter(p => {
-    const doNome = norm(p).split(' ')
-    return partes.every(x => doNome.includes(x))
-  })
-  const candidatos = iguais.length ? iguais : porParte
+  const candidatos = pagadoresQueServem(escrito, pagadores)
 
   if (candidatos.length !== 1) {
     return { achado: null, resto: texto, ambiguo: candidatos.length > 1 ? candidatos : null }

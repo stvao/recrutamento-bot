@@ -144,7 +144,15 @@ export function conferir(saida) {
   if (/R\$\s*\d|\d+\s*(reais|mil reais)/i.test(r)
     || /https?:\/\/|www\.|\.com|\.br\//i.test(r)
     || /senha|token/i.test(r)) {
-    console.warn('[triagem] resposta DESCARTADA (valor/link/senha):', r.slice(0, 120))
+    // O TEXTO não vai para o log.
+    //
+    // Ele está sendo descartado justamente por conter valor, link ou senha
+    // — escrevê-lo aqui só mudaria o lugar do vazamento, do WhatsApp do
+    // funcionário para o arquivo de log do servidor, que é lido por mais
+    // gente e guardado por mais tempo. O motivo basta para investigar.
+    console.warn(`[triagem] resposta descartada — continha ${[
+      temValor && 'valor', temLink && 'link', temSenha && 'senha',
+    ].filter(Boolean).join(', ')}`)
     return {
       resposta: 'Deixa eu chamar alguém da equipe pra falar com você. 🙂',
       intencao: 'informacao',

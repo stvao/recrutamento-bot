@@ -396,18 +396,38 @@ async function baixar(msg, tamanhoDeclarado = 0) {
 
   try {
     const { downloadMediaMessage } = await import('@whiskeysockets/baileys')
-    const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+
+    // Baixa em fluxo e conta os bytes na chegada.
+    //
+    // O tamanho declarado acima é só uma promessa de quem enviou: nada impede
+    // declarar 1 KB e mandar 2 GB. Baixando para um buffer, a checagem
+    // posterior só constata o estrago — a memória já foi consumida, e neste
+    // servidor de 911 MB isso derruba o robô E o sistema de RH, que divide a
+    // máquina e não tem nada a ver com o assunto.
+    //
+    // Em fluxo, o download é abortado no primeiro byte que passa do limite.
+    const fluxo = await downloadMediaMessage(msg, 'stream', {}, {
       logger: pino({ level: 'error' }),
       reuploadRequest: sock.updateMediaMessage,
     })
-    if (!buffer?.length) return null
 
-    // O tamanho declarado e so uma promessa de quem enviou. Este e o real.
-    if (buffer.length > MAX_ARQUIVO_BYTES) {
-      console.warn(`[whatsapp] arquivo baixado passou do limite (${(buffer.length / 1024 / 1024).toFixed(0)} MB) — descartado`)
-      return null
+    const pedacos = []
+    let recebidos = 0
+    for await (const pedaco of fluxo) {
+      recebidos += pedaco.length
+      if (recebidos > MAX_ARQUIVO_BYTES) {
+        fluxo.destroy()
+        console.warn(
+          `[whatsapp] download abortado ao passar de ${MAX_ARQUIVO_BYTES / 1024 / 1024} MB `
+          + `(declarado: ${(tamanhoDeclarado / 1024 / 1024).toFixed(1)} MB)`,
+        )
+        return null
+      }
+      pedacos.push(pedaco)
     }
-    return buffer
+
+    const buffer = Buffer.concat(pedacos)
+    return buffer.length ? buffer : null
   } catch (e) {
     console.error('[whatsapp] não consegui baixar o arquivo:', e.message)
     return null

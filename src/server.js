@@ -56,13 +56,24 @@ app.get('/health', (_req, res) => res.json({ ok: true, servico: 'recrutamento-bo
  * e `abandonaramNaEtapa` diz ONDE as pessoas desistem — que é o que aponta
  * qual pergunta rever.
  */
-app.get('/metricas', (_req, res) => res.json({
-  ...metricas(),
-  vagas: origemDaLista(),
-  atendente: iaDisponivel() ? 'Maria Vitória (IA)' : 'roteiro',
-  gastos: gastos.situacao(),
-  limite: limite.situacao(),
-}))
+app.get('/metricas', (req, res) => {
+  // Mesma porta do simulador: localhost, ou o token compartilhado.
+  //
+  // Não é só pudor com número de conversa. `gastos.situacao()` devolve a
+  // LISTA DE GRUPOS, e o identificador do grupo é exatamente a credencial
+  // que o coringa "*" exige — publicá-lo num endereço aberto entrega de
+  // graça a informação que decide quem lança no financeiro.
+  if (!simuladorAutorizado(req)) {
+    return res.sendStatus(404)   // 404, e não 403: não confirma que existe
+  }
+  res.json({
+    ...metricas(),
+    vagas: origemDaLista(),
+    atendente: iaDisponivel() ? 'Maria Vitória (IA)' : 'roteiro',
+    gastos: gastos.situacao(),
+    limite: limite.situacao(),
+  })
+})
 
 /**
  * Mantém a lista de vagas fresca em segundo plano.
@@ -508,7 +519,13 @@ async function aplicarResultado(from, r, text) {
 
   if (r.escalarHumano) {
     marcarEscalada(from)
-    console.log(`[ATENDIMENTO HUMANO] ${from}: ${r.motivoEscalada ?? 'pediu atendimento'} — "${text}"`)
+    // Número mascarado e mensagem fora do log, como no resto do arquivo.
+    //
+    // Esta linha era a única que escrevia o número inteiro e o que a pessoa
+    // digitou. O log fica no servidor, é lido por mais gente e guardado por
+    // mais tempo que a conversa — e quem precisa do número para assumir o
+    // atendimento recebe o alerta completo em avisarRH(), logo abaixo.
+    console.log(`[ATENDIMENTO HUMANO] ${discreto(from)}: ${r.motivoEscalada ?? 'pediu atendimento'}`)
     // Sem await: o candidato não espera o RH ser avisado para receber a
     // resposta dele. Se o aviso falhar, avisarRH() registra e segue.
     avisarRH({ whatsapp: from, motivo: r.motivoEscalada, trecho: text })

@@ -33,7 +33,7 @@ import {
   enviarComprovante, lancarGasto, obrasDoSistema, obrasConfigurado, pagadoresConhecidos,
 } from './obras-client.js'
 import { enviarMensagem } from './connectors.js'
-import { interpretar, combinar, nomesDe, ehVocabularioConhecido } from './lancamento.js'
+import { interpretar, combinar, nomesDe, ehVocabularioConhecido, pagadoresQueServem } from './lancamento.js'
 import { norm, discreto } from './texto.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
@@ -96,10 +96,16 @@ const GRUPOS_NORM = new Set([...GRUPOS].map(g => norm(g)))
 
 /**
  * Perigo do nome: qualquer um pode criar um grupo chamado "Comprovantes",
- * botar o robô dentro e mandar comprovante. Por isso o nome só vale junto
- * com a checagem de quem enviou — e é a razão de o coringa "*" exigir que a
- * pessoa esteja num grupo cadastrado, e não só que o grupo tenha o nome
- * certo.
+ * botar o robô dentro e mandar comprovante.
+ *
+ * Por isso o nome só serve como FILTRO de onde escutar, nunca como
+ * credencial. Quando há lista de números, tudo bem: o nome diz onde o robô
+ * presta atenção, e quem autoriza é a lista.
+ *
+ * Com o coringa "*" é diferente, e era aqui que estava o furo: não há lista,
+ * então estar no grupo É a credencial — e o nome, que o atacante escolhe,
+ * virava a chave inteira. O coringa passou a exigir que o grupo tenha casado
+ * pelo IDENTIFICADOR, que o WhatsApp atribui e ninguém escolhe.
  */
 
 /**
@@ -622,6 +628,45 @@ function aplicarResposta(p, texto) {
     Sem isto o número seria lido como valor — "1" viraria R$ 1,00 e o gasto
     entraria errado.
   */
+  /*
+    Resposta à pergunta "quem pagou?".
+
+    Tratada ANTES da lista de obras, e por um motivo prático: as duas
+    respondem com número, e nesta altura a obra já está resolvida — "1"
+    aqui só pode ser um sócio.
+  */
+  if (p.esperandoPagador) {
+    p.esperandoPagador = false
+    const escolhido = lerRespostaDePagador(texto, p.opcoesPagador ?? [])
+    delete p.opcoesPagador
+
+    if (escolhido.nome) {
+      p.pagadorEscolhido = escolhido.nome
+    } else if (escolhido.ambiguo?.length) {
+      // Dois sócios servem para o que foi escrito. Perguntar de novo entre
+      // esses dois é melhor que escolher um: gasto no nome do sócio errado
+      // ninguém percebe olhando o relatório.
+      p.esperandoPagador = true
+      p.opcoesPagador = escolhido.ambiguo
+      p.perguntadoEm = Date.now()
+      pendentes.atualizar(p)
+      return [
+        `Tem mais de um: ${escolhido.ambiguo.join(' e ')}.`,
+        ...escolhido.ambiguo.map((nome, i) => `${i + 1}) ${nome}`),
+        '_(responde o número)_',
+      ].join('\n')
+    } else if (!escolhido.pulou) {
+      // Nome que não casou com ninguém. Não é motivo para segurar o
+      // comprovante: vira resposta comum, e o gasto entra sem o sócio.
+      p.respostas.push(texto.trim())
+    }
+
+    p.jaPerguntou = false
+    p.perguntadoEm = null
+    pendentes.atualizar(p)
+    return resolveDireto(p)
+  }
+
   if (/^\d{1,2}$/.test(so) && p.opcoes?.length) {
     const i = Number(so) - 1
     if (i >= 0 && i < p.opcoes.length) {
@@ -858,6 +903,9 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
   // apontou, e não há leitura de texto que valha mais que isso.
   if (pendente.obraEscolhida) dados.obra = pendente.obraEscolhida
 
+  // Idem para o sócio apontado na resposta à pergunta "quem pagou?".
+  if (pendente.pagadorEscolhido) dados.pagoPor = pendente.pagadorEscolhido
+
   pendente.dados = dados
 
   const falta = []
@@ -868,6 +916,26 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
     return { perguntando: true, texto: perguntar(pendente, falta, obras) }
   }
   if (falta.length) return { perguntando: false, texto: await paraCaixa(pendente) }
+
+  /*
+    Obra e valor resolvidos. Falta saber quem bancou — e aí sim se pergunta.
+
+    Depois dos outros dois de propósito: obra e valor decidem SE o gasto pode
+    entrar; o sócio decide apenas como ele fica registrado. Perguntar os três
+    de uma vez faria a pessoa responder um e esquecer os outros.
+
+    E, ao contrário dos outros dois, esta pergunta NUNCA segura o lançamento.
+    Ninguém respondeu? O gasto entra sem o sócio, como entrava antes de esta
+    pergunta existir. Trocar um gasto lançado por um campo preenchido seria
+    um mau negócio: o campo se completa na aprovação, o gasto perdido não.
+  */
+  const socios = pagadoresConhecidos()
+  if (!dados.pagoPor && socios.length && !pendente.pagadorPerguntado && !acabouOTempo) {
+    pendente.pagadorPerguntado = true
+    pendente.esperandoPagador = true
+    pendente.jaPerguntou = true
+    return { perguntando: true, texto: perguntarPagador(pendente, dados, socios) }
+  }
 
   /*
     Mesma obra e mesmo valor de um lançamento recente: pode ser duplicata.
@@ -903,6 +971,66 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
   }
 
   return lancar(pendente, dados)
+}
+
+/**
+ * "Quem pagou?" — com a lista numerada, que é como se responde mais rápido.
+ *
+ * Mostra o que já entendeu antes de perguntar, igual à pergunta da obra: sem
+ * isso a pessoa não sabe se ele leu o resto e acaba redigitando tudo.
+ *
+ * A saída faz parte da pergunta. Comprovante de material comprado pela
+ * empresa não foi bancado por sócio nenhum, e sem uma forma de dizer isso a
+ * pessoa ficaria sem resposta possível — e o comprovante, parado.
+ */
+function perguntarPagador(pendente, dados, socios) {
+  const linhas = []
+
+  const sabido = [
+    dados.obra, dados.descricao,
+    dados.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
+    moeda(dados.valor),
+  ].filter(Boolean)
+  if (sabido.length) linhas.push(`Anotei: ${sabido.join(' · ')}`)
+
+  const pergunta = 'Só falta: *quem pagou*?'
+  pendente.ultimaPergunta = pergunta
+  linhas.push(pergunta)
+
+  socios.forEach((nome, i) => linhas.push(`${i + 1}) ${nome}`))
+  linhas.push('_(responde o número, o nome, ou *pular* se não foi nenhum deles)_')
+
+  pendente.opcoesPagador = socios
+  return linhas.join('\n')
+}
+
+/** "não foi sócio nenhum" — as formas de dizer isso. */
+const PULAR_PAGADOR = /^\s*(pular|pula|nenhum|ningu[eé]m|n[aã]o sei|nao sei|sei l[aá]|empresa|a empresa|-)\s*[?!.]*\s*$/i
+
+/**
+ * Lê a resposta de "quem pagou?": número, nome, ou uma saída.
+ *
+ * O número é o caminho mais usado, porque a lista acabou de ser mostrada. O
+ * nome existe para quem responde sem olhar a lista, que é o normal de quem
+ * está na obra com o celular na mão.
+ */
+function lerRespostaDePagador(texto, opcoes) {
+  const bruto = (texto ?? '').trim()
+  if (!bruto) return { nome: null, pulou: false }
+
+  if (PULAR_PAGADOR.test(bruto)) return { nome: null, pulou: true }
+
+  const so = bruto.replace(/[^\d]/g, '')
+  if (/^\d{1,2}$/.test(bruto.replace(/[^\d]/g, '')) && so && opcoes.length) {
+    const i = Number(so) - 1
+    if (i >= 0 && i < opcoes.length) return { nome: opcoes[i], pulou: false }
+  }
+
+  const servem = pagadoresQueServem(bruto, opcoes)
+  if (servem.length === 1) return { nome: servem[0], pulou: false }
+  if (servem.length > 1) return { nome: null, pulou: false, ambiguo: servem }
+
+  return { nome: null, pulou: false }
 }
 
 /** Monta a pergunta. Quem controla a espera é a fila. */
@@ -1004,8 +1132,6 @@ async function lancar(pendente, dados) {
       for (const parte of r.rateio) linhas.push(`  · ${parte.obra}: ${moeda(parte.valor)}`)
     }
 
-    // Quem bancou entra na confirmação: é a informação que some mais fácil,
-    // e quem mandou a foto precisa ver que ela foi entendida.
     // Quem bancou entra na confirmação: é a informação que some mais fácil,
     // e quem mandou a foto precisa ver que ela foi entendida.
     if (r.pagoPor) {
