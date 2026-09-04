@@ -28,6 +28,7 @@
  * existe.
  */
 import { chamarModelo, iaDisponivel } from './ia.js'
+import { proibidoEm } from './resposta-segura.js'
 
 /**
  * O que ele NUNCA responde, por mais que pareça simples.
@@ -168,20 +169,15 @@ export function conferir(saida) {
 
   const r = saida.resposta
 
-  const temValor = /R\$\s*\d|\d+\s*(reais|mil reais)/i.test(r)
-  const temLink = /https?:\/\/|www\.|\.com|\.br\/|bit\.ly/i.test(r)
-  const temSenha = /senha|token|código de acesso|codigo de acesso/i.test(r)
+  // As regras vivem em resposta-segura.js, junto com as da triagem — eram
+  // copiadas nos dois arquivos e já tinham divergido.
+  const proibido = proibidoEm(r)
 
-  if (temValor || temLink || temSenha) {
-    // O TEXTO não vai para o log.
-    //
-    // Ele está sendo descartado justamente por conter valor, link ou senha
-    // — escrevê-lo aqui só mudaria o lugar do vazamento, do WhatsApp do
-    // funcionário para o arquivo de log do servidor, que é lido por mais
-    // gente e guardado por mais tempo. O motivo basta para investigar.
-    console.warn(`[funcionario] resposta descartada — continha ${[
-      temValor && 'valor', temLink && 'link', temSenha && 'senha',
-    ].filter(Boolean).join(', ')}`)
+  if (proibido.length) {
+    // O TEXTO não vai para o log: está sendo descartado justamente por conter
+    // isso, e escrevê-lo aqui só mudaria o lugar do vazamento para um que é
+    // lido por mais gente e guardado por mais tempo.
+    console.warn(`[funcionario] resposta descartada — continha ${proibido.join(', ')}`)
     return {
       resposta: 'Isso aí eu prefiro que uma pessoa do RH veja com você — já avisei a equipe, alguém te chama.',
       precisaHumano: true,

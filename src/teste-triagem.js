@@ -160,5 +160,37 @@ for (const frase of ['tem vaga?', 'quero trabalhar com vocês', 'mando o curríc
   ok('e ele não pergunta a vaga de novo', !/para qual vaga/i.test(r.resposta))
 }
 
+// ── A barreira precisa SOBREVIVER a disparar ───────────────────────────────
+//
+// Um defeito real: o log de descarte citava variáveis que não existiam neste
+// arquivo, e conferir() lançava ReferenceError — a barreira quebrava
+// exatamente no caso em que tinha trabalho a fazer, deixando passar o que
+// deveria bloquear.
+//
+// Escapou porque a verificação contava LINHAS DE FALHA, e teste que quebra
+// não imprime linha de falha nenhuma. Estes casos chamam a função de verdade,
+// em cada categoria, para a quebra virar falha visível.
+{
+  for (const [nome, resposta] of [
+    ['valor', 'Seu salário é R$ 2.500,00'],
+    ['link', 'Acessa https://exemplo.com pra ver'],
+    ['senha', 'Sua senha é 1234'],
+    ['valor por extenso', 'São dois mil reais por mês'],
+  ]) {
+    let r, quebrou = false
+    try { r = conferir({ resposta, intencao: 'procura_vaga' }) } catch { quebrou = true }
+    ok(`bloqueia ${nome} sem quebrar`, !quebrou && r?.precisaHumano === true)
+  }
+
+  // E o texto sensível NÃO pode ir para o log: ele está sendo descartado
+  // justamente por conter isso.
+  const original = console.warn
+  const escrito = []
+  console.warn = (...a) => escrito.push(a.join(' '))
+  try { conferir({ resposta: 'Sua senha é 1234', intencao: 'procura_vaga' }) } finally { console.warn = original }
+  ok('o log não repete o texto descartado', !escrito.join(' ').includes('1234'))
+  ok('  mas diz qual categoria foi detectada', /senha/.test(escrito.join(' ')))
+}
+
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exitCode = falhas ? 1 : 0

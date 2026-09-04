@@ -19,6 +19,7 @@
  */
 import { chamarModelo, iaDisponivel } from './ia.js'
 import { norm } from './texto.js'
+import { proibidoEm } from './resposta-segura.js'
 
 const EMPRESA = process.env.EMPRESA_NOME || 'KE Engenharia'
 
@@ -142,24 +143,17 @@ export function conferir(saida) {
 
   const r = saida.resposta
 
-  // Os três motivos, cada um no seu nome: a condição abaixo E o log usam
-  // estes mesmos valores. Antes o log citava variáveis que nunca existiram, e
-  // a função quebrava justamente quando precisava barrar alguma coisa — a
-  // barreira caía no único caso em que ela tinha trabalho a fazer.
-  const temValor = /R\$\s*\d|\d+\s*(reais|mil reais)/i.test(r)
-  const temLink = /https?:\/\/|www\.|\.com|\.br\//i.test(r)
-  const temSenha = /senha|token/i.test(r)
+  // As regras vivem em resposta-segura.js, junto com as do atendimento ao
+  // funcionário. Estavam copiadas nos dois arquivos e divergiram: lá se
+  // passou a barrar "bit.ly" e "código de acesso", aqui não — e ninguém viu,
+  // porque não havia lugar onde a diferença aparecesse.
+  const proibido = proibidoEm(r)
 
-  if (temValor || temLink || temSenha) {
-    // O TEXTO não vai para o log.
-    //
-    // Ele está sendo descartado justamente por conter valor, link ou senha
-    // — escrevê-lo aqui só mudaria o lugar do vazamento, do WhatsApp do
-    // funcionário para o arquivo de log do servidor, que é lido por mais
-    // gente e guardado por mais tempo. O motivo basta para investigar.
-    console.warn(`[triagem] resposta descartada — continha ${[
-      temValor && 'valor', temLink && 'link', temSenha && 'senha',
-    ].filter(Boolean).join(', ')}`)
+  if (proibido.length) {
+    // O TEXTO não vai para o log: está sendo descartado justamente por conter
+    // isso, e escrevê-lo aqui só mudaria o lugar do vazamento para um que é
+    // lido por mais gente e guardado por mais tempo.
+    console.warn(`[triagem] resposta descartada — continha ${proibido.join(', ')}`)
     return {
       resposta: 'Deixa eu chamar alguém da equipe pra falar com você. 🙂',
       intencao: 'informacao',
