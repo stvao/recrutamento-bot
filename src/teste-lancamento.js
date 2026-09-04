@@ -5,7 +5,7 @@
  * separada por vírgula. Uma divisão ingênua parte o valor no meio e lança
  * 2.500 como "2" — erro que ninguém percebe até fechar o mês.
  */
-import { interpretar, acharValor, acharTipo, acharNaFrase, apelidosDe, acharObra, combinar } from './lancamento.js'
+import { interpretar, acharValor, acharTipo, acharNaFrase, apelidosDe, acharObra, acharPagador, combinar } from './lancamento.js'
 
 /** As obras de verdade, como estão no .env de produção. */
 const OBRAS = ['Bastos Tsuya', 'Bastos haia', 'Peruibe', 'Caraguatatuba', 'Praia Grande', 'Buritama', 'Pereiras', 'Itapevi']
@@ -287,6 +287,60 @@ ok('nome completo ainda casa', interpretar('EE PROFA TSUYA OHNO KIMURA cimento 5
 
 // Sem obras conhecidas, não inventa apelido nenhum.
 ok('lista vazia não quebra', acharObra('qualquer coisa', []).achado === null)
+
+// ── Quem bancou ────────────────────────────────
+//
+// O nome do pagador é um nome próprio solto no meio da frase. Se não sair da
+// linha antes de tudo, ele vira descrição ou, pior, é confundido com o nome de
+// uma obra — e aí o custo vai para a escola errada.
+
+const SOCIOS = ['Estevao Bandeira', 'Joao Carlos Silva', 'Ana Paula Souza', 'Joao Pedro Lima']
+
+{
+  const r = interpretar('haia cimento 250 pago por joao carlos', REAIS, SOCIOS)
+  ok('nome completo casa', r.pagoPor === 'Joao Carlos Silva')
+  ok('pagador sai da descricao', r.descricao === 'cimento')
+  ok('obra sobrevive ao pagador', r.obra === 'EE/ETEC AGUIA DE HAIA')
+  ok('valor sobrevive ao pagador', r.valor === 250)
+}
+
+{
+  const r = interpretar('haia, tijolos e areia, material, 2500,00, pago pelo Estevao', REAIS, SOCIOS)
+  ok('"pago pelo" tambem casa', r.pagoPor === 'Estevao Bandeira')
+  ok('valor com virgula intacto', r.valor === 2500)
+  ok('tipo intacto', r.tipo === 'MATERIAL')
+}
+
+{
+  const r = interpretar('tsuya areia 300 quem pagou foi a ana', REAIS, SOCIOS)
+  ok('"quem pagou foi a" casa', r.pagoPor === 'Ana Paula Souza')
+}
+
+// Dois Joaos: escolher um seria por o gasto no nome do socio errado, e isso
+// ninguem percebe olhando o relatorio. Prefere nao saber.
+{
+  const r = interpretar('haia cimento 250 pago por joao', REAIS, SOCIOS)
+  ok('primeiro nome ambiguo NAO escolhe', r.pagoPor === null)
+}
+
+// Nome que nao existe: o gasto entra sem pagador, e quem aprova completa.
+{
+  const r = interpretar('haia cimento 250 pago por fulano', REAIS, SOCIOS)
+  ok('nome desconhecido nao vira pagador', r.pagoPor === null)
+}
+
+// Sem a preposicao nao ha pagador: um nome solto na linha e adivinhacao.
+{
+  const r = interpretar('haia cimento 250 estevao', REAIS, SOCIOS)
+  ok('nome solto sem "pago por" nao conta', r.pagoPor === null)
+}
+
+// Sem lista de socios o robo nao inventa ninguem.
+ok('sem lista, sem pagador', acharPagador('haia cimento pago por joao', []).achado === null)
+ok('texto vazio nao quebra', acharPagador('', SOCIOS).achado === null)
+
+// E a linha sem pagador segue igual ao que ja era.
+ok('linha sem pagador continua igual', interpretar('haia cimento 250', REAIS, SOCIOS).pagoPor === null)
 
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)

@@ -179,7 +179,13 @@ async function postar({ arquivo, nomeArquivo, tipo, texto, idMensagem, extras })
  * Nunca lança. Sem resposta, quem chama usa a reserva do .env.
  */
 const VALIDADE_OBRAS_MS = 1000 * 60 * 30
-let cacheObras = null   // { nomes, buscadoEm }
+let cacheObras = null   // { lista, buscadoEm }
+let cachePagadores = []
+
+/** Quem pode aparecer como "quem pagou". Vem junto com as obras. */
+export function pagadoresConhecidos() {
+  return [...cachePagadores]
+}
 
 export async function obrasDoSistema() {
   if (cacheObras && Date.now() - cacheObras.buscadoEm < VALIDADE_OBRAS_MS) {
@@ -210,6 +216,11 @@ export async function obrasDoSistema() {
 
     if (!lista.length) return null
 
+    // Quem pode aparecer como "quem pagou". Vem na mesma resposta de
+    // propósito: são as duas listas que o robô consulta a cada comprovante,
+    // e duas chamadas seriam duas chances de o sistema estar fora.
+    cachePagadores = Array.isArray(j.pagadores) ? j.pagadores.filter(Boolean) : []
+
     cacheObras = { lista, buscadoEm: Date.now() }
     const comEndereco = lista.filter(o => typeof o === 'object' && o.endereco).length
     console.log(`[obras] ${lista.length} obra(s) do sistema${comEndereco ? `, ${comEndereco} com endereço` : ''}`)
@@ -233,7 +244,7 @@ export async function obrasDoSistema() {
  * O 422 é resposta esperada, não falha: quer dizer que o sistema não
  * reconheceu a obra, e vem com a lista para o robô PERGUNTAR qual é.
  */
-export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, rateio, idMensagem }) {
+export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, rateio, pagoPor, idMensagem }) {
   if (!OBRAS_API_TOKEN) return { ok: false, motivo: 'nao-configurado' }
   if (!arquivo?.byteLength) return { ok: false, motivo: 'arquivo-vazio' }
   if (!obra || valor == null) return { ok: false, motivo: 'faltam-dados' }
@@ -250,6 +261,7 @@ export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, des
   // Nomes separados por vírgula: em multipart não há array, e exigir JSON
   // aqui só daria mais chance de erro.
   if (rateio?.length) form.append('rateio', rateio.join(','))
+  if (pagoPor) form.append('pagoPor', pagoPor)
 
   try {
     const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancar`, {
@@ -265,7 +277,7 @@ export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, des
     let j = {}
     try { j = cru ? JSON.parse(cru) : {} } catch { j = {} }
 
-    if (r.ok) return { ok: true, id: j.id, obra: j.obra, obras: j.obras, rateio: j.rateio, mensagem: j.mensagem }
+    if (r.ok) return { ok: true, id: j.id, obra: j.obra, obras: j.obras, rateio: j.rateio, pagoPor: j.pagoPor, mensagem: j.mensagem }
 
     if (r.status === 422) {
       // Obra não reconhecida: quem chama pergunta, oferecendo as opções.
@@ -287,6 +299,7 @@ export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, des
 /** Só para teste: esquece as obras guardadas. */
 export function _limparCacheObras() {
   cacheObras = null
+  cachePagadores = []
 }
 
 /** Só para teste: esquece o que foi descoberto sobre os campos extras. */

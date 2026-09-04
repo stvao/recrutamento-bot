@@ -30,7 +30,7 @@
  */
 import { lerComprovante, visaoDisponivel } from './ia-visao.js'
 import {
-  enviarComprovante, lancarGasto, obrasDoSistema, obrasConfigurado,
+  enviarComprovante, lancarGasto, obrasDoSistema, obrasConfigurado, pagadoresConhecidos,
 } from './obras-client.js'
 import { enviarMensagem } from './connectors.js'
 import { interpretar, combinar, nomesDe, ehVocabularioConhecido } from './lancamento.js'
@@ -768,7 +768,7 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
   const escritoTudo = [pendente.descricao, ...(pendente.respostas ?? [])]
     .filter(Boolean).join(', ')
 
-  const escrito = interpretar(escritoTudo, obras)
+  const escrito = interpretar(escritoTudo, obras, pagadoresConhecidos())
 
   // A imagem é lida UMA vez e guardada: numa segunda passada, depois da
   // resposta, reler custaria mais 20 segundos e daria o mesmo resultado.
@@ -906,6 +906,7 @@ async function lancar(pendente, dados) {
     fornecedor: dados.estabelecimento,
     observacao: dados.valorDigitado ? null : 'Valor lido da imagem pelo robô — confira.',
     rateio: dados.rateio,
+    pagoPor: dados.pagoPor,
     idMensagem: pendente.idMensagem,
   })
 
@@ -928,6 +929,19 @@ async function lancar(pendente, dados) {
     // conferir — o total ela já sabe, está no comprovante na mão dela.
     if (r.rateio?.length > 1) {
       for (const parte of r.rateio) linhas.push(`  · ${parte.obra}: ${moeda(parte.valor)}`)
+    }
+
+    // Quem bancou entra na confirmação: é a informação que some mais fácil,
+    // e quem mandou a foto precisa ver que ela foi entendida.
+    // Quem bancou entra na confirmação: é a informação que some mais fácil,
+    // e quem mandou a foto precisa ver que ela foi entendida.
+    if (r.pagoPor) {
+      linhas.push(`  pago por ${r.pagoPor}`)
+    } else if (dados.pagoPor) {
+      // Nome escrito que o sistema não reconheceu. O gasto entrou — recusar
+      // o comprovante por causa de um nome seria trocar uma informação a
+      // menos por um comprovante a menos —, mas quem mandou precisa saber.
+      linhas.push(`⚠ Não achei "${dados.pagoPor}" no sistema — lancei sem o pagador.`)
     }
 
     if (!dados.valorDigitado) linhas.push('⚠ Esse valor eu li da imagem. Confere ao aprovar.')

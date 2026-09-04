@@ -431,6 +431,57 @@ export function acharObras(texto, obras, limite = 6) {
 }
 
 /**
+ * Acha quem BANCOU o gasto: "pago por João", "quem pagou foi a Ana".
+ *
+ * Procurado ANTES de tudo, e por uma razão prática: o nome do pagador é um
+ * nome próprio no meio da frase, e sem tirá-lo antes ele vira descrição — ou,
+ * pior, é confundido com o nome de uma obra.
+ *
+ * A marca é a preposição. "Pago por" e "pagou" são as formas que as pessoas
+ * usam; sem uma delas, um nome solto na linha não vira pagador, porque aí
+ * seria adivinhação.
+ */
+export function acharPagador(texto, pagadores) {
+  if (!texto || !pagadores?.length) return { achado: null, resto: texto ?? '' }
+
+  // "pago por X", "pagou X", "quem pagou foi X" — X até o fim ou até uma
+  // vírgula, que é onde o campo seguinte começa.
+  const marca = /\b(?:pag(?:o|a|ou|amento)\s+(?:por|pelo|pela)|quem\s+pagou\s+foi|pagou)\s+(?:o\s+|a\s+)?([^,;\n]+)/i
+  const achou = marca.exec(texto)
+  if (!achou) return { achado: null, resto: texto }
+
+  const escrito = achou[1].trim()
+  const alvo = norm(escrito)
+  if (!alvo) return { achado: null, resto: texto }
+
+  // Nome inteiro, ou um pedaço dele: "joao" e "joao carlos" acham "João
+  // Carlos Silva". Basta que TODAS as palavras escritas estejam no nome —
+  // ninguém digita o nome completo de cadastro numa legenda de foto.
+  //
+  // Havendo dois que servem, não escolhe nenhum: pôr o gasto no nome do
+  // sócio errado é problema de dinheiro entre sócios, e ninguém percebe
+  // olhando o relatório.
+  const iguais = pagadores.filter(p => norm(p) === alvo)
+  const partes = alvo.split(' ').filter(Boolean)
+  const porParte = pagadores.filter(p => {
+    const doNome = norm(p).split(' ')
+    return partes.every(x => doNome.includes(x))
+  })
+  const candidatos = iguais.length ? iguais : porParte
+
+  if (candidatos.length !== 1) {
+    return { achado: null, resto: texto, ambiguo: candidatos.length > 1 ? candidatos : null }
+  }
+
+  const resto = (texto.slice(0, achou.index) + texto.slice(achou.index + achou[0].length))
+    .replace(/\s*,\s*,\s*/g, ', ')
+    .replace(/^[,\s]+|[,\s]+$/g, '')
+    .trim()
+
+  return { achado: candidatos[0], resto }
+}
+
+/**
  * Interpreta a linha inteira.
  *
  * Devolve sempre um objeto — linha vazia ou incompreensível dá todos os
@@ -438,11 +489,16 @@ export function acharObras(texto, obras, limite = 6) {
  * Nunca recusa um comprovante por não entender o texto: a foto no lugar
  * certo já vale, e quem aprova completa o que faltar.
  */
-export function interpretar(texto, obras = []) {
-  const vazio = { obra: null, rateio: null, descricao: null, tipo: null, valor: null, candidatos: null, textoOriginal: texto ?? null }
+export function interpretar(texto, obras = [], pagadores = []) {
+  const vazio = { obra: null, rateio: null, descricao: null, tipo: null, valor: null, pagoPor: null, candidatos: null, textoOriginal: texto ?? null }
   if (!texto?.trim()) return vazio
 
-  const { valor, resto } = acharValor(texto)
+  // O pagador sai primeiro: é nome próprio no meio da frase, e deixado ali
+  // viraria descrição — ou seria confundido com nome de obra.
+  const comPagador = acharPagador(texto, pagadores)
+  const pagoPor = comPagador.achado
+
+  const { valor, resto } = acharValor(comPagador.resto)
 
   // A linha foi escrita no formato com separador, ou é texto corrido?
   //
@@ -498,7 +554,10 @@ export function interpretar(texto, obras = []) {
   //    areia" → MATERIAL). É palpite, e por isso só depois de tudo falhar.
   if (!tipo) tipo = acharTipo(descricao ?? '')
 
-  return { obra, rateio: rateio.length ? rateio : null, descricao, tipo, valor, candidatos, textoOriginal: texto }
+  return {
+    obra, rateio: rateio.length ? rateio : null,
+    descricao, tipo, valor, pagoPor, candidatos, textoOriginal: texto,
+  }
 }
 
 /**
@@ -515,6 +574,9 @@ export function combinar(escrito, lido) {
     obra: escrito?.obra ?? null,
     // Outras obras citadas na mesma linha: o gasto é dividido entre elas.
     rateio: escrito?.rateio ?? null,
+    // Quem bancou. Só sai da linha escrita: a foto do cupom não sabe quem
+    // pagou, e a IA não deve chutar um nome de pessoa.
+    pagoPor: escrito?.pagoPor ?? null,
     // As obras entre as quais perguntar, quando a pessoa escreveu algo que
     // serve para mais de uma (a cidade, tipicamente).
     candidatos: escrito?.candidatos ?? null,
