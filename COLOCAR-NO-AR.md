@@ -188,8 +188,21 @@ O nome `recrutamento-bot` **não é opcional** — é por ele que o auto-deploy
 encontra o processo:
 
 ```bash
-cd ~/recrutamento-bot && pm2 start npm --name recrutamento-bot -- start && pm2 save && pm2 list
+cd ~/recrutamento-bot && pm2 start npm --name recrutamento-bot --cwd /home/ubuntu/recrutamento-bot -- start && pm2 save && pm2 list
 ```
+
+O `--cwd` é cinto e suspensório. O robô acha o `.env` sozinho, pelo caminho
+do próprio código — mas o pm2 guarda o diretório no `pm2 save`, e um dia
+alguém agradece por ele estar certo.
+
+**Confira que ele leu a configuração**, e não subiu vazio:
+
+```bash
+sleep 3 && pm2 logs recrutamento-bot --lines 15 --nostream | grep -E "config|gastos|RH"
+```
+
+Tem que aparecer `[config] N variáveis de /home/ubuntu/recrutamento-bot/.env`.
+Se aparecer `❌ NÃO ACHEI O .env`, o arquivo não chegou lá — volte ao passo 3.
 
 # Passo 6 — Conferir
 

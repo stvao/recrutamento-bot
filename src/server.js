@@ -9,6 +9,11 @@
  *   POST /webhook    — mensagens recebidas do WhatsApp
  *   POST /simular    — testar a conversa sem WhatsApp (usado pelo simulador do RH)
  */
+// PRIMEIRO import, e a ordem importa: o ESM avalia as dependências na ordem
+// em que aparecem, e todo módulo abaixo lê process.env ao ser carregado. Vindo
+// depois, o .env chegaria tarde demais.
+import './config.js'
+
 import express from 'express'
 import { iniciarAtendimento as iniciar, atender } from './atendimento.js'
 import { iaDisponivel } from './ia.js'
