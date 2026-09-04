@@ -43,10 +43,16 @@ const posDownload = fonte.indexOf('downloadMediaMessage(msg')
 ok('a recusa vem ANTES da chamada de download',
   posDeclarado > 0 && posDownload > 0 && posDeclarado < posDownload)
 
-// ── E confere de novo depois ───────────────────────────────────────────
+// ── E o download é ABORTADO no meio ───────────────────────────────────
 //
-// O tamanho declarado é só uma promessa de quem enviou.
-ok('confere também o tamanho real', /buffer\.length > MAX_ARQUIVO_BYTES/.test(fonte))
+// O tamanho declarado é só uma promessa: nada impede declarar 1 KB e mandar
+// 2 GB. Conferir o buffer depois só constataria o estrago — a memória já
+// teria sido consumida, e neste servidor isso derruba o RH junto. Em fluxo,
+// o download morre no primeiro byte a mais.
+ok('baixa em fluxo, não em buffer', /'stream'/.test(fonte))
+ok('conta os bytes que chegam', /recebidos \+= /.test(fonte))
+ok('aborta ao passar do limite', /recebidos > MAX_ARQUIVO_BYTES[\s\S]{0,200}?destroy\(\)/.test(fonte))
+ok('e não devolve nada', /destroy\(\)[\s\S]{0,300}?return null/.test(fonte))
 
 // ── Só baixa o que serve ───────────────────────────────────────────────
 ok('não baixa arquivo de quem não pode lançar', /const vaiServir = /.test(fonte))
