@@ -125,8 +125,35 @@ export function coringaInvalido() {
   return QUALQUER_UM_DO_GRUPO && GRUPOS.size === 0
 }
 
+/** Um identificador de grupo do WhatsApp/Telegram, e não um nome digitado. */
+function pareceIdentificador(g) {
+  return /@g\.us$/.test(g) || /^-?\d{5,}$/.test(g)
+}
+
+/**
+ * Coringa configurado só com NOME de grupo — aceito antes, recusado agora.
+ *
+ * Era um furo: qualquer pessoa criava um grupo com aquele nome, punha o robô
+ * dentro e lançava no financeiro. Como agora o coringa exige identificador,
+ * essa configuração deixa de autorizar alguém — e ficar em silêncio faria o
+ * dono achar que o robô quebrou. Melhor dizer exatamente o que fazer.
+ */
+export function coringaSoComNome() {
+  if (!QUALQUER_UM_DO_GRUPO || GRUPOS.size === 0) return false
+  return ![...GRUPOS].some(pareceIdentificador)
+}
+
 export function gastosAtivo() {
   if (coringaInvalido()) return false
+
+  // Coringa só com nome de grupo não credencia ninguém, então o módulo não
+  // está "no ar" — estava dizendo que sim e recusando todo mundo em seguida,
+  // que é a pior forma de falhar: o dono lê "no ar" e vai procurar o defeito
+  // em qualquer outro lugar.
+  if (coringaSoComNome()) return false
+
+  // Coringa sozinho também não basta: quem o usa depende de casar o grupo
+  // pelo identificador, e sem AUTORIZADOS a lista de números fica vazia.
   const temQuem = AUTORIZADOS.size > 0 || QUALQUER_UM_DO_GRUPO
   return temQuem && obrasConfigurado()
 }
@@ -139,8 +166,34 @@ export function gastosAtivo() {
  */
 export function autorizado(de, deGrupoCadastrado = false) {
   if (AUTORIZADOS.has((de || '').replace(/\D/g, ''))) return true
+
+  // O coringa exige grupo casado pelo IDENTIFICADOR.
+  //
+  // Casar pelo nome não serve aqui, e o buraco era real: com
+  // GASTOS_AUTORIZADOS=* e GASTOS_GRUPOS=Comprovantes, qualquer pessoa criava
+  // um grupo chamado "Comprovantes", punha o robô dentro e lançava no
+  // financeiro da empresa. O comentário acima já dizia que o nome só vale
+  // "junto com a checagem de quem enviou" — mas com o coringa NÃO HÁ checagem
+  // de quem enviou: estar no grupo É a credencial. O nome, que o atacante
+  // escolhe, virava a chave inteira.
+  //
+  // `deGrupoCadastrado` agora significa "grupo casado por id", e é quem
+  // chama que garante isso.
   if (QUALQUER_UM_DO_GRUPO && GRUPOS.size > 0 && deGrupoCadastrado) return true
   return false
+}
+
+/**
+ * A pergunta completa: esta mensagem pode lançar gasto?
+ *
+ * Reúne origem e remetente num lugar só. Antes cada chamador combinava as
+ * duas por conta própria — e combinar errado é justamente o que abre a porta.
+ */
+export function podeLancarGasto({ de, chat, chatNome, ehGrupo }) {
+  const como = comoCasouAOrigem(chat, chatNome)
+  if (como === null) return false
+  // Só o casamento por identificador credencia o coringa.
+  return autorizado(de, Boolean(ehGrupo) && como === 'id')
 }
 
 /**
@@ -150,10 +203,23 @@ export function autorizado(de, deGrupoCadastrado = false) {
  * sabe o nome, não o identificador.
  */
 export function origemAceita(chat, chatNome) {
-  if (GRUPOS.size === 0) return true
-  if (GRUPOS.has(String(chat ?? ''))) return true
-  if (chatNome && GRUPOS_NORM.has(norm(chatNome))) return true
-  return false
+  return comoCasouAOrigem(chat, chatNome) !== null
+}
+
+/**
+ * COMO a origem foi aceita: por identificador, por nome, ou por não haver
+ * restrição. Devolve null quando não foi aceita.
+ *
+ * A distinção existe por segurança, e não por capricho. O identificador de um
+ * grupo é atribuído pelo WhatsApp e ninguém escolhe; o NOME é digitado por
+ * quem cria o grupo. São garantias completamente diferentes, e o coringa "*"
+ * depende dessa diferença — ver `autorizado()`.
+ */
+export function comoCasouAOrigem(chat, chatNome) {
+  if (GRUPOS.size === 0) return 'sem_restricao'
+  if (GRUPOS.has(String(chat ?? ''))) return 'id'
+  if (chatNome && GRUPOS_NORM.has(norm(chatNome))) return 'nome'
+  return null
 }
 
 /**
@@ -347,11 +413,11 @@ async function avisar(pendente, texto) {
 export async function tratar(msg) {
   const { de, chat, chatNome, arquivo, nomeArquivo, tipo, texto, idMensagem } = msg
 
-  const daOrigemCerta = origemAceita(chat, chatNome)
-  if (!daOrigemCerta) return null
+  if (!origemAceita(chat, chatNome)) return null
 
-  // O coringa só vale vindo de grupo cadastrado — no privado, nunca.
-  if (!autorizado(de, daOrigemCerta && Boolean(msg.ehGrupo))) {
+  // O coringa só vale vindo de grupo casado pelo IDENTIFICADOR — no privado
+  // nunca, e por nome de grupo também não.
+  if (!podeLancarGasto(msg)) {
     // Nem responde. Dizer "você não pode" a quem mandou foto num grupo
     // confirma que existe um robô ouvindo e convida a insistir.
     if (arquivo) console.warn(`[gastos] comprovante ignorado: ${discreto(de)} não está em GASTOS_AUTORIZADOS`)

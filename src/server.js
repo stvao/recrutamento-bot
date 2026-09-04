@@ -257,8 +257,12 @@ function tempoDecorrido(ms) {
  * com um candidato por vez, e não teria o que fazer num grupo de trabalho.
  */
 async function rotear(msg) {
-  const daOrigemCerta = gastos.origemAceita(msg.chat, msg.chatNome)
-  const podeLancar = daOrigemCerta && gastos.autorizado(msg.de, daOrigemCerta && Boolean(msg.ehGrupo))
+  // Uma pergunta só, respondida num lugar só.
+  //
+  // Antes esta linha recombinava origem e remetente por conta própria, e era
+  // fácil errar a combinação — foi assim que o coringa passou a aceitar grupo
+  // casado pelo NOME, que o atacante escolhe.
+  const podeLancar = gastos.podeLancarGasto(msg)
 
   if (podeLancar && (msg.arquivo || msg.ehGrupo)) {
     return gastos.tratar(msg)
@@ -620,6 +624,14 @@ if (gastos.gastosAtivo()) {
     + '         para quem manda no privado, e qualquer um que descobrisse o número\n'
     + '         lançaria no financeiro. Defina o grupo, ou liste os números.',
   )
+} else if (gastos.coringaSoComNome()) {
+  console.error([
+    '[gastos] GASTOS_AUTORIZADOS="*" com GASTOS_GRUPOS só por NOME: ninguém vai',
+    '         conseguir lançar. O nome do grupo é escolhido por quem o cria —',
+    '         qualquer pessoa criaria um grupo com esse nome, poria o robô',
+    '         dentro e lançaria no financeiro. Use o IDENTIFICADOR do grupo',
+    '         (algo como 1203630000000000@g.us), ou liste os números.',
+  ].join('\n'))
 } else if (process.env.OBRAS_API_TOKEN || process.env.GASTOS_AUTORIZADOS) {
   console.warn('[gastos] configuração incompleta — falta OBRAS_API_TOKEN ou GASTOS_AUTORIZADOS. Comprovantes NÃO serão enviados.')
 }

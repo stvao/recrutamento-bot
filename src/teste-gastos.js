@@ -182,22 +182,66 @@ ok('nome sem ligar para maiúscula/acento', n.semAcentoNemCaixa)
 ok('grupo de outro nome NÃO passa', !n.outroNome)
 ok('sem nome e sem id certo, NÃO passa', !n.semNome)
 
-// O coringa: qualquer um do grupo pode lançar.
+// O coringa: qualquer um do grupo pode lançar — mas o grupo tem que ser
+// identificado pelo IDENTIFICADOR, nunca pelo nome.
 const coringa = comAmbiente(
-  { GASTOS_GRUPOS: 'Comprovantes', GASTOS_AUTORIZADOS: '*', OBRAS_API_TOKEN: 'x' },
+  { GASTOS_GRUPOS: '120363000000000000@g.us', GASTOS_AUTORIZADOS: '*', OBRAS_API_TOKEN: 'x' },
   `const g = await import('./src/gastos.js')
+   const grupo = { chat: '120363000000000000@g.us', chatNome: 'Comprovantes', ehGrupo: true }
    console.log(JSON.stringify({
      ativo: g.gastosAtivo(),
      invalido: g.coringaInvalido(),
-     doGrupo: g.autorizado('5511900000000', true),
-     doPrivado: g.autorizado('5511900000000', false),
+     doGrupo: g.podeLancarGasto({ de: '5511900000000', ...grupo }),
+     doPrivado: g.podeLancarGasto({ de: '5511900000000', chat: '5511900000000@s.whatsapp.net', ehGrupo: false }),
    }))`,
 )
 const c2 = JSON.parse(coringa)
-ok('com "*" o módulo fica ativo', c2.ativo)
+ok('com "*" e grupo por id, o módulo fica ativo', c2.ativo)
 ok('"*" com grupo definido é válido', !c2.invalido)
 ok('qualquer um DO GRUPO pode lançar', c2.doGrupo)
 ok('mas NÃO no privado', !c2.doPrivado)
+
+// ── O furo: "*" com grupo casado pelo NOME ────────────────────────────────
+//
+// O nome do grupo é digitado por quem o cria. Com o coringa NÃO HÁ checagem
+// de quem enviou — estar no grupo É a credencial. Então qualquer pessoa
+// criava um grupo chamado "Comprovantes", punha o robô dentro, e lançava no
+// financeiro da empresa.
+const ataque = comAmbiente(
+  { GASTOS_GRUPOS: 'Comprovantes', GASTOS_AUTORIZADOS: '*', OBRAS_API_TOKEN: 'x' },
+  `const g = await import('./src/gastos.js')
+   console.log(JSON.stringify({
+     soComNome: g.coringaSoComNome(),
+     ativo: g.gastosAtivo(),
+     invasor: g.podeLancarGasto({
+       de: '5599999999999',
+       chat: '120363999999999999@g.us',   // grupo do atacante
+       chatNome: 'Comprovantes',          // nome que ele escolheu
+       ehGrupo: true,
+     }),
+   }))`,
+)
+const a2 = JSON.parse(ataque)
+ok('grupo criado pelo atacante NÃO autoriza ninguém', !a2.invasor)
+ok('a configuração é reconhecida como só-por-nome', a2.soComNome)
+// Inativo, e não "ativo recusando todo mundo": dizer "no ar" e negar em
+// seguida faz o dono procurar o defeito em qualquer outro lugar.
+ok('e o módulo fica INATIVO, para o dono ver o aviso', !a2.ativo)
+
+// Lista de números explícita continua valendo com grupo por NOME — ali o
+// nome não é a credencial, é só um filtro de onde o robô escuta.
+const nomeComLista = comAmbiente(
+  { GASTOS_GRUPOS: 'Comprovantes', GASTOS_AUTORIZADOS: '5511999998888', OBRAS_API_TOKEN: 'x' },
+  `const g = await import('./src/gastos.js')
+   console.log(JSON.stringify({
+     ativo: g.gastosAtivo(),
+     daLista: g.podeLancarGasto({ de: '5511999998888', chat: '123@g.us', chatNome: 'Comprovantes', ehGrupo: true }),
+     estranho: g.podeLancarGasto({ de: '5599999999999', chat: '123@g.us', chatNome: 'Comprovantes', ehGrupo: true }),
+   }))`,
+)
+const nl = JSON.parse(nomeComLista)
+ok('grupo por nome + lista de números segue funcionando', nl.ativo && nl.daLista)
+ok('e o estranho do mesmo grupo continua barrado', !nl.estranho)
 
 // E o caso que importa: "*" SEM grupo definido valeria para o privado também,
 // e aí qualquer um que descobrisse o número lançaria no financeiro.

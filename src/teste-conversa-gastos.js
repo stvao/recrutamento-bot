@@ -16,7 +16,10 @@ const PASTA = './dados/teste-pendentes'
 process.env.GASTOS_PENDENTES_DIR = PASTA
 process.env.GEMINI_API_KEY = ''            // sem leitura de imagem, de propósito
 process.env.GASTOS_AUTORIZADOS = '*'
-process.env.GASTOS_GRUPOS = 'Comprovantes'
+// Pelo IDENTIFICADOR, e não pelo nome: com o coringa '*', quem está no
+// grupo é quem está autorizado, e nome de grupo é escolhido por quem o
+// cria. Ver o ataque coberto em teste-gastos.js.
+process.env.GASTOS_GRUPOS = '123@g.us'
 process.env.OBRAS_API_TOKEN = 'token-de-teste'
 process.env.GASTOS_ESPERA_DESCRICAO_MS = '50'
 process.env.GASTOS_COBRAR_APOS_MS = '80'
