@@ -24,6 +24,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import qrcode from 'qrcode-terminal'
 import pino from 'pino'
+import * as gastos from './gastos.js'
 
 /** Onde a sessão fica guardada. */
 const PASTA_SESSAO = process.env.BAILEYS_SESSAO || join(process.cwd(), 'dados', 'whatsapp')
@@ -168,16 +169,32 @@ function ehGrupoAtendido(msg) {
 function anexoDaMensagem(msg) {
   const m = msg.message ?? {}
   const img = m.imageMessage
-  if (img) return { tipo: img.mimetype || 'image/jpeg', nome: 'comprovante.jpg' }
+  if (img) {
+    return { tipo: img.mimetype || 'image/jpeg', nome: 'comprovante.jpg', tamanho: Number(img.fileLength ?? 0) }
+  }
   const doc = m.documentMessage ?? m.documentWithCaptionMessage?.message?.documentMessage
   if (doc) {
     const tipo = doc.mimetype || ''
     if (tipo.startsWith('image/') || tipo === 'application/pdf') {
-      return { tipo, nome: doc.fileName || 'comprovante' }
+      return { tipo, nome: doc.fileName || 'comprovante', tamanho: Number(doc.fileLength ?? 0) }
     }
   }
   return null
 }
+
+/**
+ * O maior arquivo que vale a pena baixar.
+ *
+ * Comprovante e foto de cupom ou PDF de nota: alguns MB. O WhatsApp, porem,
+ * aceita documento de ate 2 GB, e `baixar` monta o arquivo INTEIRO na
+ * memoria antes de qualquer conferencia.
+ *
+ * Este servidor tem 911 MB e divide a maquina com o sistema de RH. Um PDF
+ * grande — de sacanagem ou de engano, tanto faz — derrubaria os dois, e o
+ * RH nao tem nada a ver com o assunto. Vinte e cinco megas cobre com folga
+ * qualquer comprovante de verdade.
+ */
+const MAX_ARQUIVO_BYTES = Number(process.env.GASTOS_MAX_ARQUIVO_MB || 25) * 1024 * 1024
 
 /**
  * A mensagem que esta está CITANDO, se houver.
@@ -301,15 +318,31 @@ export async function conectar(aoReceber) {
       // ninguém passaria.
       const de = numeroDoJid(grupo ? (msg.key.participant ?? '') : jid)
 
-      if (pessoal && !anexo && !texto?.trim()) {
-        // Áudio ou figurinha na conversa de candidato. Ela não processa, mas
-        // ficar muda é pior: a pessoa acha que não chegou.
+      /*
+        Este arquivo vai servir para alguma coisa?
+
+        Em grupo cadastrado, comprovante é o propósito do lugar. No privado,
+        quem lança gasto é só quem está na lista explícita — para todo o
+        resto, arquivo não serve para nada: a Maria Vitória lê texto.
+
+        Antes o arquivo era baixado sempre, inclusive o de quem nunca
+        poderia lançá-lo. Era memória e banda gastas para jogar fora, e um
+        desconhecido conseguia fazê-lo de propósito, quantas vezes quisesse.
+
+        A pergunta é respondida aqui em cima porque a resposta muda duas
+        coisas: se vale a pena baixar, e o que dizer a quem mandou.
+      */
+      const vaiServir = Boolean(anexo) && (grupo || gastos.autorizado(de, false))
+
+      if (pessoal && !vaiServir && !texto?.trim()) {
+        // Áudio, figurinha, ou uma foto que ela não tem como usar. Ela não
+        // processa, mas ficar muda é pior: a pessoa acha que não chegou.
         await responder(jid, 'Consigo ler só mensagem de texto, viu? Pode escrever aí que eu te ajudo. 🙂')
         continue
       }
 
       try {
-        const arquivo = anexo ? await baixar(msg) : null
+        const arquivo = vaiServir ? await baixar(msg, anexo.tamanho) : null
         const resposta = await aoReceber({
           canal: 'whatsapp',
           de,
@@ -352,14 +385,29 @@ export async function conectar(aoReceber) {
  * Devolve null se não der: o comprovante não chega ao sistema de obras, mas
  * a conexão não cai e as outras mensagens seguem sendo atendidas.
  */
-async function baixar(msg) {
+async function baixar(msg, tamanhoDeclarado = 0) {
+  // Recusa ANTES de baixar, pelo tamanho que a propria mensagem declara.
+  // Conferir depois nao adianta: o estrago da memoria ja aconteceu.
+  if (tamanhoDeclarado > MAX_ARQUIVO_BYTES) {
+    const mb = (tamanhoDeclarado / 1024 / 1024).toFixed(0)
+    console.warn(`[whatsapp] arquivo de ${mb} MB recusado sem baixar (limite ${MAX_ARQUIVO_BYTES / 1024 / 1024} MB)`)
+    return null
+  }
+
   try {
     const { downloadMediaMessage } = await import('@whiskeysockets/baileys')
     const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
       logger: pino({ level: 'error' }),
       reuploadRequest: sock.updateMediaMessage,
     })
-    return buffer?.length ? buffer : null
+    if (!buffer?.length) return null
+
+    // O tamanho declarado e so uma promessa de quem enviou. Este e o real.
+    if (buffer.length > MAX_ARQUIVO_BYTES) {
+      console.warn(`[whatsapp] arquivo baixado passou do limite (${(buffer.length / 1024 / 1024).toFixed(0)} MB) — descartado`)
+      return null
+    }
+    return buffer
   } catch (e) {
     console.error('[whatsapp] não consegui baixar o arquivo:', e.message)
     return null

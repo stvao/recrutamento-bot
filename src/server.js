@@ -27,6 +27,7 @@ import { enviarCandidatura, avisarRH, quemE } from './rh-client.js'
 import * as funcionario from './funcionario.js'
 import * as triagem from './triagem.js'
 import * as gastos from './gastos.js'
+import * as limite from './limite.js'
 
 const app = express()
 app.use(express.json({ limit: '1mb' }))
@@ -59,6 +60,7 @@ app.get('/metricas', (_req, res) => res.json({
   vagas: origemDaLista(),
   atendente: iaDisponivel() ? 'Maria Vitória (IA)' : 'roteiro',
   gastos: gastos.situacao(),
+  limite: limite.situacao(),
 }))
 
 /**
@@ -262,6 +264,30 @@ async function rotear(msg) {
   }
 
   if (msg.ehGrupo) return null
+
+  /*
+    Daqui para baixo é conversa com desconhecido, e cada mensagem custa uma
+    chamada ao modelo.
+
+    A cota é diária e compartilhada. Um número mandando sem parar — de
+    sacanagem, ou um aplicativo repetindo sozinho — gastava a cota do dia, e
+    quem pagava era o candidato que escrevesse depois: caindo no roteiro
+    fixo, que não sabe salário nem cidade. O prejuízo nunca foi a conta; era
+    o atendimento de quem interessa, pelo resto do dia.
+
+    Quem lança gasto já saiu acima, e de propósito: vinte comprovantes
+    seguidos no grupo é o uso normal do outro módulo.
+  */
+  const vez = limite.registrar(msg.de)
+  if (!vez.permitido) {
+    // Um aviso por janela. Repetir a cada mensagem faria do robô exatamente
+    // o que se quer evitar: uma máquina respondendo sem parar.
+    if (vez.avisar) {
+      console.warn(`[limite] ${msg.de} passou do limite de mensagens — avisado uma vez.`)
+      return limite.textoDoAviso()
+    }
+    return null
+  }
 
   // Recrutamento desligado: fica calado em vez de atender e perder a ficha.
   //
