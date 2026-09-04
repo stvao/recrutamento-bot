@@ -173,12 +173,61 @@ export function carregar() {
       }
     }
 
+    // Antes de anunciar o número, tira o que já passou da validade: senão o
+    // log diria "40 recuperados" para 40 fotos que ninguém vai responder.
+    const vencidos = limparAntigos()
+    recuperados -= vencidos
+
+    if (vencidos) console.log(`[pendentes] ${vencidos} comprovante(s) sem resposta há mais de ${VALIDADE_MS / 86400000} dias — descartados`)
     if (recuperados) console.log(`[pendentes] ${recuperados} comprovante(s) recuperado(s) do disco`)
     return recuperados
   } catch (e) {
     console.error('[pendentes] não consegui reler a pasta:', e.message)
     return 0
   }
+}
+
+/**
+ * Por quanto tempo um comprovante sem resposta continua esperando.
+ *
+ * A ronda do módulo de gastos já cuida de quem RECEBEU pergunta: cobra uma
+ * vez e, passado um dia, manda para a caixa de comprovantes. Esta limpeza é
+ * para os que escapam dela.
+ *
+ * Escapam os que nunca chegaram a ser perguntados. Um comprovante que chega
+ * sem legenda espera um minuto pela descrição; se o robô for reiniciado
+ * nesse minuto — um deploy, uma queda — a ficha volta do disco sem
+ * `perguntadoEm`, e a ronda pula justamente essas. Ficam para sempre.
+ *
+ * São poucas, e por isso passavam despercebidas: o estrago aparece devagar.
+ * O disco vai enchendo de fotos, o arranque fica mais lento a cada mês, e ao
+ * juntar cinquenta esperando o robô passa a RECUSAR comprovante novo daquela
+ * pessoa — uma foto órfã de dois meses atrás impedindo o gasto de hoje.
+ *
+ * Sete dias é folgado para o que se resolve em minutos. Passado isso, a foto
+ * continua no WhatsApp de quem mandou — nada se perde de verdade.
+ */
+const VALIDADE_MS = Number(process.env.GASTOS_VALIDADE_DIAS || 7) * 24 * 60 * 60 * 1000
+
+/**
+ * Joga fora o que ficou esperando tempo demais.
+ *
+ * Devolve quantos saíram, para o log dizer o que aconteceu em vez de o
+ * número simplesmente cair sozinho.
+ */
+export function limparAntigos(agora = Date.now()) {
+  if (VALIDADE_MS <= 0) return 0
+  let removidos = 0
+  for (const p of [...fichas.values()]) {
+    const quando = p.criadoEm ?? 0
+    // Ficha sem data é de uma versão antiga do formato: conta como velha,
+    // porque foi gravada antes desta linha existir.
+    if (!quando || agora - quando > VALIDADE_MS) {
+      remover(p.id)
+      removidos++
+    }
+  }
+  return removidos
 }
 
 /** Só para teste: esvazia a memória sem apagar o disco. */

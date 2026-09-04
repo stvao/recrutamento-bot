@@ -654,6 +654,13 @@ async function descartarTudo(de) {
 async function ronda() {
   const agora = Date.now()
 
+  // Primeiro, os órfãos: comprovante que reiniciou durante a espera pela
+  // legenda volta sem `perguntadoEm`, e o laço abaixo pula justamente esses.
+  // Sem isto eles ficariam no disco para sempre — e, somando cinquenta,
+  // passariam a impedir comprovante novo da mesma pessoa.
+  const vencidos = pendentes.limparAntigos(agora)
+  if (vencidos) console.log(`[gastos] ${vencidos} comprovante(s) antigos sem resposta — descartados`)
+
   for (const p of pendentes.todos()) {
     if (!p.perguntadoEm) continue
     const parado = agora - p.perguntadoEm
