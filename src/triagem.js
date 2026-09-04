@@ -141,9 +141,16 @@ export function conferir(saida) {
   if (!saida?.resposta?.trim()) return null
 
   const r = saida.resposta
-  if (/R\$\s*\d|\d+\s*(reais|mil reais)/i.test(r)
-    || /https?:\/\/|www\.|\.com|\.br\//i.test(r)
-    || /senha|token/i.test(r)) {
+
+  // Os três motivos, cada um no seu nome: a condição abaixo E o log usam
+  // estes mesmos valores. Antes o log citava variáveis que nunca existiram, e
+  // a função quebrava justamente quando precisava barrar alguma coisa — a
+  // barreira caía no único caso em que ela tinha trabalho a fazer.
+  const temValor = /R\$\s*\d|\d+\s*(reais|mil reais)/i.test(r)
+  const temLink = /https?:\/\/|www\.|\.com|\.br\//i.test(r)
+  const temSenha = /senha|token/i.test(r)
+
+  if (temValor || temLink || temSenha) {
     // O TEXTO não vai para o log.
     //
     // Ele está sendo descartado justamente por conter valor, link ou senha

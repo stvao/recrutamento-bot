@@ -342,5 +342,39 @@ ok('texto vazio nao quebra', acharPagador('', SOCIOS).achado === null)
 // E a linha sem pagador segue igual ao que ja era.
 ok('linha sem pagador continua igual', interpretar('haia cimento 250', REAIS, SOCIOS).pagoPor === null)
 
+
+// ── Dois valores na mesma linha: pergunta, não chuta ────────────────────────
+//
+// A regra do "último número" serve para ignorar quantidade ("20 sacos de
+// cimento, 2500,00"). Mas com dois PREÇOS ela lançava o segundo em silêncio —
+// o número errado, e o certo virando lixo na descrição. Ninguém percebe um
+// valor errado até fechar o mês.
+{
+  const a = acharValor('material 2500,00 e frete 300,00')
+  ok('dois preços NÃO viram valor chutado', a.valor === null)
+  ok('  e os dois são devolvidos para a pergunta', a.ambiguo?.length === 2)
+  ok('  na ordem em que foram escritos', a.ambiguo?.[0] === '2500,00' && a.ambiguo?.[1] === '300,00')
+
+  const comCifrao = acharValor('R$ 2.500,00 mais R$ 300,00')
+  ok('vale também com R$ nos dois', comCifrao.valor === null && comCifrao.ambiguo?.length === 2)
+
+  // Quantidade não é preço, e continua sendo ignorada — senão a mudança
+  // transformaria toda linha com número em pergunta.
+  ok('quantidade + preço segue lendo o preço',
+    acharValor('20 sacos de cimento, 2500,00').valor === 2500)
+  ok('número de nota + preço também',
+    acharValor('nota 12345, 250,00').valor === 250)
+  ok('preço sozinho sem centavos continua valendo',
+    acharValor('bastos, material, 2500').valor === 2500)
+  ok('dois inteiros sem cara de dinheiro não travam',
+    acharValor('20 sacos e 30 tijolos, 500').valor === 500)
+
+  // E o campo chega em interpretar(), que é de onde a pergunta lê.
+  const i = interpretar('bastos, material 2500,00 e frete 300,00', ['Bastos Tsuya'])
+  ok('interpretar entrega os valores ambíguos', i.valorAmbiguo?.length === 2)
+  ok('  e não inventa um valor', i.valor === null)
+  ok('  mas a obra continua reconhecida', i.obra === 'Bastos Tsuya')
+}
+
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)

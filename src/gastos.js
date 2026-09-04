@@ -777,6 +777,28 @@ async function ronda() {
     const parado = agora - p.perguntadoEm
 
     if (parado > DESISTIR_APOS_MS) {
+      /*
+        Esperando SÓ o nome do sócio? Então lança, sem ele.
+
+        Obra e valor decidem SE o gasto pode entrar — sem um deles o
+        comprovante vai mesmo para a caixa, onde alguém completa à mão. Mas o
+        sócio decide só COMO o gasto fica registrado, e mandar para a caixa um
+        comprovante que está completo seria trocar um lançamento automático por
+        trabalho manual, por causa de um campo que a aprovação preenche.
+
+        Sem isto, acrescentar a pergunta do sócio teria PIORADO o módulo: todo
+        comprovante sem resposta cairia na caixa, inclusive os que antes
+        entravam sozinhos.
+      */
+      if (p.esperandoPagador && p.dados?.obra && p.dados?.valor != null) {
+        p.esperandoPagador = false
+        p.pagadorPerguntado = true
+        pendentes.atualizar(p)
+        const texto = await resolveDireto(p)
+        if (texto) await avisar(p, `⏰ Ninguém disse quem pagou, então lancei sem essa informação.\n${texto}`)
+        continue
+      }
+
       const r = await paraCaixa(p)
       pendentes.remover(p.id)
       await avisar(p, `⏰ Faz ${faz(parado)} que perguntei sobre este e não tive resposta.\n${r}`)
@@ -793,6 +815,18 @@ async function ronda() {
         + '_(responde citando esta mensagem, ou escreve *cancelar tudo*)_')
     }
   }
+}
+
+/**
+ * Uma passada da ronda, sem reler o disco. Só para teste.
+ *
+ * `iniciarRonda` relê a pasta, e a ficha que volta do disco não tem mais o
+ * canal de conversa — uma função não sobrevive a ser gravada. Num teste isso
+ * esconderia justamente o que se quer conferir: o que o robô FALA ao decidir
+ * sozinho.
+ */
+export async function _rodarRonda() {
+  return ronda()
 }
 
 /** Liga a ronda. Chamado uma vez, no arranque. */
@@ -1064,13 +1098,25 @@ function perguntar(pendente, falta, obras) {
     dito. A última linha costuma ser a lista de obras, e repetir só a lista
     não lembra ninguém do que estava sendo perguntado.
   */
+  /*
+    Dois valores na mesma linha — a pergunta diz QUAIS.
+
+    Sem isso, quem escreveu "material 2500,00 e frete 300,00" recebia um
+    "qual foi o valor?" seco e concluía que o robô não tinha lido nada. E
+    escolher um dos dois em silêncio era pior: lançava o número errado, que
+    ninguém percebe até fechar o mês.
+  */
+  const doisValores = d?.valorAmbiguo?.length > 1 ? d.valorAmbiguo : null
+
   const pergunta = candidatos?.length
     ? 'Aí tem mais de uma obra. É qual delas?'
-    : falta.includes('obra') && falta.includes('valor')
-      ? 'Só faltou a *obra* e o *valor*. Me manda os dois?'
-      : falta.includes('obra')
-        ? 'De qual *obra* é esse gasto?'
-        : 'Qual foi o *valor*?'
+    : doisValores
+      ? `Vi dois valores aí (${doisValores.join(' e ')}). Qual é o do comprovante?`
+      : falta.includes('obra') && falta.includes('valor')
+        ? 'Só faltou a *obra* e o *valor*. Me manda os dois?'
+        : falta.includes('obra')
+          ? 'De qual *obra* é esse gasto?'
+          : 'Qual foi o *valor*?'
 
   pendente.ultimaPergunta = pergunta
   linhas.push(pergunta)

@@ -83,6 +83,29 @@ export function acharValor(texto) {
   const achados = [...texto.matchAll(padrao)]
   if (!achados.length) return { valor: null, resto: texto }
 
+  // Dois valores com CARA DE DINHEIRO: não se chuta.
+  //
+  // A regra do "último número" existe para ignorar quantidade ("20 sacos de
+  // cimento, 2500,00"), e para isso ela serve. Mas em "material 2500,00 e
+  // frete 300,00" ela lançava R$ 300 em silêncio — o número errado, com o
+  // certo virando lixo na descrição. É o mesmo erro que o módulo já evita em
+  // outro lugar: quando há duas obras possíveis, ele pergunta em vez de
+  // escolher. Valor merece o mesmo cuidado, e mais: ninguém percebe um valor
+  // errado até fechar o mês.
+  //
+  // Cara de dinheiro = tem R$, centavos, ou separador de milhar. "20" não
+  // tem, "2.500,00" tem — é o que separa quantidade de preço.
+  const comCaraDeDinheiro = achados.filter(a =>
+    /r\$/i.test(a[0]) || /,\d{1,2}$/.test(a[1]) || /\.\d{3}/.test(a[1]))
+
+  if (comCaraDeDinheiro.length > 1) {
+    return {
+      valor: null,
+      resto: texto,
+      ambiguo: comCaraDeDinheiro.map(a => a[1]),
+    }
+  }
+
   const ultimo = achados[achados.length - 1]
   const bruto = ultimo[1]
 
@@ -511,7 +534,7 @@ export function interpretar(texto, obras = [], pagadores = []) {
   const comPagador = acharPagador(texto, pagadores)
   const pagoPor = comPagador.achado
 
-  const { valor, resto } = acharValor(comPagador.resto)
+  const { valor, resto, ambiguo: valorAmbiguo } = acharValor(comPagador.resto)
 
   // A linha foi escrita no formato com separador, ou é texto corrido?
   //
@@ -570,6 +593,10 @@ export function interpretar(texto, obras = [], pagadores = []) {
   return {
     obra, rateio: rateio.length ? rateio : null,
     descricao, tipo, valor, pagoPor, candidatos, textoOriginal: texto,
+    // Os valores que apareceram quando havia mais de um com cara de dinheiro.
+    // Serve para a pergunta dizer QUAIS eram — perguntar "qual o valor?" logo
+    // depois de a pessoa ter escrito dois faz ela achar que o robô não leu.
+    valorAmbiguo: valorAmbiguo ?? null,
   }
 }
 
