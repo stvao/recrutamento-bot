@@ -26,6 +26,8 @@ import qrcode from 'qrcode-terminal'
 import pino from 'pino'
 import * as gastos from './gastos.js'
 import { ehConversaPessoal, tipoIgnorado, telefoneDe, numeroDoJid } from './endereco.js'
+import { recrutamentoLigado } from './config.js'
+import * as observacao from './observacao.js'
 
 /** Onde a sessão fica guardada. */
 const PASTA_SESSAO = process.env.BAILEYS_SESSAO || join(process.cwd(), 'dados', 'whatsapp')
@@ -287,6 +289,11 @@ export async function conectar(aoReceber) {
     if (type !== 'notify') return
 
     for (const msg of messages) {
+      // Olha ANTES de qualquer filtro: as respostas do dono, digitadas no
+      // celular, chegam como mensagens "minhas", e o filtro abaixo as
+      // descarta. São justamente elas que ensinam como responder.
+      await observar(msg)
+
       const pessoal = ehConversaPessoal(msg)
       const grupo = !pessoal && ehGrupoAtendido(msg)
 
@@ -341,7 +348,13 @@ export async function conectar(aoReceber) {
       if (pessoal && !vaiServir && !texto?.trim()) {
         // Áudio, figurinha, ou uma foto que ela não tem como usar. Ela não
         // processa, mas ficar muda é pior: a pessoa acha que não chegou.
-        await responder(jid, 'Consigo ler só mensagem de texto, viu? Pode escrever aí que eu te ajudo. 🙂')
+        //
+        // Só com o recrutamento ligado. Desligado, quem atende é o dono, e o
+        // robô se metendo na conversa para dizer "só leio texto" a quem
+        // mandou áudio é pior que o silêncio.
+        if (recrutamentoLigado()) {
+          await responder(jid, 'Consigo ler só mensagem de texto, viu? Pode escrever aí que eu te ajudo. 🙂')
+        }
         continue
       }
 
@@ -375,7 +388,7 @@ export async function conectar(aoReceber) {
         if (resposta) await responder(jid, resposta, { citar: grupo ? msg : null, rapido: grupo })
       } catch (e) {
         console.error('[whatsapp] erro ao atender:', e.message)
-        if (pessoal) await responder(jid, 'Tive um probleminha aqui no sistema. Pode repetir, por favor?')
+        if (pessoal && recrutamentoLigado()) await responder(jid, 'Tive um probleminha aqui no sistema. Pode repetir, por favor?')
       }
     }
   })
@@ -438,6 +451,44 @@ async function baixar(msg, tamanhoDeclarado = 0) {
   }
 }
 
+/** Conversa privada com uma pessoa — telefone ou @lid. */
+const ehPrivado = (jid) => typeof jid === 'string' && (jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid'))
+
+/**
+ * Anota a mensagem privada, dos dois lados, para o robô aprender.
+ *
+ * Nunca lança: observar é secundário, e um erro aqui não pode impedir a
+ * mensagem de ser atendida.
+ */
+async function observar(msg) {
+  try {
+    if (!observacao.ligado()) return
+    const jid = msg.key?.remoteJid
+    if (!ehPrivado(jid)) return
+    const tipo = observacao.tipoDe(msg.message)
+    if (!tipo) return
+
+    const autor = !msg.key.fromMe ? 'candidato'
+      : observacao.foiORobo(msg.key.id) ? 'robo' : 'empresa'
+    // O robô já anotou o que ele mesmo mandou, na hora de enviar.
+    if (autor === 'robo') return
+
+    const { numero, telefoneConhecido } = await telefoneDe(msg, {
+      lidMapping: sock?.signalRepository?.lidMapping,
+    })
+    observacao.anotar({
+      chave: jid,
+      final: telefoneConhecido ? numero : null,
+      autor,
+      tipo,
+      texto: textoDaMensagem(msg),
+      em: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
+    })
+  } catch (e) {
+    console.error('[observacao] falhou ao olhar a mensagem:', e.message)
+  }
+}
+
 /** Envia, com a pausa e o "digitando…" que fazem parecer gente. */
 async function responder(jid, texto, { citar = null, rapido = false } = {}) {
   if (!sock) return { ok: false }
@@ -455,6 +506,12 @@ async function responder(jid, texto, { citar = null, rapido = false } = {}) {
     // pergunta ao responder, e é assim que o robô sabe de qual comprovante
     // ela está falando.
     const enviada = await sock.sendMessage(jid, { text: texto }, citar ? { quoted: citar } : {})
+
+    // Anota o que o robô disse no privado, e marca o id: a mesma mensagem
+    // pode voltar como "minha", e não pode ser confundida com o dono.
+    observacao.marcarDoRobo(enviada?.key?.id)
+    if (ehPrivado(jid)) observacao.anotar({ chave: jid, autor: 'robo', tipo: 'texto', texto })
+
     return { ok: true, id: enviada?.key?.id ?? null }
   } catch (e) {
     console.error('[whatsapp] não consegui enviar:', e.message)

@@ -84,6 +84,22 @@ export function carregar() {
   return { achou: true, caminho: CAMINHO, carregadas }
 }
 
+/**
+ * A Maria Vitória está respondendo candidatos?
+ *
+ * Uma chave só, lida por quem responde. Eram duas: o roteamento respeitava
+ * RECRUTAMENTO=off, mas o módulo do WhatsApp respondia áudio e figurinha por
+ * conta própria, antes de o roteamento ser consultado. Com o recrutamento
+ * desligado — o dono ainda atendendo à mão —, o robô entrava na conversa
+ * dizendo "consigo ler só texto" para quem mandava áudio.
+ *
+ * Lida na hora, e não guardada: mudar o .env e reiniciar é o suficiente, e
+ * os testes podem ligar e desligar sem recarregar o módulo.
+ */
+export function recrutamentoLigado() {
+  return (process.env.RECRUTAMENTO ?? 'on').toLowerCase() !== 'off'
+}
+
 const resultado = carregar()
 
 if (!resultado.achou) {

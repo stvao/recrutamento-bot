@@ -12,7 +12,7 @@
 // PRIMEIRO import, e a ordem importa: o ESM avalia as dependências na ordem
 // em que aparecem, e todo módulo abaixo lê process.env ao ser carregado. Vindo
 // depois, o .env chegaria tarde demais.
-import './config.js'
+import { recrutamentoLigado } from './config.js'
 
 import express from 'express'
 import { iniciarAtendimento as iniciar, atender } from './atendimento.js'
@@ -44,7 +44,7 @@ app.use(express.json({ limit: '1mb' }))
  *
  * Ligado por padrão: quem não configurou nada tem o comportamento de sempre.
  */
-const RECRUTAMENTO_LIGADO = (process.env.RECRUTAMENTO ?? 'on').toLowerCase() !== 'off'
+const RECRUTAMENTO_LIGADO = recrutamentoLigado()
 
 
 app.get('/health', (_req, res) => res.json({ ok: true, servico: 'recrutamento-bot' }))
