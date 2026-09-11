@@ -9,21 +9,16 @@
  */
 
 import { norm, melhorMatch, contemAlgum } from './texto.js'
-import { vagasAtuais, termosDasVagas } from './catalogo.js'
+import { vagasAtuais, cidadesAtuais, termosDasVagas, tetoDe } from './catalogo.js'
 
 // ─── Base de conhecimento ────────────────────────────────────────────────────
 // As vagas vêm do RH (ver vagas.js). Antes moravam aqui, com salário escrito
 // à mão — e o robô informa o valor por escrito, no WhatsApp do candidato.
 
-export const CIDADES = [
-  { nome: 'Buritama',      alojamento: true },
-  { nome: 'Pereiras',      alojamento: true },
-  { nome: 'Bastos',        alojamento: true },
-  { nome: 'Caraguatatuba', alojamento: true },
-  { nome: 'Praia Grande',  alojamento: true },
-  { nome: 'Peruíbe',       alojamento: true },
-  { nome: 'Itapevi',       alojamento: false },
-]
+// As cidades também. Moravam aqui escritas à mão, e a lista dizia que SEIS
+// tinham alojamento quando só duas têm: alguém podia largar o que tem e
+// chegar numa cidade sem onde dormir, com a promessa por escrito no celular.
+// Agora vêm do RH, pelo catálogo — a mesma fonte da Maria Vitória.
 
 export const JORNADA = 'Segunda a quinta das 7h às 17h, e sexta das 7h às 16h.'
 
@@ -69,13 +64,13 @@ const APELIDOS_CIDADE = {
 }
 
 function matchCidade(msg) {
-  const i = indiceEscolhido(msg, CIDADES.length)
-  if (i) return CIDADES[i - 1]
-  const nome = melhorMatch(msg, CIDADES.map(c => ({
+  const i = indiceEscolhido(msg, cidadesAtuais().length)
+  if (i) return cidadesAtuais()[i - 1]
+  const nome = melhorMatch(msg, cidadesAtuais().map(c => ({
     valor: c.nome,
     termos: [c.nome, ...(APELIDOS_CIDADE[c.nome] ?? [])],
   })))
-  return nome ? CIDADES.find(c => c.nome === nome) || null : null
+  return nome ? cidadesAtuais().find(c => c.nome === nome) || null : null
 }
 function ehSim(msg) {
   return temAlguma(msg, ['sim', 'tenho', 'ja tenho', 'ja', 'possuo', 'claro', 'positivo', 'isso', 'com certeza'])
@@ -123,45 +118,103 @@ function listaVagasTexto() {
     `\n${vagasAtuais().length + 1}. Outra função (não está na lista)`
 }
 function listaCidadesTexto() {
-  return CIDADES.map((c, i) => `${i + 1}. ${c.nome}`).join('\n')
+  return cidadesAtuais().map((c, i) => `${i + 1}. ${c.nome}`).join('\n')
 }
 
-// ─── FAQ ──────────────────────────────────────────────────────────────────────
-function responderFAQ(msg, estado) {
+// ─── FAQ ────────────────────────────────────────────────────────────────────────────
+/** "a, b e c" */
+function juntar(nomes) {
+  return nomes.length <= 1 ? (nomes[0] ?? '') : `${nomes.slice(0, -1).join(', ')} e ${nomes.at(-1)}`
+}
+
+/** "R$ 2.803,00 (inicial — com experiência comprovada pode chegar a R$ 3.500,00)" */
+function faixaSalarial(v) {
+  if (!v.salario) return 'a combinar'
+  const teto = tetoDe(v.nome)
+  return teto
+    ? `${fmtMoeda(v.salario)} (inicial — com experiência comprovada pode chegar a ${fmtMoeda(teto)})`
+    : fmtMoeda(v.salario)
+}
+
+export function responderFAQ(msg, estado = {}) {
+  /*
+    As perguntas novas usam comparação EXATA, e não a tolerância a erro de
+    digitação do resto do arquivo. Nelas uma letra muda o sentido: com
+    tolerância, "quanto paga pedreiro?" casava com "quando paga" e recebia o
+    dia do pagamento, e "quais cidades têm vaga?" casava com "idade" e
+    recebia "precisa ter 18 anos".
+  */
+  const t = norm(msg)
+  /*
+    Benefício e registro, ANTES de tudo — e sem resposta pronta.
+
+    "Recebo seguro-desemprego, dá pra não registrar?" é uma pergunta cuja
+    resposta escrita, qualquer que seja, vira prova. A resposta antiga dizia
+    que "no momento da contratação verificamos essa possibilidade": por
+    escrito, a empresa se oferecendo para não registrar alguém que recebe
+    benefício. Isto quem conversa é uma pessoa.
+  */
+  // Sem "auxilio": com tolerância ou sem, fica perto demais de "auxiliar",
+  // que é como muita gente chama a vaga de servente.
+  if (/\b(beneficio|bolsa familia|bpc|seguro desemprego)\b|nao (posso )?registrar|(perco|perder) o beneficio/.test(t)) {
+    return { texto: 'Essa parte eu prefiro que o responsável converse direto com você, tá? Vou pedir pra ele te chamar. 🙂', escalar: true }
+  }
+  /*
+    Registro: diz as formas de contratação, e NUNCA quando o registro é
+    feito. "Sim, é CLT 👍" era promessa escrita de carteira assinada — e
+    a contratação também é por diária e por empreita.
+  */
+  if (temAlguma(msg, ['registrado', 'registro', 'registra', 'registram', 'carteira', 'clt', 'fichado', 'assinada'])) {
+    if (/primeiro dia|desde o (inicio|comeco)|quando (registra|vou ser)|quanto tempo|demora (pra|para) registrar/.test(t)) {
+      return { texto: 'Isso o responsável te explica certinho na entrevista, tá? 🙂', escalar: true }
+    }
+    return { texto: 'Trabalhamos com carteira assinada (CLT), diária ou empreita — o formato é combinado com o responsável na entrevista. 🙂' }
+  }
+  // O DIA do pagamento antes do salário: "quando cai o pagamento" não é
+  // "quanto paga".
+  if (/quando (cai|paga|recebe|e o pagamento)|dia (do|de) pagamento|que dia (paga|cai|recebe)|quinto dia|dia util|adiantamento/.test(t)) {
+    return { texto: 'O pagamento é no 5º dia útil de cada mês, e no dia 20 tem o vale (adiantamento). 🙂' }
+  }
   if (temAlguma(msg, ['vale', 'passe', 'transporte', 'conducao', 'passagem', 'onibus'])) {
     const pedeAgora = temAlguma(msg, ['amanha', 'hoje', 'agora', 'ir trabalhar', 'me da', 'me dar', 'manda', 'enviar'])
-    return { texto: 'Sobre o vale-transporte: ele é fornecido para quem precisa. Só não conseguimos enviar antes de você começar — assim que estiver trabalhando, o RH envia o vale. 🙂', escalar: pedeAgora }
+    return { texto: 'O vale-transporte é a partir do primeiro dia de trabalho. A gente não consegue adiantar: você começa e, chegando lá, o RH envia o vale. 🙂', escalar: pedeAgora }
   }
   if (temAlguma(msg, ['salario', 'quanto ganha', 'quanto paga', 'quanto e', 'remuneracao', 'pagamento'])) {
     // A vaga citada na pergunta vem antes da já escolhida: quem pergunta
-    // "e o do pedreiro?" quer o do pedreiro, não a lista dos sete.
+    // "e o do pedreiro?" quer o do pedreiro, não a lista inteira.
     const v = matchVaga(msg) || (estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null)
-    if (v) return { texto: v.salario ? `O salário de ${v.nome} é ${fmtMoeda(v.salario)}.` : `Para ${v.nome} o salário é a combinar, conforme a sua experiência.` }
-    return { texto: `Os salários:\n${vagasAtuais().map(v => `• ${v.nome}: ${v.salario ? fmtMoeda(v.salario) : 'a combinar'}`).join('\n')}` }
+    if (v) return { texto: v.salario ? `O salário de ${v.nome} é ${faixaSalarial(v)}.` : `Para ${v.nome} o salário é a combinar, conforme a sua experiência.` }
+    return { texto: `Os salários:\n${vagasAtuais().map(v => `• ${v.nome}: ${faixaSalarial(v)}`).join('\n')}` }
   }
   if (temAlguma(msg, ['horario', 'que horas', 'dias', 'jornada', 'expediente', 'turno'])) {
     return { texto: `A jornada é: ${JORNADA}` }
   }
+  // Alimentação antes do alojamento: "quem fica no alojamento tem janta?" é
+  // pergunta de comida.
+  if (/\b(almoco|comida|refeicao|alimentacao|marmita|janta|jantar)\b|cafe da manha/.test(t)) {
+    return { texto: 'A empresa fornece o almoço na obra. Quem fica no alojamento tem também café da manhã e janta. 🍽️' }
+  }
   if (temAlguma(msg, ['alojamento', 'moradia', 'dormir', 'ficar', 'hospeda', 'morar', 'estadia'])) {
-    const cMsg = matchCidade(msg)
-    const c = cMsg || (estado.cidade ? CIDADES.find(x => x.nome === estado.cidade) : null)
-    if (c) return { texto: c.alojamento ? `Sim! Em ${c.nome} temos alojamento. 🏠` : `Em ${c.nome} não temos alojamento. Nas demais cidades onde temos obra, sim.` }
-    return { texto: 'Temos alojamento em todas as cidades onde há obra, exceto Itapevi. O alojamento fica na própria cidade da obra.' }
+    const cidades = cidadesAtuais()
+    const comAlojamento = cidades.filter(c => c.alojamento).map(c => c.nome)
+    const onde = comAlojamento.length ? ` Hoje o alojamento é em ${juntar(comAlojamento)}.` : ''
+    const c = matchCidade(msg) || (estado.cidade ? cidades.find(x => x.nome === estado.cidade) : null)
+    if (c) return { texto: c.alojamento ? `Sim! Em ${c.nome} temos alojamento. 🏠` : `Em ${c.nome} não temos alojamento.${onde}` }
+    return { texto: comAlojamento.length
+      ? `Hoje temos alojamento em ${juntar(comAlojamento)}. O alojamento fica na própria cidade da obra.`
+      : 'No momento não temos alojamento disponível.' }
   }
-  if (temAlguma(msg, ['registrado', 'registro', 'carteira', 'clt', 'fichado', 'assinada'])) {
-    if (temAlguma(msg, ['beneficio', 'bolsa', 'bpc', 'auxilio', 'nao posso registrar', 'perco'])) {
-      return { texto: 'A contratação é com registro em carteira (CLT). Se você recebe algum benefício e não pode ser registrado agora, no momento da contratação nós verificamos essa possibilidade com você.' }
-    }
-    return { texto: 'Sim, a contratação é com registro em carteira (CLT). 👍' }
+  if (/idade minima|menor de idade|(qual|que) (a )?idade|quantos anos (precisa|tem que)|tenho 1[4-7] anos/.test(t)) {
+    return { texto: 'É preciso ter 18 anos ou mais. 🙂' }
   }
-  if (temAlguma(msg, ['beneficio', 'bolsa familia', 'bpc', 'nao posso registrar', 'perco o'])) {
-    return { texto: 'A contratação é registrada (CLT). Se você recebe algum benefício e não pode ser registrado agora, no momento da contratação verificamos essa possibilidade com você.' }
+  if (/como funciona|proximo passo|como e o processo|tem entrevista|quando (me )?chamam/.test(t)) {
+    return { texto: 'Funciona assim: a gente conversa aqui e eu já preencho a sua ficha. Depois o responsável te liga, e aí marcamos a entrevista. 🙂' }
   }
   if (temAlguma(msg, ['experiencia', 'precisa saber', 'sou iniciante', 'nunca trabalhei'])) {
     const v = estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null
     if (v && !v.profissional) return { texto: `Para ${v.nome} não é preciso experiência. 🙂` }
     if (v && v.profissional) return { texto: `Para ${v.nome} é necessário ter experiência na função.` }
-    return { texto: 'Para Servente e Estágio não precisa de experiência. Para as demais funções é necessário ter experiência.' }
+    return { texto: 'Para Servente e Estágio não precisa de experiência. Para Pedreiro é necessário ter experiência na função.' }
   }
   if (temAlguma(msg, ['cidade', 'onde tem', 'qual cidade', 'tem vaga em', 'regiao', 'local'])) {
     const c = matchCidade(msg)

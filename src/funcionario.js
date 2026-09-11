@@ -52,6 +52,11 @@ const ASSUNTO_PESSOAL = new RegExp([
   'quanto (eu )?(ganho|recebo|vou receber)', 'meu pagamento',
   'meu cpf', 'minha conta', 'minha chave', 'meu pix', 'meu banco',
   'quanto (tem|falta|sobrou)',
+  // O registro da própria pessoa é assunto dela, e a resposta escrita —
+  // qualquer uma — fica no celular dela. Vai para uma pessoa, sem passar
+  // pelo modelo.
+  '\\b(registro|registrado|registrada|registrar|fichado|fichada|ctps)\\b',
+  'carteira assinada', 'carteira de trabalho',
 ].join('|'), 'i')
 
 /**
@@ -137,7 +142,6 @@ precisaHumano = true. Não é desculpa — é o certo, e ele vai ser atendido.
 
 FATOS DE HOJE (a única fonte de verdade):
 ${JORNADA_TEXTO}
-Contratação: registro em carteira (CLT).
 EPI e uniforme: fornecidos pela empresa, pedidos ao encarregado da obra.
 Atestado: entregar em até 48 horas ao encarregado.
 Férias e folga: pedidos ao encarregado, que fala com o RH.

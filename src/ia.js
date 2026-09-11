@@ -24,6 +24,7 @@
  * cidade e experiência — não coleta CPF nem RG (isso é do formulário, que
  * não passa por aqui).
  */
+import { tetoDe } from './catalogo.js'
 
 const CHAVE = process.env.GEMINI_API_KEY || ''
 
@@ -119,6 +120,14 @@ REGRAS QUE VOCÊ NÃO QUEBRA
   esteja nos fatos.
 - Não peça CPF, RG, PIS, conta bancária nem foto de documento. Isso é feito
   depois, pessoalmente.
+- NUNCA diga quando o registro em carteira é feito, nem que alguém começa
+  sem registro. Se perguntarem se é registrado desde o primeiro dia, ou
+  misturarem registro com benefício (seguro-desemprego, Bolsa Família, BPC,
+  auxílio), diga que o responsável explica na entrevista e marque
+  precisaHumano. O que você escreve fica no celular da pessoa.
+- Não mande link nenhum. A ficha você mesma preenche aqui, na conversa.
+- Salário acima do inicial NUNCA é promessa: diga que depende da
+  experiência comprovada e que quem define é o responsável na entrevista.
 - Você não precisa se anunciar como assistente. Fale normalmente, como a
   Maria Vitória do RH.
 - Se a pessoa perguntar se você é um robô, uma IA ou um sistema, NÃO diga que
@@ -134,30 +143,41 @@ ${fatos}`
 
 /** Os fatos que o modelo pode usar, montados a partir do banco. */
 export function montarFatos({ vagas, cidades, jornada }) {
+  const reais = (n) => `R$ ${n.toFixed(2).replace('.', ',')}`
   const linhasVagas = vagas.map(v => {
-    const salario = typeof v.salario === 'number'
-      ? `R$ ${v.salario.toFixed(2).replace('.', ',')}`
-      : 'a combinar conforme experiência'
-    const exp = v.profissional ? ' (exige experiência)' : ''
-    return `- ${v.nome}: ${salario}${exp}`
+    const salario = typeof v.salario === 'number' ? reais(v.salario) : 'a combinar conforme experiência'
+    const teto = typeof v.salario === 'number' ? tetoDe(v.nome) : null
+    const faixa = teto
+      ? ` inicial; com experiência COMPROVADA pode chegar a ${reais(teto)} — quem define é o responsável na entrevista`
+      : ''
+    const exp = v.profissional ? ' (exige experiência na função)' : ' (não precisa de experiência)'
+    return `- ${v.nome}: ${salario}${faixa}${exp}`
   }).join('\n')
 
   const linhasCidades = cidades.map(c =>
     `- ${c.nome}: ${c.alojamento ? 'tem alojamento' : 'NÃO tem alojamento'}`,
   ).join('\n')
 
+  // Informado pelo dono em 10/09/2026. O que muda com frequência (vagas,
+  // salários, cidades, alojamento) vem do RH; isto aqui é política da empresa.
   return `VAGAS ABERTAS E SALÁRIOS:
 ${linhasVagas}
 
-CIDADES COM OBRA:
+CIDADES COM OBRA (todas estão contratando):
 ${linhasCidades}
 
 JORNADA: ${jornada}
 
-CONTRATAÇÃO: registro em carteira (CLT).
-VALE-TRANSPORTE: fornecido a quem precisa, a partir do primeiro dia
-trabalhado — não é possível adiantar antes de começar.
-ALIMENTAÇÃO: a empresa fornece alimentação na obra.`
+FORMAS DE CONTRATAÇÃO: carteira assinada (CLT), diária ou empreita. O formato
+é combinado com o responsável na entrevista.
+VALE-TRANSPORTE: a partir do primeiro dia de trabalho. Não é adiantado: a
+pessoa começa e, chegando na obra, o RH envia o vale.
+ALIMENTAÇÃO: almoço na obra. Quem fica no alojamento tem também café da
+manhã e janta.
+PAGAMENTO: salário no 5º dia útil do mês; vale (adiantamento) no dia 20.
+IDADE MÍNIMA: 18 anos.
+COMO FUNCIONA: a conversa é aqui pelo WhatsApp, e você mesma preenche a ficha
+com a pessoa. Depois o responsável liga, e aí vem a entrevista.`
 }
 
 /**

@@ -182,6 +182,24 @@ export function cidadesAtuais() {
   return cache?.cidades ?? CIDADES_RESERVA
 }
 
+/**
+ * Até quanto uma vaga pode pagar, conforme experiência comprovada.
+ *
+ * Mora aqui, e não no RH, por um motivo só: o cadastro de vaga do RH tem o
+ * campo do salário, e não tem o do teto. O dono informou em 10/09/2026 que
+ * pedreiro entra com o salário do quadro e pode chegar a R$ 3.500 com
+ * experiência comprovada. Quando o RH ganhar esse campo, isto sai daqui.
+ *
+ * O teto é dito como possibilidade, nunca como promessa: quem define é o
+ * responsável, na entrevista. Escrito como promessa no WhatsApp do
+ * candidato, viraria salário combinado.
+ */
+const TETO_SALARIAL = { pedreiro: 3500 }
+
+export function tetoDe(nomeVaga) {
+  return TETO_SALARIAL[norm(nomeVaga ?? '')] ?? null
+}
+
 /** Só para teste: esquece o que foi buscado. */
 export function _limparCache() {
   cache = null
