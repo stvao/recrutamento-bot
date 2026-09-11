@@ -28,6 +28,7 @@ import * as gastos from './gastos.js'
 import { ehConversaPessoal, tipoIgnorado, telefoneDe, numeroDoJid } from './endereco.js'
 import { recrutamentoLigado } from './config.js'
 import * as observacao from './observacao.js'
+import { criarFiltro } from './recebimento.js'
 
 /** Onde a sessão fica guardada. */
 const PASTA_SESSAO = process.env.BAILEYS_SESSAO || join(process.cwd(), 'dados', 'whatsapp')
@@ -282,17 +283,24 @@ export async function conectar(aoReceber) {
     }
   })
 
+  // Um filtro por conexão: lembra o que já foi atendido (ver recebimento.js).
+  const deveAtender = criarFiltro()
+
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    // 'notify' é mensagem chegando agora. 'append' é histórico sendo
-    // sincronizado — responder a isso faria o robô reagir a conversas
-    // antigas ao reconectar, mandando mensagem para quem não falou nada.
-    if (type !== 'notify') return
+    // 'notify' é o que chega agora; 'append' inclui o que chegou com o robô
+    // FORA DO AR. Antes o 'append' era descartado inteiro, e o comprovante
+    // mandado no grupo durante um reinício sumia. Quem decide o que entra é
+    // o recebimento.js: só mensagem de verdade, recente, e uma vez só.
+    if (type !== 'notify' && type !== 'append') return
 
     for (const msg of messages) {
+      const { atender, foraDoAr } = deveAtender(msg, type)
+      if (!atender) continue
+
       // Olha ANTES de qualquer filtro: as respostas do dono, digitadas no
       // celular, chegam como mensagens "minhas", e o filtro abaixo as
       // descarta. São justamente elas que ensinam como responder.
-      await observar(msg)
+      await observar(msg, type)
 
       const pessoal = ehConversaPessoal(msg)
       const grupo = !pessoal && ehGrupoAtendido(msg)
@@ -311,6 +319,9 @@ export async function conectar(aoReceber) {
 
       const jid = msg.key.remoteJid
       const texto = textoDaMensagem(msg)
+      if (foraDoAr) {
+        console.log(`[whatsapp] mensagem que chegou com o robô fora do ar — atendendo agora (${grupo ? 'grupo' : 'privado'})`)
+      }
       const anexo = anexoDaMensagem(msg)
 
       // Num grupo, quem falou é o participante — remoteJid é o grupo. Sem
@@ -460,9 +471,14 @@ const ehPrivado = (jid) => typeof jid === 'string' && (jid.endsWith('@s.whatsapp
  * Nunca lança: observar é secundário, e um erro aqui não pode impedir a
  * mensagem de ser atendida.
  */
-async function observar(msg) {
+async function observar(msg, type = 'notify') {
   try {
     if (!observacao.ligado()) return
+    // O eco do que o próprio robô enviou chega como 'append', e ANTES de ele
+    // ter marcado a mensagem como dele. Sem isto, a observação gravaria a
+    // resposta do robô como se fosse do dono. As respostas do dono chegam
+    // como 'notify'; o que se perde é só a que ele digitou com o robô fora.
+    if (msg.key?.fromMe && type === 'append') return
     const jid = msg.key?.remoteJid
     if (!ehPrivado(jid)) return
     const tipo = observacao.tipoDe(msg.message)
