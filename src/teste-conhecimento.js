@@ -24,7 +24,7 @@ const RH = {
   vagas: [
     { nome: 'Servente', salario: 2303, profissional: false, sinonimos: ['servente', 'ajudante'] },
     { nome: 'Pedreiro', salario: 2803, profissional: true, sinonimos: ['pedreiro'] },
-    { nome: 'Estagiário', salario: 1500, profissional: false, sinonimos: ['estagiario'] },
+    { nome: 'Estagiário', salario: 1200, profissional: false, sinonimos: ['estagiario'] },
   ],
   cidades: [
     { nome: 'Bastos', uf: 'SP', alojamento: true },
@@ -60,7 +60,7 @@ ok('servente não fala de teto', !/3\.500/.test(texto('quanto ganha servente?'))
 ok('pedreiro: inicial R$ 2.803,00', /2\.803,00/.test(texto('quanto paga pedreiro?')))
 ok('pedreiro: pode chegar a R$ 3.500,00', /3\.500,00/.test(texto('quanto paga pedreiro?')))
 ok('o teto depende de experiência comprovada', /experi[eê]ncia comprovada/.test(texto('quanto paga pedreiro?')))
-ok('estagiário: R$ 1.500,00', /1\.500,00/.test(texto('quanto ganha estagiario?')))
+ok('estagiário: bolsa R$ 1.200,00', /1\.200,00/.test(texto('quanto ganha estagiario?')))
 ok('o teto é só do pedreiro', catalogo.tetoDe('Pedreiro') === 3500 && catalogo.tetoDe('Servente') === null)
 
 // ── Alojamento: só Bastos e Pereiras ───────────────────────────────────
@@ -114,19 +114,19 @@ ok('cidade: pode escolher trabalhar lá', /pode escolher/.test(texto('tem vaga e
 {
   const r = texto('quanto ganha estagiario?')
   ok('estágio: é bolsa, não salário', /bolsa/.test(r) && !/salário/.test(r))
-  ok('estágio: R$ 1.500,00', /1\.500,00/.test(r))
+  ok('estágio: bolsa R$ 1.200,00', /1\.200,00/.test(r))
+  ok('estágio: mais R$ 300,00 de auxílio-transporte', /300,00/.test(r) && /auxílio-transporte/.test(r))
   ok('estágio: diz o requisito', /engenharia/.test(r) && /arquitetura/.test(r))
 }
 ok('estágio: precisa estar estudando', /cursando engenharia/.test(texto('estagio precisa estar estudando?')))
 {
-  // Benefício do estágio não se escreve: a Lei do Estágio obriga
-  // auxílio-transporte no estágio não obrigatório.
+  // Estágio: bolsa + auxílio-transporte de R$ 300 (dono, 11/09/2026).
   const vale = texto('estagiario tem vale transporte?')
-  ok('estágio + vale: o responsável combina', /responsável combina/.test(vale))
+  ok('estágio + vale: R$ 300,00 de auxílio-transporte', /300,00/.test(vale) && /auxílio-transporte/.test(vale))
   ok('  e NÃO recebe a regra do vale dos contratados', !/primeiro dia/.test(vale))
-  ok('  e não diz que não tem', !/não tem|nao tem|só a bolsa|nada mais/i.test(vale))
   const almoco = texto('tem almoço?', { vaga: 'Estagiário' })
-  ok('estágio escolhido + almoço: o responsável combina', /responsável combina/.test(almoco))
+  ok('estágio + almoço: bolsa e auxílio, o resto com o responsável', /auxílio-transporte/.test(almoco) && /responsável combina/.test(almoco))
+  ok('  sem prometer almoço', !/fornece o almoço/.test(almoco))
 }
 ok('contratado continua recebendo a regra do vale', /primeiro dia/.test(texto('tem vale transporte?', { vaga: 'Servente' })))
 

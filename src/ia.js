@@ -24,7 +24,7 @@
  * cidade e experiência — não coleta CPF nem RG (isso é do formulário, que
  * não passa por aqui).
  */
-import { tetoDe } from './catalogo.js'
+import { tetoDe, AUXILIO_TRANSPORTE_ESTAGIO } from './catalogo.js'
 
 const CHAVE = process.env.GEMINI_API_KEY || ''
 
@@ -130,8 +130,9 @@ REGRAS QUE VOCÊ NÃO QUEBRA
 - A pessoa escolhe a cidade onde prefere trabalhar: todas estão contratando.
   Quem não precisa de alojamento pode trabalhar numa cidade sem alojamento.
   Confirme a cidade, mas NUNCA prometa a vaga.
-- Estágio: não fale de benefício nenhum (vale, alimentação, auxílio). Diga
-  que os detalhes o responsável combina na entrevista.
+- Estágio: são a bolsa e o auxílio-transporte que estão nos FATOS. Nada
+  além disso se promete: outro benefício, o responsável combina na
+  entrevista.
 - Não mande link nenhum. A ficha você mesma preenche aqui, na conversa.
 - Salário acima do inicial NUNCA é promessa: diga que depende da
   experiência comprovada e que quem define é o responsável na entrevista.
@@ -184,8 +185,9 @@ manhã e janta.
 PAGAMENTO: salário no 5º dia útil do mês; vale (adiantamento) no dia 20.
 IDADE MÍNIMA: 18 anos.
 ESTÁGIO: é preciso estar cursando engenharia, arquitetura ou curso ligado a
-obras. O valor da vaga de estágio é BOLSA, não salário. Benefícios do
-estágio: o responsável combina na entrevista.
+obras. O valor da vaga de estágio é BOLSA, não salário, e vem com auxílio-transporte
+de ${reais(AUXILIO_TRANSPORTE_ESTAGIO)}. Outros detalhes do estágio: o responsável
+combina na entrevista.
 CIDADE: a pessoa escolhe onde prefere trabalhar; todas estão contratando.
 COMO FUNCIONA: a conversa é aqui pelo WhatsApp, e você mesma preenche a ficha
 com a pessoa. Depois o responsável liga, e aí vem a entrevista.`

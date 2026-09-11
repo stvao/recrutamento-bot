@@ -200,6 +200,19 @@ export function tetoDe(nomeVaga) {
   return TETO_SALARIAL[norm(nomeVaga ?? '')] ?? null
 }
 
+/**
+ * Auxílio-transporte do estágio, além da bolsa.
+ *
+ * Informado pelo dono em 11/09/2026: bolsa (o valor da vaga, no RH) mais
+ * R$ 300 de auxílio-transporte. Mora aqui pelo mesmo motivo do teto: o
+ * cadastro de vaga do RH não tem esse campo.
+ *
+ * É o que a Lei do Estágio (11.788, art. 12) exige no estágio não
+ * obrigatório — bolsa E auxílio-transporte —, então pode ser dito por
+ * escrito sem medo.
+ */
+export const AUXILIO_TRANSPORTE_ESTAGIO = 300
+
 /** Só para teste: esquece o que foi buscado. */
 export function _limparCache() {
   cache = null

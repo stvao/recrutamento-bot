@@ -9,7 +9,7 @@
  */
 
 import { norm, melhorMatch, contemAlgum } from './texto.js'
-import { vagasAtuais, cidadesAtuais, termosDasVagas, tetoDe } from './catalogo.js'
+import { vagasAtuais, cidadesAtuais, termosDasVagas, tetoDe, AUXILIO_TRANSPORTE_ESTAGIO } from './catalogo.js'
 
 // ─── Base de conhecimento ────────────────────────────────────────────────────
 // As vagas vêm do RH (ver vagas.js). Antes moravam aqui, com salário escrito
@@ -190,16 +190,20 @@ export function responderFAQ(msg, estado = {}) {
   }
   if (ehEstagio(t, estado)) {
     /*
-      Benefício do estágio NÃO se responde por escrito.
+      O estágio tem bolsa e auxílio-transporte (R$ 300), e é isso que se diz.
+      Vem antes do vale dos contratados: "estagiário tem vale?" recebia a
+      regra deles — "a partir do primeiro dia, sem adiantamento" —, que não é
+      a do estágio.
 
-      A Lei do Estágio (11.788, art. 12) obriga bolsa e auxílio-transporte no
-      estágio não obrigatório. "Estagiário só ganha a bolsa" escrito no
-      celular do estudante — cujo termo de estágio a faculdade assina — é o
-      tipo de frase que o dono pediu para o robô nunca deixar por escrito.
-      Quem combina é o responsável.
+      O resto (almoço, qualquer outro benefício) quem combina é o
+      responsável: o dono informou bolsa e auxílio, e nada além disso se
+      promete por escrito.
     */
-    if (/(^| )(vale|transporte|passe|passagem|almoco|comida|refeicao|alimentacao|beneficios?|auxilio)( |$)/.test(t)) {
-      return { texto: 'Os detalhes do estágio o responsável combina com você na entrevista. 🙂' }
+    if (/(^| )(vale|transporte|passe|passagem|conducao|onibus)( |$)/.test(t)) {
+      return { texto: `No estágio, além da bolsa, tem ${fmtMoeda(AUXILIO_TRANSPORTE_ESTAGIO)} de auxílio-transporte. 🙂` }
+    }
+    if (/(^| )(almoco|comida|refeicao|alimentacao|beneficios?|auxilio)( |$)/.test(t)) {
+      return { texto: `No estágio são a bolsa e o auxílio-transporte de ${fmtMoeda(AUXILIO_TRANSPORTE_ESTAGIO)}. Outros detalhes o responsável combina com você na entrevista. 🙂` }
     }
     if (/(^| )(precisa|requisito|estudando|estudar|faculdade|curso|cursando|matriculad)/.test(t)) {
       return { texto: REQUISITO_ESTAGIO }
@@ -214,7 +218,7 @@ export function responderFAQ(msg, estado = {}) {
     // "e o do pedreiro?" quer o do pedreiro, não a lista inteira.
     const v = matchVaga(msg) || (estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null)
     if (v && ehVagaDeEstagio(v)) {
-      return { texto: `A bolsa de estágio é de ${faixaSalarial(v)}. ${REQUISITO_ESTAGIO}` }
+      return { texto: `A bolsa de estágio é de ${faixaSalarial(v)}, mais ${fmtMoeda(AUXILIO_TRANSPORTE_ESTAGIO)} de auxílio-transporte. ${REQUISITO_ESTAGIO}` }
     }
     if (v) return { texto: v.salario ? `O salário de ${v.nome} é ${faixaSalarial(v)}.` : `Para ${v.nome} o salário é a combinar, conforme a sua experiência.` }
     return { texto: `Os salários:\n${vagasAtuais().map(v => `• ${v.nome}: ${faixaSalarial(v)}`).join('\n')}` }
