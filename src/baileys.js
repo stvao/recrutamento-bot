@@ -25,6 +25,7 @@ import { join } from 'node:path'
 import qrcode from 'qrcode-terminal'
 import pino from 'pino'
 import * as gastos from './gastos.js'
+import { ehConversaPessoal, tipoIgnorado, telefoneDe, numeroDoJid } from './endereco.js'
 
 /** Onde a sessão fica guardada. */
 const PASTA_SESSAO = process.env.BAILEYS_SESSAO || join(process.cwd(), 'dados', 'whatsapp')
@@ -64,16 +65,6 @@ const GRUPOS_ATENDIDOS = new Set(
   (process.env.GASTOS_GRUPOS || '').split(',').map(g => g.trim()).filter(Boolean),
 )
 
-/** É conversa individual de uma pessoa de verdade? */
-function ehConversaPessoal(msg) {
-  const jid = msg.key?.remoteJid ?? ''
-  if (msg.key?.fromMe) return false          // eco da própria resposta
-  if (jid.endsWith('@g.us')) return false    // grupo
-  if (jid === 'status@broadcast') return false
-  if (jid.endsWith('@broadcast')) return false
-  if (jid.endsWith('@newsletter')) return false
-  return jid.endsWith('@s.whatsapp.net')
-}
 
 /** O texto da mensagem, em qualquer um dos formatos que o WhatsApp usa. */
 function textoDaMensagem(msg) {
@@ -213,10 +204,6 @@ function citada(msg) {
   return contexto?.stanzaId ?? null
 }
 
-/** Só os dígitos do número, para casar com o que o RH guarda. */
-function numeroDoJid(jid) {
-  return (jid ?? '').split('@')[0].split(':')[0]
-}
 
 /**
  * Abre a conexão.
@@ -302,6 +289,12 @@ export async function conectar(aoReceber) {
     for (const msg of messages) {
       const pessoal = ehConversaPessoal(msg)
       const grupo = !pessoal && ehGrupoAtendido(msg)
+
+      // Endereço de um tipo que o robô não atende: registra. Foi o descarte
+      // calado que escondeu por dias as conversas que chegavam como @lid.
+      const ignorado = tipoIgnorado(msg)
+      if (ignorado) console.warn(`[whatsapp] mensagem ignorada — endereço do tipo "${ignorado}"`)
+
       if (!pessoal && !grupo) {
         if (!msg.key?.fromMe && (msg.key?.remoteJid ?? '').endsWith('@g.us')) {
           mostrarGrupo(msg.key.remoteJid, msg)
@@ -316,7 +309,18 @@ export async function conectar(aoReceber) {
       // Num grupo, quem falou é o participante — remoteJid é o grupo. Sem
       // isso a lista de autorizados compararia com o id do grupo, e nunca
       // ninguém passaria.
-      const de = numeroDoJid(grupo ? (msg.key.participant ?? '') : jid)
+      //
+      // E o endereço pode ser @lid, que esconde o telefone: o número de
+      // verdade vem do campo alternativo ou do mapa da sessão. É ele que acha
+      // a pessoa no RH. A resposta continua indo para `jid`, o endereço
+      // original — responder para um @lid funciona.
+      const { numero: de, telefoneConhecido } = await telefoneDe(msg, {
+        grupo,
+        lidMapping: sock.signalRepository?.lidMapping,
+      })
+      if (pessoal && !telefoneConhecido) {
+        console.warn(`[whatsapp] conversa @lid sem telefone conhecido — atendendo pelo identificador`)
+      }
 
       /*
         Este arquivo vai servir para alguma coisa?

@@ -6,3 +6,7 @@ dados
 # A pasta dados/whatsapp guarda as CREDENCIAIS da sessão: quem tiver esses
 # arquivos entra no WhatsApp do robô sem ler QR code nenhum.
 dados/
+
+# Conversas reais exportadas do WhatsApp, para analise do atendimento.
+# Tem nome e telefone de candidato: nunca vai para o GitHub.
+conversas-reais/
