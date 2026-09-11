@@ -136,6 +136,16 @@ function faixaSalarial(v) {
     : fmtMoeda(v.salario)
 }
 
+/** O que o estágio exige. Informado pelo dono em 11/09/2026. */
+const REQUISITO_ESTAGIO = 'É preciso estar cursando engenharia, arquitetura ou algum curso ligado a obras.'
+
+const ehVagaDeEstagio = (v) => norm(v?.nome ?? '').startsWith('estagi')
+
+/** A conversa é sobre estágio: citado na mensagem, ou a vaga escolhida. */
+function ehEstagio(t, estado) {
+  return /(^| )estagi/.test(t) || norm(estado?.vaga ?? '').startsWith('estagi')
+}
+
 export function responderFAQ(msg, estado = {}) {
   /*
     As perguntas novas usam comparação EXATA, e não a tolerância a erro de
@@ -166,7 +176,10 @@ export function responderFAQ(msg, estado = {}) {
   */
   if (temAlguma(msg, ['registrado', 'registro', 'registra', 'registram', 'carteira', 'clt', 'fichado', 'assinada'])) {
     if (/primeiro dia|desde o (inicio|comeco)|quando (registra|vou ser)|quanto tempo|demora (pra|para) registrar/.test(t)) {
-      return { texto: 'Isso o responsável te explica certinho na entrevista, tá? 🙂', escalar: true }
+      // O dono decidiu (11/09/2026): isto se combina com o responsável, e o
+      // robô pode dizer exatamente isso — sem chamar ninguém. Continua sem
+      // dizer QUANDO registra.
+      return { texto: 'Isso você combina direto com o responsável quando ele te ligar. 🙂' }
     }
     return { texto: 'Trabalhamos com carteira assinada (CLT), diária ou empreita — o formato é combinado com o responsável na entrevista. 🙂' }
   }
@@ -174,6 +187,23 @@ export function responderFAQ(msg, estado = {}) {
   // "quanto paga".
   if (/quando (cai|paga|recebe|e o pagamento)|dia (do|de) pagamento|que dia (paga|cai|recebe)|quinto dia|dia util|adiantamento/.test(t)) {
     return { texto: 'O pagamento é no 5º dia útil de cada mês, e no dia 20 tem o vale (adiantamento). 🙂' }
+  }
+  if (ehEstagio(t, estado)) {
+    /*
+      Benefício do estágio NÃO se responde por escrito.
+
+      A Lei do Estágio (11.788, art. 12) obriga bolsa e auxílio-transporte no
+      estágio não obrigatório. "Estagiário só ganha a bolsa" escrito no
+      celular do estudante — cujo termo de estágio a faculdade assina — é o
+      tipo de frase que o dono pediu para o robô nunca deixar por escrito.
+      Quem combina é o responsável.
+    */
+    if (/(^| )(vale|transporte|passe|passagem|almoco|comida|refeicao|alimentacao|beneficios?|auxilio)( |$)/.test(t)) {
+      return { texto: 'Os detalhes do estágio o responsável combina com você na entrevista. 🙂' }
+    }
+    if (/(^| )(precisa|requisito|estudando|estudar|faculdade|curso|cursando|matriculad)/.test(t)) {
+      return { texto: REQUISITO_ESTAGIO }
+    }
   }
   if (temAlguma(msg, ['vale', 'passe', 'transporte', 'conducao', 'passagem', 'onibus'])) {
     const pedeAgora = temAlguma(msg, ['amanha', 'hoje', 'agora', 'ir trabalhar', 'me da', 'me dar', 'manda', 'enviar'])
@@ -183,6 +213,9 @@ export function responderFAQ(msg, estado = {}) {
     // A vaga citada na pergunta vem antes da já escolhida: quem pergunta
     // "e o do pedreiro?" quer o do pedreiro, não a lista inteira.
     const v = matchVaga(msg) || (estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null)
+    if (v && ehVagaDeEstagio(v)) {
+      return { texto: `A bolsa de estágio é de ${faixaSalarial(v)}. ${REQUISITO_ESTAGIO}` }
+    }
     if (v) return { texto: v.salario ? `O salário de ${v.nome} é ${faixaSalarial(v)}.` : `Para ${v.nome} o salário é a combinar, conforme a sua experiência.` }
     return { texto: `Os salários:\n${vagasAtuais().map(v => `• ${v.nome}: ${faixaSalarial(v)}`).join('\n')}` }
   }
@@ -199,7 +232,12 @@ export function responderFAQ(msg, estado = {}) {
     const comAlojamento = cidades.filter(c => c.alojamento).map(c => c.nome)
     const onde = comAlojamento.length ? ` Hoje o alojamento é em ${juntar(comAlojamento)}.` : ''
     const c = matchCidade(msg) || (estado.cidade ? cidades.find(x => x.nome === estado.cidade) : null)
-    if (c) return { texto: c.alojamento ? `Sim! Em ${c.nome} temos alojamento. 🏠` : `Em ${c.nome} não temos alojamento.${onde}` }
+    // Sem alojamento não quer dizer sem vaga: quem não precisa de onde
+    // dormir trabalha na cidade que preferir (decisão do dono, 11/09/2026).
+    // Confirma a cidade, não promete a vaga.
+    if (c) return { texto: c.alojamento
+      ? `Sim! Em ${c.nome} temos alojamento. 🏠`
+      : `Em ${c.nome} não temos alojamento.${onde} Se você não precisar de alojamento, pode trabalhar em ${c.nome} sim — a cidade você escolhe. 🙂` }
     return { texto: comAlojamento.length
       ? `Hoje temos alojamento em ${juntar(comAlojamento)}. O alojamento fica na própria cidade da obra.`
       : 'No momento não temos alojamento disponível.' }
@@ -214,11 +252,11 @@ export function responderFAQ(msg, estado = {}) {
     const v = estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null
     if (v && !v.profissional) return { texto: `Para ${v.nome} não é preciso experiência. 🙂` }
     if (v && v.profissional) return { texto: `Para ${v.nome} é necessário ter experiência na função.` }
-    return { texto: 'Para Servente e Estágio não precisa de experiência. Para Pedreiro é necessário ter experiência na função.' }
+    return { texto: `Para Servente não precisa de experiência, e Pedreiro precisa ter experiência na função. Para estágio não precisa de experiência, mas ${REQUISITO_ESTAGIO.charAt(0).toLowerCase()}${REQUISITO_ESTAGIO.slice(1)}` }
   }
   if (temAlguma(msg, ['cidade', 'onde tem', 'qual cidade', 'tem vaga em', 'regiao', 'local'])) {
     const c = matchCidade(msg)
-    if (c) return { texto: `Sim, temos obra em ${c.nome}.${c.alojamento ? ' E tem alojamento. ✅' : ' (Sem alojamento nesta cidade.)'}` }
+    if (c) return { texto: `Sim, temos obra em ${c.nome}, e você pode escolher trabalhar lá.${c.alojamento ? ' E tem alojamento. ✅' : ' (Sem alojamento nesta cidade.)'}` }
     return { texto: `Hoje temos vagas nestas cidades:\n${listaCidadesTexto()}` }
   }
   return null

@@ -93,10 +93,42 @@ ok('as cidades vêm do RH, não de lista escrita à mão',
   ok('registro: não é mais "Sim, é CLT 👍"', !/^Sim/.test(r))
 }
 {
+  // Decisão do dono (11/09/2026): responde que se combina com o responsável,
+  // sem chamar ninguém — e continua sem dizer QUANDO registra.
   const r = diz('registra desde o primeiro dia?')
-  ok('"desde o primeiro dia?" vai para uma pessoa', r.escalar === true)
-  ok('e não responde sim nem não', !/\bsim\b|\bnão\b/i.test(r.texto))
+  ok('"desde o primeiro dia?": combina com o responsável', /responsável/.test(r.texto) && /ligar/.test(r.texto))
+  ok('  sem chamar uma pessoa', !r.escalar)
+  ok('  e não responde sim nem não', !/(^|\s)(sim|não)(\s|[.,!?]|$)/i.test(r.texto))
 }
+
+// ── Cidade: quem não precisa de alojamento escolhe onde trabalhar ──────
+{
+  const r = texto('tem alojamento em buritama?')
+  ok('cidade sem alojamento: pode trabalhar nela', /pode trabalhar em Buritama/.test(r))
+  ok('  a cidade a pessoa escolhe', /você escolhe/.test(r))
+  ok('  sem prometer a vaga', !/garant|contratad|vaga (é|e) sua/i.test(r))
+}
+ok('cidade: pode escolher trabalhar lá', /pode escolher/.test(texto('tem vaga em buritama?')))
+
+// ── Estágio ────────────────────────────────────────────────────────────
+{
+  const r = texto('quanto ganha estagiario?')
+  ok('estágio: é bolsa, não salário', /bolsa/.test(r) && !/salário/.test(r))
+  ok('estágio: R$ 1.500,00', /1\.500,00/.test(r))
+  ok('estágio: diz o requisito', /engenharia/.test(r) && /arquitetura/.test(r))
+}
+ok('estágio: precisa estar estudando', /cursando engenharia/.test(texto('estagio precisa estar estudando?')))
+{
+  // Benefício do estágio não se escreve: a Lei do Estágio obriga
+  // auxílio-transporte no estágio não obrigatório.
+  const vale = texto('estagiario tem vale transporte?')
+  ok('estágio + vale: o responsável combina', /responsável combina/.test(vale))
+  ok('  e NÃO recebe a regra do vale dos contratados', !/primeiro dia/.test(vale))
+  ok('  e não diz que não tem', !/não tem|nao tem|só a bolsa|nada mais/i.test(vale))
+  const almoco = texto('tem almoço?', { vaga: 'Estagiário' })
+  ok('estágio escolhido + almoço: o responsável combina', /responsável combina/.test(almoco))
+}
+ok('contratado continua recebendo a regra do vale', /primeiro dia/.test(texto('tem vale transporte?', { vaga: 'Servente' })))
 
 // ── Benefício: nada escrito, vai para uma pessoa ───────────────────────
 //
