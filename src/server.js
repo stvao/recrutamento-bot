@@ -28,6 +28,7 @@ import * as funcionario from './funcionario.js'
 import * as triagem from './triagem.js'
 import * as gastos from './gastos.js'
 import * as limite from './limite.js'
+import { decidir as quemAtender, ehCobranca } from './quem-atender.js'
 import { discreto } from './texto.js'
 
 const app = express()
@@ -293,17 +294,12 @@ async function rotear(msg) {
   }
 
   /*
-    O limite vem DEPOIS da chave do recrutamento, e isso custou caro.
-
-    Com o recrutamento desligado o robô deve ficar calado: quem atende é o
-    dono. Mas o limite estava ACIMA da chave, e em 12/09/2026 uma pessoa que
-    trabalhou e não recebeu mandou dezenas de mensagens cobrando — a única
-    resposta que ela teve foi a do robô dizendo "preciso de um tempinho".
-    Resposta automática para quem cobra pagamento é pior que silêncio.
-  */
-  /*
     Daqui para baixo é conversa com desconhecido, e cada mensagem custa uma
     chamada ao modelo.
+
+    O limite vem DEPOIS da chave do recrutamento, e isso custou caro: ele
+    estava acima, e em 12/09/2026 quem cobrava pagamento recebeu do robô um
+    "preciso de um tempinho" — a única resposta que teve.
 
     A cota é diária e compartilhada. Um número mandando sem parar — de
     sacanagem, ou um aplicativo repetindo sozinho — gastava a cota do dia, e
@@ -334,6 +330,27 @@ async function rotear(msg) {
   if (!msg.texto) return null
 
   /*
+    Cobrança de pagamento NUNCA recebe resposta automática.
+
+    Vem antes da consulta ao RH porque não depende dela: quem cobra pode não
+    estar cadastrado — foi o caso de 12/09/2026, 64 mensagens de madrugada de
+    alguém que trabalhou, não recebeu e, para o robô, seria uma desconhecida
+    procurando vaga.
+
+    O robô cala e chama gente. É o RH que responde sobre dinheiro.
+  */
+  if (ehCobranca(msg.texto)) {
+    console.warn(`[atendimento] ${discreto(msg.de)}: cobrança de pagamento — calado, avisando o RH.`)
+    marcarEscalada(msg.de)
+    avisarRH({
+      whatsapp: msg.de,
+      motivo: 'Cobrança de pagamento no WhatsApp do recrutamento',
+      trecho: msg.texto.slice(0, 300),
+    }).catch(() => {})
+    return null
+  }
+
+  /*
     ANTES de qualquer coisa: quem é essa pessoa?
 
     O robô tratava todo desconhecido como candidato, e perguntava "qual vaga
@@ -344,6 +361,25 @@ async function rotear(msg) {
     quando o RH não responde, cai na triagem, que funciona sem saber quem é.
   */
   const ficha = await quemE({ whatsapp: msg.de }).catch(() => null)
+
+  /*
+    Quem trabalha na empresa fala com gente.
+
+    O módulo de atendimento a funcionário existe e funciona, mas fica
+    desligado por decisão do dono (12/09/2026): o robô atende CANDIDATO. Para
+    ligar, ATENDER_FUNCIONARIO=on.
+  */
+  const decisao = quemAtender({ texto: msg.texto, ficha })
+  if (!decisao.atender) {
+    console.log(`[atendimento] ${discreto(msg.de)}: ${decisao.motivo} — calado, avisando o RH.`)
+    marcarEscalada(msg.de)
+    avisarRH({
+      whatsapp: msg.de,
+      motivo: `Mensagem de quem ${decisao.motivo} — ninguém do robô respondeu`,
+      trecho: msg.texto.slice(0, 300),
+    }).catch(() => {})
+    return null
+  }
 
   if (ficha?.tipo === 'funcionario') return atenderFuncionario(msg, ficha)
   if (ficha?.tipo === 'candidato') return atenderCandidatoConhecido(msg, ficha)
