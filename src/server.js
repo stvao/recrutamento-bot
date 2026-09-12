@@ -281,6 +281,26 @@ async function rotear(msg) {
 
   if (msg.ehGrupo) return null
 
+  // Recrutamento desligado: fica calado em vez de atender e perder a ficha.
+  //
+  // Calado, e não "estamos fora do ar": o número pode estar em anúncio, e
+  // uma resposta automática dizendo que o sistema caiu é pior para a empresa
+  // do que nenhuma resposta — quem não recebe resposta liga; quem recebe
+  // "estamos com problema" desiste.
+  if (!RECRUTAMENTO_LIGADO) {
+    console.log(`[recrutamento] desligado — ignorando mensagem de ${discreto(msg.de)}`)
+    return null
+  }
+
+  /*
+    O limite vem DEPOIS da chave do recrutamento, e isso custou caro.
+
+    Com o recrutamento desligado o robô deve ficar calado: quem atende é o
+    dono. Mas o limite estava ACIMA da chave, e em 12/09/2026 uma pessoa que
+    trabalhou e não recebeu mandou dezenas de mensagens cobrando — a única
+    resposta que ela teve foi a do robô dizendo "preciso de um tempinho".
+    Resposta automática para quem cobra pagamento é pior que silêncio.
+  */
   /*
     Daqui para baixo é conversa com desconhecido, e cada mensagem custa uma
     chamada ao modelo.
@@ -305,16 +325,6 @@ async function rotear(msg) {
     return null
   }
 
-  // Recrutamento desligado: fica calado em vez de atender e perder a ficha.
-  //
-  // Calado, e não "estamos fora do ar": o número pode estar em anúncio, e
-  // uma resposta automática dizendo que o sistema caiu é pior para a empresa
-  // do que nenhuma resposta — quem não recebe resposta liga; quem recebe
-  // "estamos com problema" desiste.
-  if (!RECRUTAMENTO_LIGADO) {
-    console.log(`[recrutamento] desligado — ignorando mensagem de ${discreto(msg.de)}`)
-    return null
-  }
 
   // Arquivo de candidato: ela não lê, mas ficar muda faz a pessoa achar que
   // não chegou.
