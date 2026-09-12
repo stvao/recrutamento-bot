@@ -72,14 +72,37 @@ const GRUPOS_ATENDIDOS = new Set(
 )
 
 
+/**
+ * Tira os embrulhos da mensagem.
+ *
+ * Mensagem temporária, de visualização única e documento com legenda chegam
+ * DENTRO de outra mensagem. Sem abrir, o texto não aparecia — e o robô
+ * respondia "consigo ler só mensagem de texto" para quem tinha escrito.
+ */
+function desembrulhar(m) {
+  let atual = m
+  for (let i = 0; i < 4 && atual; i++) {
+    const dentro = atual.ephemeralMessage?.message
+      ?? atual.viewOnceMessage?.message
+      ?? atual.viewOnceMessageV2?.message
+      ?? atual.viewOnceMessageV2Extension?.message
+      ?? atual.documentWithCaptionMessage?.message
+      ?? null
+    if (!dentro) break
+    atual = dentro
+  }
+  return atual
+}
+
 /** O texto da mensagem, em qualquer um dos formatos que o WhatsApp usa. */
 function textoDaMensagem(msg) {
-  const m = msg.message
+  const m = desembrulhar(msg.message)
   if (!m) return null
   return m.conversation
     ?? m.extendedTextMessage?.text
     ?? m.imageMessage?.caption
     ?? m.videoMessage?.caption
+    ?? m.documentMessage?.caption
     ?? m.buttonsResponseMessage?.selectedDisplayText
     ?? m.listResponseMessage?.title
     ?? null
@@ -136,7 +159,7 @@ async function carregarGrupos() {
       const achado = [...nomeDoGrupo.entries()]
         .find(([jid, nome]) => jid === alvo || normalizar(nome) === normalizar(alvo))
       console.log(achado
-        ?`[whatsapp]  grupo "${achado[1]}" encontrado (${achado[0]})`
+        ? `[whatsapp]  grupo "${achado[1]}" encontrado (${achado[0]})`
         : `[whatsapp]  NÃO achei nenhum grupo chamado "${alvo}" — confira o nome em GASTOS_GRUPOS`)
     }
   } catch (e) {
@@ -164,7 +187,7 @@ function ehGrupoAtendido(msg) {
  * como comprovante. Áudio, vídeo e figurinha não.
  */
 function anexoDaMensagem(msg) {
-  const m = msg.message ?? {}
+  const m = desembrulhar(msg.message) ?? {}
   const img = m.imageMessage
   if (img) {
     return { tipo: img.mimetype || 'image/jpeg', nome: 'comprovante.jpg', tamanho: Number(img.fileLength ?? 0) }
@@ -188,7 +211,7 @@ function anexoDaMensagem(msg) {
  * em vez de digitar.
  */
 function audioDaMensagem(msg) {
-  const m = msg.message ?? {}
+  const m = desembrulhar(msg.message) ?? {}
   const a = m.audioMessage
   if (!a) return null
   return { tipo: a.mimetype || 'audio/ogg', tamanho: Number(a.fileLength ?? 0) }
@@ -341,7 +364,7 @@ export async function conectar(aoReceber) {
       const jid = msg.key.remoteJid
       const texto = textoDaMensagem(msg)
       if (foraDoAr) {
-        console.log(`[whatsapp] mensagem que chegou com o robô fora do ar — atendendo agora (${grupo ?'grupo' : 'privado'})`)
+        console.log(`[whatsapp] mensagem que chegou com o robô fora do ar — atendendo agora (${grupo ? 'grupo' : 'privado'})`)
       }
       const anexo = anexoDaMensagem(msg)
 
@@ -389,21 +412,25 @@ export async function conectar(aoReceber) {
         const bytes = await baixar(msg, audio.tamanho)
         if (bytes) doAudio = await transcrever({ arquivo: bytes, tipo: audio.tipo })
         console.log(doAudio
-          ?`[whatsapp] áudio ouvido (${doAudio.length} caracteres)`
+          ? `[whatsapp] áudio ouvido (${doAudio.length} caracteres)`
           : '[whatsapp] não consegui ouvir o áudio')
       }
 
       if (pessoal && !vaiServir && !texto?.trim() && !doAudio) {
-        // Áudio, figurinha, ou uma foto que ela não tem como usar. Ela não
-        // processa, mas ficar muda é pior: a pessoa acha que não chegou.
-        //
-        // Só com o recrutamento ligado. Desligado, quem atende é o dono, e o
-        // robô se metendo na conversa para dizer "só leio texto" a quem
-        // mandou áudio é pior que o silêncio.
-        if (recrutamentoLigado()) {
-          await responder(jid, audio
-            ?'não consegui ouvir seu áudio, pode escrever pra mim?'
-            : 'consigo ler só mensagem de texto, pode escrever pra mim?')
+        /*
+          Sem texto: só o ÁUDIO que não deu para ouvir recebe resposta.
+
+          Antes qualquer coisa sem texto recebia "consigo ler só mensagem de
+          texto". Em 12/09/2026 foram 89 vezes — 53 delas logo depois de a
+          pessoa ter escrito, porque o que disparava a frase era uma reação,
+          uma mensagem apagada ou editada, que chegam como evento sem texto.
+          Para quem escreveu, o robô parecia não ter lido nada.
+
+          Foto, vídeo, documento, figurinha e contato ficam sem resposta
+          automática: a conversa segue na próxima mensagem de texto.
+        */
+        if (recrutamentoLigado() && audio) {
+          await responder(jid, 'não consegui ouvir seu áudio, pode escrever pra mim?')
         }
         continue
       }
@@ -541,8 +568,8 @@ async function observar(msg, type = 'notify') {
     const tipo = observacao.tipoDe(msg.message)
     if (!tipo) return
 
-    const autor = !msg.key.fromMe ?'candidato'
-      : observacao.foiORobo(msg.key.id) ?'robo' : 'empresa'
+    const autor = !msg.key.fromMe ? 'candidato'
+      : observacao.foiORobo(msg.key.id) ? 'robo' : 'empresa'
     // O robô já anotou o que ele mesmo mandou, na hora de enviar.
     if (autor === 'robo') return
 

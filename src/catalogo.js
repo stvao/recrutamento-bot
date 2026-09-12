@@ -46,12 +46,13 @@ const REPETIR_MS = 1000 * 60        // 1 min
  * Serve só para o robô conseguir conversar enquanto o RH não responde.
  */
 const RESERVA = [
+  // Só o que está ABERTO (dono, 12/09/2026). A reserva ainda oferecia
+  // armador, serralheiro e eletricista — e é ela que atende quando o RH não
+  // responde, justamente quando ninguém está olhando.
   { nome: 'Servente',    salario: null, profissional: false, sinonimos: ['servente', 'ajudante', 'auxiliar', 'meio oficial'] },
-  { nome: 'Pedreiro',    salario: null, profissional: true,  sinonimos: ['pedreiro', 'alvenaria'] },
-  { nome: 'Carpinteiro', salario: null, profissional: true,  sinonimos: ['carpinteiro', 'carpintaria'] },
-  { nome: 'Armador',     salario: null, profissional: true,  sinonimos: ['armador', 'ferreiro'] },
-  { nome: 'Serralheiro', salario: null, profissional: true,  sinonimos: ['serralheiro', 'soldador'] },
-  { nome: 'Eletricista', salario: null, profissional: true,  sinonimos: ['eletricista', 'eletrica'] },
+  { nome: 'Pedreiro',    salario: null, profissional: false, sinonimos: ['pedreiro', 'alvenaria'] },
+  { nome: 'Carpinteiro', salario: null, profissional: false, sinonimos: ['carpinteiro', 'carpintaria'] },
+  { nome: 'Estagiário',  salario: null, profissional: false, sinonimos: ['estagiario', 'estagiaria', 'estagio'] },
 ]
 
 /**

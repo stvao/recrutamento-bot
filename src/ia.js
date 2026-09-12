@@ -53,6 +53,17 @@ const ENDPOINT = process.env.IA_ENDPOINT
 const PRAZO_MS = Number(process.env.IA_PRAZO_MS || 4000)
 const TENTATIVAS = Number(process.env.IA_TENTATIVAS || 2)
 
+/**
+ * Com a cota esgotada, parar de insistir por um tempo.
+ *
+ * Em 12/09/2026 o log teve "cota esgotada" 66 vezes e 128 novas tentativas:
+ * cada mensagem batia na cota, tentava de novo, batia de novo — gastando
+ * tempo da pessoa esperando para, no fim, cair no roteiro do mesmo jeito.
+ * Esgotou: vai direto para o roteiro por dez minutos, e só então tenta.
+ */
+const PAUSA_COTA_MS = Number(process.env.IA_PAUSA_COTA_MS || 10 * 60 * 1000)
+let semCotaAte = 0
+
 export function iaDisponivel() {
   return Boolean(CHAVE)
 }
@@ -222,6 +233,13 @@ obras. O valor da vaga de estágio é BOLSA, não salário, e vem com auxílio-t
 de ${reais(AUXILIO_TRANSPORTE_ESTAGIO)}. Outros detalhes do estágio: o responsável
 combina na entrevista.
 CIDADE: a pessoa escolhe onde prefere trabalhar; todas estão contratando.
+FUNÇÕES QUE NÃO ESTAMOS CONTRATANDO AGORA: mestre de obras, encarregado,
+eletricista, armador, serralheiro, soldador, pintor, encanador, azulejista,
+gesseiro, operador de máquinas — e qualquer outra que não esteja nas VAGAS
+ABERTAS acima. Se a pessoa pedir uma delas, diga que no momento não tem vaga
+para essa função e diga quais estão abertas. NUNCA troque a função que a
+pessoa disse por outra parecida (mestre de obras não é pedreiro nem estágio)
+e não preencha a vaga com uma que ela não pediu.
 COMO FUNCIONA: a conversa é aqui pelo WhatsApp, e você mesma preenche a ficha
 com a pessoa. Depois o responsável liga, e aí vem a entrevista.`
 }
@@ -276,11 +294,13 @@ const ESQUEMA = {
  * antigo", então uma falha aqui nunca deixa o candidato sem resposta.
  */
 export async function conversar({ historico, fatos, conhecido = '' }) {
-  if (!CHAVE) return null
+  if (!CHAVE || Date.now() < semCotaAte) return null
 
   for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
     const r = await umaTentativa({ historico, fatos, conhecido })
     if (r) return r
+    // Cota esgotada nesta mesma tentativa: a segunda bate na cota de novo.
+    if (Date.now() < semCotaAte) break
     if (tentativa < TENTATIVAS) console.warn(`[ia] tentando de novo (${tentativa + 1}/${TENTATIVAS})`)
   }
   return null
@@ -298,11 +318,13 @@ export async function conversar({ historico, fatos, conhecido = '' }) {
  * Devolve null em qualquer problema, como o resto deste arquivo.
  */
 export async function chamarModelo({ instrucoes: texto, esquema, historico }) {
-  if (!CHAVE) return null
+  if (!CHAVE || Date.now() < semCotaAte) return null
 
   for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
     const r = await umaTentativa({ historico, instrucoesProntas: texto, esquemaProprio: esquema })
     if (r) return r
+    // Cota esgotada nesta mesma tentativa: a segunda bate na cota de novo.
+    if (Date.now() < semCotaAte) break
     if (tentativa < TENTATIVAS) console.warn(`[ia] tentando de novo (${tentativa + 1}/${TENTATIVAS})`)
   }
   return null
@@ -351,7 +373,8 @@ async function umaTentativa({ historico, fatos, conhecido = '', instrucoesPronta
       // 429 é cota do dia estourada — esperado no plano gratuito, e não é
       // erro de programação. Registrar diferente para não virar ruído.
       const nivel = r.status === 429 ? 'cota esgotada' : `HTTP ${r.status}`
-      console.warn(`[ia] ${nivel} — atendendo pelo roteiro.`)
+      if (r.status === 429) semCotaAte = Date.now() + PAUSA_COTA_MS
+      console.warn(`[ia] ${nivel} — atendendo pelo roteiro${r.status === 429 ? ` pelos próximos ${PAUSA_COTA_MS / 60000} min` : ''}.`)
       return null
     }
 

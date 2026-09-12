@@ -9,6 +9,9 @@
  *   node src/teste-atendimento.js
  */
 process.env.GEMINI_API_KEY = 'chave-de-teste'
+// Sem pausa depois da cota esgotada: em produção são 10 minutos até tentar de
+// novo, e aqui o teste simula a cota acabando e a IA voltando em seguida.
+process.env.IA_PAUSA_COTA_MS = '0'
 
 const { atender, iniciarAtendimento } = await import('./atendimento.js')
 

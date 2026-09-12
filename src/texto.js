@@ -84,6 +84,12 @@ function tolerancia(tamanho) {
 const PALAVRAS_PROPRIAS = new Set([
   'valeu', 'vaga', 'vagas', 'nada', 'mais', 'meu', 'seu', 'sou', 'nome',
   'dia', 'boa', 'bom', 'sem', 'com', 'para', 'pela', 'esse', 'essa',
+  // Palavras comuns que ficavam perto de uma vaga (12/09/2026): "está"
+  // virava estágio — "quanto está o salário do mestre?" recebeu o valor da
+  // bolsa —, e "auxílio" (de auxílio-transporte) virava servente.
+  'esta', 'estao', 'estava', 'estou', 'isso', 'isto', 'aqui', 'agora',
+  'ainda', 'auxilio', 'mestre', 'obra', 'obras', 'hoje', 'onde', 'quanto',
+  'qual', 'quando', 'tudo', 'casa', 'certo', 'servico', 'trabalho',
 ])
 
 /** A palavra digitada é, provavelmente, o alvo? */
@@ -91,8 +97,10 @@ export function pareceCom(palavra, alvo) {
   if (!palavra || !alvo) return false
   if (palavra === alvo) return true
   if (PALAVRAS_PROPRIAS.has(palavra)) return false
-  // Prefixo conta: quem escreve "carpint" quer dizer "carpinteiro".
-  if (alvo.length >= 5 && palavra.length >= 4 && alvo.startsWith(palavra)) return true
+  // Prefixo conta: quem escreve "carpint" quer dizer "carpinteiro". Mas só
+  // com 6 letras ou mais: com 4, "esta" era o começo de "estagio", e toda
+  // frase com "está" virava pergunta sobre estágio.
+  if (alvo.length >= 6 && palavra.length >= 6 && alvo.startsWith(palavra)) return true
   return distancia(palavra, alvo) <= tolerancia(Math.max(palavra.length, alvo.length))
 }
 
@@ -122,6 +130,10 @@ export function melhorMatch(mensagem, opcoes) {
     for (const termoBruto of opcao.termos) {
       const termo = norm(termoBruto)
       for (const pedaco of pedacos) {
+        // Par de palavras so se compara com termo de duas palavras. Contra uma
+        // palavra so, "esta o" ficava a dois erros de "estagio" — e "quanto
+        // esta o salario do mestre?" virava estagio.
+        if (pedaco.includes(' ') && !termo.includes(' ')) continue
         if (!pareceCom(pedaco, termo)) continue
         const d = distancia(pedaco, termo)
         // Empate: fica com o primeiro, que é a ordem de prioridade da lista.

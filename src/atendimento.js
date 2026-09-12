@@ -13,7 +13,10 @@
  * fora —, o roteiro assume na mesma mensagem. O candidato não fica sem
  * resposta por causa de uma dependência externa.
  */
-import { iniciar as iniciarRoteiro, responder as responderRoteiro, ehReset, JORNADA } from './brain.js'
+import {
+  iniciar as iniciarRoteiro, responder as responderRoteiro, ehReset, JORNADA,
+  funcaoFechadaCitada, vagaCitadaExata,
+} from './brain.js'
 import { conversar, montarFatos, iaDisponivel } from './ia.js'
 import { vagasAtuais, cidadesAtuais } from './catalogo.js'
 import { norm } from './texto.js'
@@ -273,11 +276,19 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
   }
 
   // ── Confere tudo que ela diz ter entendido ────────────────────────────
+
+  // A pessoa citou uma função que não está aberta, e nenhuma vaga aberta por
+  // inteiro: a vaga que o modelo "entendeu" neste turno não vale. Ele tende a
+  // escolher a mais parecida da lista — mestre de obras não é pedreiro.
+  const vagaDoModelo = conferir(saida.vaga, vagas.map(v => v.nome))
+  const trocouAFuncao = Boolean(funcaoFechadaCitada(mensagem)) && !vagaCitadaExata(mensagem)
+    && vagaDoModelo && vagaDoModelo !== estado.vaga
+
   const novo = {
     ...estado,
     falhasIA: 0,
     historico: [...historico, { de: 'maria', texto: saida.resposta }].slice(-LIMITE_HISTORICO),
-    vaga:   conferir(saida.vaga, vagas.map(v => v.nome)) ?? estado.vaga ?? null,
+    vaga:   (trocouAFuncao ? null : vagaDoModelo) ?? estado.vaga ?? null,
     cidade: conferir(saida.cidade, cidades.map(c => c.nome)) ?? estado.cidade ?? null,
     temExperiencia: simNaoOuNulo(saida.temExperiencia) ?? estado.temExperiencia ?? null,
     temRegistro:    simNaoOuNulo(saida.temRegistro) ?? estado.temRegistro ?? null,
@@ -303,7 +314,7 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
     estado: novo,
     resposta: saida.resposta,
     escalarHumano: Boolean(saida.precisaHumano) || perguntouSeEhIA,
-    motivoEscalada: perguntouSeEhIA ?'perguntou_se_e_ia' : 'pediu_atendimento',
+    motivoEscalada: perguntouSeEhIA ? 'perguntou_se_e_ia' : 'pediu_atendimento',
     ultimaMensagem: mensagem,
   }
 
@@ -333,15 +344,15 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
         cidadePreferencia: novo.cidade,
         whatsapp: novo.whatsapp ?? null,
         tempoExperiencia: novo.tempoExperiencia
-          || (novo.temExperiencia === true ?'Com experiência'
-            : novo.temExperiencia === false ?'Sem experiência' : null),
+          || (novo.temExperiencia === true ? 'Com experiência'
+            : novo.temExperiencia === false ? 'Sem experiência' : null),
         bairro: novo.bairro ?? null,
         cidade: novo.cidadeMora ?? null,
         cep: novo.cep ?? null,
         dataNascimento: novo.dataNascimento ?? null,
         disponibilidadeInicio: novo.disponibilidadeInicio ?? null,
-        aceitaOutrasObras: novo.aceitaOutrasObras === 'sim' ?'Sim'
-          : novo.aceitaOutrasObras === 'nao' ?'Não' : null,
+        aceitaOutrasObras: novo.aceitaOutrasObras === 'sim' ? 'Sim'
+          : novo.aceitaOutrasObras === 'nao' ? 'Não' : null,
         tamanhoCamisa: novo.tamanhoCamisa ?? null,
         tamanhoBota: novo.tamanhoBota ?? null,
         contatoRecadoNome: novo.contatoRecadoNome ?? null,
@@ -349,14 +360,14 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
         resumoExperiencia: [
           'Conversa por WhatsApp (Maria Vitória).',
           novo.resumo,
-          novo.temRegistro === true ?'Já teve registro em carteira na função.'
-            : novo.temRegistro === false ?'Nunca teve registro na função.' : null,
+          novo.temRegistro === true ? 'Já teve registro em carteira na função.'
+            : novo.temRegistro === false ? 'Nunca teve registro na função.' : null,
         ].filter(Boolean).join(' '),
         dadosBrutos: { origem: 'whatsapp-bot', historico: novo.historico },
       },
     }
     resultado.respostaFalha =
-      `${saida.resposta}\n\n(Tive um probleminha para salvar aqui no sistema.` +
+      `${saida.resposta}\n\n(Tive um probleminha para salvar aqui no sistema. ` +
       'Já avisei a equipe, pode deixar que a gente registra.)'
   }
 

@@ -117,8 +117,9 @@ function querOutros(msg) {
   return temAlguma(msg, ['outro', 'outra', 'nao tem na lista', 'nenhuma dessas', 'nenhuma destas', 'fora da lista', 'minha funcao', 'minha area', 'nao achei'])
 }
 function listaVagasTexto() {
-  return vagasAtuais().map((v, i) => `${i + 1}. ${v.nome}${v.salario ?` — ${fmtMoeda(v.salario)}` : ' — a combinar'}`).join('\n') +
-    `\n${vagasAtuais().length + 1}. Outra função (não está na lista)`
+  // Sem "outra função": a empresa só contrata o que está na lista, e a opção
+  // convidava a pedir vaga que não existe — e registrava.
+  return vagasAtuais().map((v, i) => `${i + 1}. ${v.nome}${v.salario ? ` — ${fmtMoeda(v.salario)}` : ' — a combinar'}`).join('\n')
 }
 function listaCidadesTexto() {
   return cidadesAtuais().map((c, i) => `${i + 1}. ${c.nome}`).join('\n')
@@ -135,8 +136,65 @@ function faixaSalarial(v) {
   if (!v.salario) return 'a combinar'
   const teto = tetoDe(v.nome)
   return teto
-    ?`${fmtMoeda(v.salario)} sem experiência comprovada, e ${fmtMoeda(teto)} para quem tem experiência comprovada em carteira`
+    ? `${fmtMoeda(v.salario)} sem experiência comprovada, e ${fmtMoeda(teto)} para quem tem experiência comprovada em carteira`
     : fmtMoeda(v.salario)
+}
+
+/**
+ * Funções que existem na obra, mas NÃO estão abertas.
+ *
+ * Sem esta lista, quem pedia uma delas caía na vaga aberta mais parecida ou
+ * no "outra função". Em 12/09/2026 um mestre de obras foi registrado como
+ * "Outros: Mestre de obras" e, ao perguntar "quanto está o salário do
+ * mestre?", recebeu o valor da bolsa de estágio. O dono: "não temos vagas
+ * para mestre de obras, apenas pedreiro".
+ *
+ * Comparação exata, sem tolerância: aqui confundir é pior que não reconhecer.
+ */
+const FUNCOES_FECHADAS = [
+  ['mestre de obras', /(^| )mestres?( |$)/],
+  ['encarregado', /(^| )encarregad[oa]s?( |$)/],
+  ['eletricista', /(^| )eletricistas?( |$)/],
+  ['armador', /(^| )armador(es)?( |$)/],
+  ['serralheiro', /(^| )serralheir[oa]s?( |$)/],
+  ['soldador', /(^| )soldador(es)?( |$)/],
+  ['pintor', /(^| )pintor(es)?( |$)/],
+  ['encanador', /(^| )encanador(es)?( |$)/],
+  ['azulejista', /(^| )azulejistas?( |$)/],
+  ['gesseiro', /(^| )gesseir[oa]s?( |$)/],
+  ['operador de máquinas', /(^| )operador(es)?( |$)/],
+]
+
+/** Qual função fechada a pessoa citou, se alguma. */
+export function funcaoFechadaCitada(msg) {
+  const t = norm(msg ?? '')
+  const achada = FUNCOES_FECHADAS.find(([, re]) => re.test(t))
+  return achada ? achada[0] : null
+}
+
+/**
+ * A vaga aberta que a pessoa escreveu com todas as letras, sem tolerância.
+ *
+ * "Mestre carpinteiro" é carpinteiro: a vaga aberta dita por inteiro ganha
+ * da função fechada que vem junto.
+ */
+export function vagaCitadaExata(msg) {
+  const t = norm(msg ?? '')
+  return vagasAtuais().find(v =>
+    [v.nome, ...(v.sinonimos ?? [])].some(s => {
+      const termo = norm(s)
+      return termo && new RegExp(`(^| )${termo}( |$)`).test(t)
+    })) ?? null
+}
+
+/** "servente, pedreiro, carpinteiro e estagiário" */
+function vagasAbertasTexto() {
+  return juntar(vagasAtuais().map(v => v.nome.toLowerCase()))
+}
+
+/** A resposta para quem pediu função que não está aberta. */
+function semVagaPara(funcao) {
+  return `no momento não temos vaga de ${funcao}. hoje estamos contratando ${vagasAbertasTexto()}. alguma dessas te interessa?`
 }
 
 /** O que o estágio exige. Informado pelo dono em 11/09/2026. */
@@ -158,6 +216,15 @@ export function responderFAQ(msg, estado = {}) {
     recebia "precisa ter 18 anos".
   */
   const t = norm(msg)
+
+  // Função que não está aberta, e nenhuma vaga aberta dita por inteiro: diz
+  // que não tem, e quais têm. Só quando é mesmo sobre vaga ou salário —
+  // "vou falar com o encarregado" não é pedido de vaga de encarregado.
+  const fechada = funcaoFechadaCitada(msg)
+  if (fechada && !vagaCitadaExata(msg)
+    && /(^| )(vaga|vagas|salario|ganha|paga|pagando|contrat\w*|emprego|servico|trabalh\w*|sou|procuro|procurando|tem pra|tem para)( |$)/.test(t)) {
+    return { texto: semVagaPara(fechada) }
+  }
   /*
     Benefício e registro, ANTES de tudo — e sem resposta pronta.
 
@@ -223,7 +290,7 @@ export function responderFAQ(msg, estado = {}) {
     if (v && ehVagaDeEstagio(v)) {
       return { texto: `A bolsa de estágio é de ${faixaSalarial(v)}, mais ${fmtMoeda(AUXILIO_TRANSPORTE_ESTAGIO)} de auxílio-transporte. ${REQUISITO_ESTAGIO}` }
     }
-    if (v) return { texto: v.salario ?`O salário de ${v.nome} é ${faixaSalarial(v)}.` : `Para ${v.nome} o salário é a combinar, conforme a sua experiência.` }
+    if (v) return { texto: v.salario ? `O salário de ${v.nome} é ${faixaSalarial(v)}.` : `Para ${v.nome} o salário é a combinar, conforme a sua experiência.` }
     return { texto: `Os salários:\n${vagasAtuais().map(v => `• ${v.nome}: ${faixaSalarial(v)}`).join('\n')}` }
   }
   if (temAlguma(msg, ['horario', 'que horas', 'dias', 'jornada', 'expediente', 'turno'])) {
@@ -250,16 +317,16 @@ export function responderFAQ(msg, estado = {}) {
 
     const cidades = cidadesAtuais()
     const comAlojamento = cidades.filter(c => c.alojamento).map(c => c.nome)
-    const onde = comAlojamento.length ?` Hoje o alojamento é em ${juntar(comAlojamento)}.` : ''
+    const onde = comAlojamento.length ? ` Hoje o alojamento é em ${juntar(comAlojamento)}.` : ''
     const c = matchCidade(msg) || (estado.cidade ? cidades.find(x => x.nome === estado.cidade) : null)
     // Sem alojamento não quer dizer sem vaga: quem não precisa de onde
     // dormir trabalha na cidade que preferir (decisão do dono, 11/09/2026).
     // Confirma a cidade, não promete a vaga.
     if (c) return { texto: c.alojamento
-      ?`Sim! Em ${c.nome} temos alojamento.`
+      ? `Sim! Em ${c.nome} temos alojamento.`
       : `Em ${c.nome} não temos alojamento.${onde} Se você não precisar de alojamento, pode trabalhar em ${c.nome} sim — a cidade você escolhe.` }
     return { texto: comAlojamento.length
-      ?`Hoje temos alojamento em ${juntar(comAlojamento)}. O alojamento fica na própria cidade da obra.`
+      ? `Hoje temos alojamento em ${juntar(comAlojamento)}. O alojamento fica na própria cidade da obra.`
       : 'No momento não temos alojamento disponível.' }
   }
   if (/idade minima|menor de idade|(qual|que) (a )?idade|quantos anos (precisa|tem que)|tenho 1[4-7] anos/.test(t)) {
@@ -288,7 +355,7 @@ export function responderFAQ(msg, estado = {}) {
   }
   if (temAlguma(msg, ['cidade', 'onde tem', 'qual cidade', 'tem vaga em', 'regiao', 'local'])) {
     const c = matchCidade(msg)
-    if (c) return { texto: `Sim, temos obra em ${c.nome}, e você pode escolher trabalhar lá.${c.alojamento ?' E tem alojamento.' : ' (Sem alojamento nesta cidade.)'}` }
+    if (c) return { texto: `Sim, temos obra em ${c.nome}, e você pode escolher trabalhar lá.${c.alojamento ? ' E tem alojamento.' : ' (Sem alojamento nesta cidade.)'}` }
     return { texto: `Hoje temos vagas nestas cidades:\n${listaCidadesTexto()}` }
   }
   return null
@@ -345,6 +412,11 @@ export function responder(estado, mensagem) {
 function avancar(estado, mensagem) {
   switch (estado.etapa) {
     case 'vaga': {
+      // Função fechada, sem vaga aberta dita por inteiro: diz que não tem.
+      const fechada = funcaoFechadaCitada(mensagem)
+      if (fechada && !vagaCitadaExata(mensagem)) {
+        return { estado: { ...estado, tentativasVaga: 0 }, resposta: semVagaPara(fechada) }
+      }
       // "Outras" = item N+1 da lista, ou pedido explícito
       const idxOutros = indiceEscolhido(mensagem, vagasAtuais().length + 1)
       if (querOutros(mensagem) || idxOutros === vagasAtuais().length + 1) {
@@ -353,21 +425,33 @@ function avancar(estado, mensagem) {
       const v = matchVaga(mensagem)
       if (!v) {
         const tent = (estado.tentativasVaga || 0) + 1
-        const dica = tent >= 2 ?`\n\nSe a sua função não está na lista, escreva *${vagasAtuais().length + 1}* ou "outra".` : ''
+        const dica = ''
         return { estado: { ...estado, tentativasVaga: tent }, resposta: `Não consegui identificar a vaga. Pode me dizer o número ou o nome?\n\n${listaVagasTexto()}${dica}` }
       }
       return {
         estado: { ...estado, etapa: 'cidade', vaga: v.nome, vagaProfissional: v.profissional, tentativasVaga: 0 },
-        resposta: `Boa escolha! Vaga de *${v.nome}*${v.salario ?` (${fmtMoeda(v.salario)})` : ' (salário a combinar)'}.\n\nEm qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto()}`,
+        resposta: `Boa escolha! Vaga de *${v.nome}*${v.salario ? ` (${fmtMoeda(v.salario)})` : ' (salário a combinar)'}.\n\nEm qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto()}`,
       }
     }
     case 'vagaOutros': {
       const funcao = mensagem.trim()
-      if (funcao.length < 2) return { estado, resposta: 'Pode escrever a função que você procura?' }
-      // Função fora da lista → tratada como profissional (perguntamos experiência/registro)
+      if (funcao.length < 2) return { estado, resposta: 'qual função vc procura?' }
+
+      // A função dita é uma das abertas: segue com ela.
+      const aberta = vagaCitadaExata(funcao) ?? matchVaga(funcao)
+      if (aberta) {
+        return {
+          estado: { ...estado, etapa: 'cidade', vaga: aberta.nome, vagaProfissional: aberta.profissional, tentativasVaga: 0 },
+          resposta: `certo, ${aberta.nome.toLowerCase()}. em qual cidade vc quer trabalhar?\n\n${listaCidadesTexto()}`,
+        }
+      }
+
+      // Não está aberta: diz que não tem, e NÃO registra. Antes virava
+      // "Outros: Mestre de obras" e chegava ao RH uma candidatura para vaga
+      // que a empresa não tem.
       return {
-        estado: { ...estado, etapa: 'cidade', vaga: `Outros: ${funcao}`, vagaProfissional: true },
-        resposta: `Anotado: *${funcao}*. Vou registrar e o RH avalia. \n\nEm qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto()}`,
+        estado: { ...estado, etapa: 'vaga', tentativasVaga: 0 },
+        resposta: semVagaPara(funcaoFechadaCitada(funcao) ?? funcao.toLowerCase()),
       }
     }
     case 'cidade': {
@@ -376,12 +460,12 @@ function avancar(estado, mensagem) {
       if (estado.vagaProfissional) {
         return {
           estado: { ...estado, etapa: 'experiencia', cidade: c.nome },
-          resposta: `Perfeito, ${c.nome}.${c.alojamento ?' (Temos alojamento aí. )' : ''}\n\nVocê tem experiência na função de ${estado.vaga}? (sim ou não)`,
+          resposta: `Perfeito, ${c.nome}.${c.alojamento ? ' (Temos alojamento aí.)' : ''}\n\nVocê tem experiência na função de ${estado.vaga}? (sim ou não)`,
         }
       }
       return {
         estado: { ...estado, etapa: 'nome', cidade: c.nome },
-        resposta: `Perfeito, ${c.nome}.${c.alojamento ?' (Temos alojamento aí. )' : ''}\n\nPara finalizar, qual é o seu nome completo?`,
+        resposta: `Perfeito, ${c.nome}.${c.alojamento ? ' (Temos alojamento aí.)' : ''}\n\nPara finalizar, qual é o seu nome completo?`,
       }
     }
     case 'experiencia': {
@@ -390,7 +474,7 @@ function avancar(estado, mensagem) {
       return {
         estado: { ...estado, etapa: 'registro', temExperiencia: sim },
         resposta: sim
-          ?`Ótimo! E você já tem (ou já teve) registro em carteira nessa função? (sim ou não)`
+          ? `Ótimo! E você já tem (ou já teve) registro em carteira nessa função? (sim ou não)`
           : `Entendi. Para ${estado.vaga} normalmente é preciso experiência, mas vou registrar e o RH avalia. Você já teve registro em carteira nessa função? (sim ou não)`,
       }
     }
@@ -410,9 +494,9 @@ function avancar(estado, mensagem) {
         vagaPretendida: estado.vaga || null,
         cidadePreferencia: estado.cidade || null,
         whatsapp: estado.whatsapp || null,
-        tempoExperiencia: estado.vagaProfissional ? (estado.temExperiencia ?'Com experiência' : 'Sem experiência') : null,
+        tempoExperiencia: estado.vagaProfissional ? (estado.temExperiencia ? 'Com experiência' : 'Sem experiência') : null,
         resumoExperiencia: estado.vagaProfissional
-          ?`Via WhatsApp. Experiência: ${estado.temExperiencia ?'sim' : 'não'}. Registro em carteira na função: ${estado.temRegistro ?'sim' : 'não'}.`
+          ? `Via WhatsApp. Experiência: ${estado.temExperiencia ? 'sim' : 'não'}. Registro em carteira na função: ${estado.temRegistro ? 'sim' : 'não'}.`
           : 'Candidatura via WhatsApp.',
         transcricao: estadoFinal,
       }
