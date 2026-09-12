@@ -29,6 +29,7 @@ import * as triagem from './triagem.js'
 import * as gastos from './gastos.js'
 import * as limite from './limite.js'
 import { decidir as quemAtender, ehCobranca } from './quem-atender.js'
+import * as maoHumana from './mao-humana.js'
 import { discreto } from './texto.js'
 
 const app = express()
@@ -73,6 +74,7 @@ app.get('/metricas', (req, res) => {
     atendente: iaDisponivel() ? 'Maria Vitória (IA)' : 'roteiro',
     gastos: gastos.situacao(),
     limite: limite.situacao(),
+  atendimentoHumano: maoHumana.situacao(),
   })
 })
 
@@ -328,6 +330,21 @@ async function rotear(msg) {
     return 'Recebi seu arquivo, mas aqui eu consigo ler só texto. Pode escrever pra mim? 🙂'
   }
   if (!msg.texto) return null
+
+  /*
+    Onde uma pessoa da empresa já está atendendo, o robô cala.
+
+    Minutos depois de o robô ser ligado, ele e o dono responderam o mesmo
+    candidato ao mesmo tempo: o dono escreveu "preenche essa ficha que eu
+    peço para te ligarem" e, no mesmo minuto, o robô perguntou "você está
+    procurando vaga por aqui?". Para quem está do outro lado, é a empresa
+    falando duas coisas — e uma delas ignorando a outra.
+  */
+  const gente = maoHumana.atendidaPorGente(msg.de)
+  if (gente.atendida) {
+    console.log(`[atendimento] ${discreto(msg.de)}: já atendido por gente há ${gente.faz} min — robô calado.`)
+    return null
+  }
 
   /*
     Cobrança de pagamento NUNCA recebe resposta automática.

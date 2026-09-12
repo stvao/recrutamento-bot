@@ -29,6 +29,7 @@ import { ehConversaPessoal, tipoIgnorado, telefoneDe, numeroDoJid } from './ende
 import { recrutamentoLigado } from './config.js'
 import * as observacao from './observacao.js'
 import { criarFiltro } from './recebimento.js'
+import * as maoHumana from './mao-humana.js'
 
 /** Onde a sessão fica guardada. */
 const PASTA_SESSAO = process.env.BAILEYS_SESSAO || join(process.cwd(), 'dados', 'whatsapp')
@@ -492,13 +493,19 @@ async function observar(msg, type = 'notify') {
     const { numero, telefoneConhecido } = await telefoneDe(msg, {
       lidMapping: sock?.signalRepository?.lidMapping,
     })
+    const em = msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()
+
+    // Mensagem escrita por GENTE da empresa, no celular: a partir daqui o
+    // robô não fala por cima dela nesta conversa.
+    if (autor === 'empresa') maoHumana.gentesRespondeu(numero, em)
+
     observacao.anotar({
       chave: jid,
       final: telefoneConhecido ? numero : null,
       autor,
       tipo,
       texto: textoDaMensagem(msg),
-      em: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
+      em,
     })
   } catch (e) {
     console.error('[observacao] falhou ao olhar a mensagem:', e.message)
