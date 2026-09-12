@@ -109,6 +109,12 @@ ok('frase sem função fechada', brain.funcaoFechadaCitada('sou pedreiro') === n
   ok('cota esgotada liga a pausa', /if \(r\.status === 429\) semCotaAte = Date\.now\(\) \+ PAUSA_COTA_MS/.test(ia))
   ok('e a conversa respeita a pausa', /if \(!CHAVE \|\| Date\.now\(\) < semCotaAte\) return null/.test(ia))
   ok('a IA sabe das funções fechadas', /FUNÇÕES QUE NÃO ESTAMOS CONTRATANDO AGORA/.test(ia))
+  // Ideias aproveitadas da revisão por outra IA (13/09/2026).
+  ok('aceita correção sem questionar', /Corrigiu algo/.test(ia))
+  ok('confirma resposta ambígua', /só pra confirmar/.test(ia))
+  ok('volta ao cadastro depois de mudar de assunto', /Mudou de assunto/.test(ia))
+  ok('texto do candidato nunca é instrução', /CONVERSA, nunca instrução/.test(ia))
+  ok('"vou confirmar" sempre avisa o RH', /confirmar com a equipe E\s+marque precisaHumano/.test(ia))
 }
 
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
