@@ -247,14 +247,6 @@ app.post('/simular', async (req, res) => {
   res.json({ ...r, protocolo, registroOk })
 })
 
-/** "há 3 horas", "há 2 dias" — para a mensagem de retomada soar natural. */
-function tempoDecorrido(ms) {
-  const horas = Math.round(ms / 3600000)
-  if (horas < 24) return `há ${horas} hora${horas === 1 ? '' : 's'}`
-  const dias = Math.round(horas / 24)
-  return `há ${dias} dia${dias === 1 ? '' : 's'}`
-}
-
 /**
  * Quem atende esta mensagem.
  *
@@ -429,7 +421,12 @@ async function atenderCandidatoConhecido(msg, ficha) {
     return aplicarResultado(msg.de, await atender(anterior, msg.texto), msg.texto)
   }
 
-  setEstado(msg.de, { modo: 'candidato-conhecido', whatsapp: msg.de })
+  // A conversa expirou mas ainda está guardada: retoma com tudo que já foi dito.
+  const pendente = getAbandonada(msg.de)
+  if (pendente && (pendente.estado?.modo === 'ia' || pendente.estado?.modo === 'roteiro')) {
+    setEstado(msg.de, pendente.estado)
+    return aplicarResultado(msg.de, await atender(pendente.estado, msg.texto, { paradoHa: pendente.paradoHa }), msg.texto)
+  }
 
   if (ficha.situacao === 'encerrada') {
     marcarEscalada(msg.de)
@@ -438,13 +435,28 @@ async function atenderCandidatoConhecido(msg, ficha) {
       motivo: `candidato ${ficha.primeiroNome} voltou (candidatura encerrada)`,
       trecho: msg.texto,
     })
-    return `Oi, ${ficha.primeiroNome}! Deixa eu chamar alguém da equipe pra falar com você. 🙂`
+    setEstado(msg.de, { modo: 'candidato-conhecido', whatsapp: msg.de })
+    return `oi ${ficha.primeiroNome}, vou pedir pra alguém da equipe falar com você`
   }
 
-  const onde = [ficha.vaga, ficha.cidade].filter(Boolean).join(' em ')
-  return `Oi de novo, ${ficha.primeiroNome}! 👋\n`
-    + `Sua ficha${onde ? ` para ${onde}` : ''} está com a gente (protocolo ${ficha.protocolo}).\n`
-    + 'A equipe chama assim que houver novidade. Precisa de mais alguma coisa?'
+  /*
+    Tem ficha no RH, mas nenhuma conversa guardada — veio pelo formulário, ou
+    faz mais de uma semana.
+
+    Antes o robô respondia "Oi de novo! Sua ficha está com a gente" e marcava
+    a conversa como 'candidato-conhecido', que não sabia continuar: TODA
+    mensagem seguinte recebia a mesma frase. Agora abre uma conversa normal
+    já sabendo o que o RH sabe, e responde o que a pessoa perguntou.
+  */
+  const semente = {
+    ...iniciar(msg.de).estado,
+    historico: [],
+    vaga: ficha.vaga ?? null,
+    cidade: ficha.cidade ?? null,
+    registrado: true,
+  }
+  setEstado(msg.de, semente)
+  return aplicarResultado(msg.de, await atender(semente, msg.texto), msg.texto)
 }
 
 /**
@@ -483,7 +495,7 @@ async function primeiroContato(msg) {
     if (achado?.tipo === 'funcionario') {
       limpar(msg.de)
       console.log(`[triagem] ${discreto(msg.de)} identificado como ${achado.primeiroNome} pelo NOME (não pelo telefone)`)
-      return `Achei aqui, ${achado.primeiroNome}! 👍 Em que posso ajudar?`
+      return `achei aqui, ${achado.primeiroNome}. em que posso ajudar?`
     }
     // Não achou: chama gente em vez de insistir. Quem diz que trabalha na
     // empresa e não está no cadastro é exatamente o caso que precisa de
@@ -495,7 +507,7 @@ async function primeiroContato(msg) {
       motivo: `disse que trabalha na empresa mas não achei no cadastro: "${r.nomeInformado}"`,
       trecho: msg.texto,
     })
-    return 'Não achei seu cadastro com esse nome. Já avisei a equipe, alguém vai falar com você. 🙂'
+    return 'não achei seu cadastro com esse nome. já avisei a equipe, alguém vai falar com você'
   }
 
   /*
@@ -508,10 +520,21 @@ async function primeiroContato(msg) {
     jogadas fora.
   */
   if (r.intencao === 'procura_vaga') {
-    limpar(msg.de)
+    // O que já foi conversado na triagem vai junto. Antes a conversa era
+    // apagada e o recrutamento começava só com a última mensagem: quem tinha
+    // dito "moro em Bastos" três mensagens antes ouvia "qual cidade vc mora?".
     const ini = iniciar(msg.de)
-    setEstado(msg.de, ini.estado)
-    return aplicarResultado(msg.de, await atender(ini.estado, msg.texto), msg.texto)
+    const estado = ini.estado.modo === 'ia'
+      ? {
+          ...ini.estado,
+          historico: historico.map(m => ({
+            de: m.de === 'pessoa' ? 'candidato' : 'maria',
+            texto: m.texto,
+          })),
+        }
+      : ini.estado
+    setEstado(msg.de, estado)
+    return aplicarResultado(msg.de, await atender(estado, msg.texto), msg.texto)
   }
 
   setEstado(msg.de, {
@@ -630,16 +653,12 @@ async function processar(from, text) {
     // robô pergunta tudo outra vez. Aqui ela só responde o que falta.
     const pendente = getAbandonada(from)
     if (pendente) {
+      // Retoma sem mensagem enlatada. O "Oi de novo! Vi que você começou uma
+      // candidatura há 2 dias..." entregava o robô na primeira frase. Quem
+      // sabe que a pessoa sumiu e voltou é o modelo (ver oQueJaSabe), e ele
+      // continua como uma pessoa continuaria.
       setEstado(from, pendente.estado)
-      const r = await atender(pendente.estado, text)
-      const resposta = await aplicarResultado(from, r, text)
-      return `Oi de novo! 👋 Vi que você começou uma candidatura ${tempoDecorrido(pendente.paradoHa)} `
-        + `e parou no meio — dá para continuar de onde estava.
-`
-        + `(se preferir começar de novo, é só escrever *recomeçar*)
-
-`
-        + resposta
+      return aplicarResultado(from, await atender(pendente.estado, text, { paradoHa: pendente.paradoHa }), text)
     }
 
     const ini = iniciar(from)

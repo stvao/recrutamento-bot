@@ -64,7 +64,7 @@ export function iaDisponivel() {
  * imita o registro do texto que recebe, e um prompt corporativo produz
  * resposta corporativa.
  */
-function instrucoes(fatos) {
+function instrucoes(fatos, conhecido = '') {
   return `Você é Maria Vitória, do RH da ${EMPRESA}, uma construtora que reforma
 escolas estaduais no interior e no litoral de São Paulo. Você conversa por
 WhatsApp com pessoas interessadas nas vagas.
@@ -172,7 +172,9 @@ REGRAS QUE VOCÊ NÃO QUEBRA
   você não pode resolver, passe para uma pessoa da equipe (precisaHumano).
 
 FATOS DE HOJE (a única fonte de verdade):
-${fatos}`
+${fatos}${conhecido ? `
+
+${conhecido}` : ''}`
 }
 
 /** Os fatos que o modelo pode usar, montados a partir do banco. */
@@ -273,11 +275,11 @@ const ESQUEMA = {
  * fora, resposta estranha. Quem chama trata null como "atende do jeito
  * antigo", então uma falha aqui nunca deixa o candidato sem resposta.
  */
-export async function conversar({ historico, fatos }) {
+export async function conversar({ historico, fatos, conhecido = '' }) {
   if (!CHAVE) return null
 
   for (let tentativa = 1; tentativa <= TENTATIVAS; tentativa++) {
-    const r = await umaTentativa({ historico, fatos })
+    const r = await umaTentativa({ historico, fatos, conhecido })
     if (r) return r
     if (tentativa < TENTATIVAS) console.warn(`[ia] tentando de novo (${tentativa + 1}/${TENTATIVAS})`)
   }
@@ -306,10 +308,10 @@ export async function chamarModelo({ instrucoes: texto, esquema, historico }) {
   return null
 }
 
-async function umaTentativa({ historico, fatos, instrucoesProntas, esquemaProprio }) {
+async function umaTentativa({ historico, fatos, conhecido = '', instrucoesProntas, esquemaProprio }) {
 
   const corpo = {
-    systemInstruction: { parts: [{ text: instrucoesProntas ?? instrucoes(fatos) }] },
+    systemInstruction: { parts: [{ text: instrucoesProntas ?? instrucoes(fatos, conhecido) }] },
     contents: historico.map(m => ({
       // "candidato" e "pessoa" são quem escreve; o resto é o robô.
       role: (m.de === 'candidato' || m.de === 'pessoa') ? 'user' : 'model',

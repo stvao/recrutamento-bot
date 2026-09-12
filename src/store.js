@@ -17,17 +17,41 @@ import { dirname, join } from 'node:path'
 const ARQUIVO = process.env.ESTADO_ARQUIVO
   || join(process.cwd(), 'dados', 'conversas.json')
 
-/** Sem interação por este tempo, a conversa é considerada abandonada. */
-const TTL_MS = 1000 * 60 * 60 * 6      // 6 horas
+/**
+ * Por quanto tempo a conversa simplesmente CONTINUA.
+ *
+ * Eram 6 horas, que é pouco para quem trabalha em obra: a pessoa escreve de
+ * noite e responde de manhã. Com 6 h, a resposta da manhã caía fora do prazo.
+ * Três dias cobrem o ritmo real de quem procura serviço sem tratar como
+ * "retomada" o que é só a resposta do dia seguinte.
+ */
+const TTL_MS = 1000 * 60 * 60 * 24 * 3   // 3 dias
 
 /**
- * Quanto tempo a conversa abandonada fica guardada para RETOMADA.
+ * Quanto tempo a conversa parada fica guardada para RETOMADA.
  *
- * Diferente do TTL: passadas as 6h a conversa não continua sozinha, mas
- * quem volta em até 7 dias é recebido de onde parou, em vez de começar de
- * novo. É a diferença entre "recomeça tudo" e "só falta o seu nome".
+ * Passado o TTL a conversa não continua sozinha, mas quem volta em até 7
+ * dias é recebido de onde parou, em vez de começar de novo.
  */
 const RETENCAO_MS = 1000 * 60 * 60 * 24 * 7
+
+/**
+ * Esta sessão ainda pode ser retomada?
+ *
+ * Antes, conversa CONCLUÍDA não podia. Só que "concluída" é marcado quando a
+ * ficha é gravada pela primeira vez — logo que há nome, vaga e cidade, bem no
+ * começo. Quem respondia isso e voltava no outro dia caía fora da retomada e
+ * recebia de novo "qual função você procura?". Agora a retomada vale para
+ * qualquer conversa guardada, concluída ou não.
+ */
+export function podeRetomar(sessao, agora = Date.now()) {
+  if (!sessao?.estado) return false
+  const parado = agora - sessao.atualizadoEm
+  return parado > TTL_MS && parado <= RETENCAO_MS
+}
+
+/** Para teste: os prazos em vigor. */
+export const _prazos = () => ({ TTL_MS, RETENCAO_MS })
 
 /** telefone -> { estado, atualizadoEm, iniciadoEm, concluidoEm, escalouEm } */
 let sessoes = new Map()
@@ -132,10 +156,8 @@ export function getEstado(telefone) {
  */
 export function getAbandonada(telefone) {
   const s = sessoes.get(telefone)
-  if (!s || s.concluidoEm) return null
-  const parado = Date.now() - s.atualizadoEm
-  if (parado <= TTL_MS || parado > RETENCAO_MS) return null
-  return { estado: s.estado, paradoHa: parado }
+  if (!podeRetomar(s)) return null
+  return { estado: s.estado, paradoHa: Date.now() - s.atualizadoEm }
 }
 
 export function setEstado(telefone, estado) {

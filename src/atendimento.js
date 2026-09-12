@@ -21,10 +21,12 @@ import { norm } from './texto.js'
 /**
  * Quantas mensagens da conversa mandar junto.
  *
- * O suficiente para ela lembrar do que já foi dito, sem crescer sem fim —
- * conversa longa custa tempo de resposta e, no plano gratuito, cota.
+ * Eram 20, e em 12/09/2026 17 das 39 conversas já batiam no limite: o que a
+ * pessoa respondeu no começo saía da vista do modelo, e ele perguntava de
+ * novo. Quarenta cobre a ficha inteira com folga. E o que foi respondido não
+ * depende mais disso — vai à parte, em oQueJaSabe().
  */
-const LIMITE_HISTORICO = 20
+const LIMITE_HISTORICO = 40
 
 /** Nome da empresa, como ela se apresenta. Mesmo valor que o prompt usa. */
 const EMPRESA = process.env.EMPRESA_NOME || 'KE Engenharia'
@@ -65,6 +67,91 @@ function manterPreenchidos(estado, saida, campos) {
     out[c] = novo || estado[c] || null
   }
   return out
+}
+
+/**
+ * O que já se sabe desta pessoa, e o que ainda falta — dito ao modelo a cada
+ * mensagem.
+ *
+ * A ficha era gravada, mas o modelo nunca a recebia: via só as últimas
+ * mensagens. Em 12/09/2026 ele pediu o nome completo duas ou mais vezes em
+ * 10 conversas, registro em carteira em 4, data de nascimento em 3 — a
+ * pessoa já tinha respondido, só que longe demais para trás.
+ *
+ * Com a lista na frente dele, "nunca pergunte de novo" deixa de depender de
+ * memória: é uma instrução com o dado do lado.
+ *
+ * Dado pessoal vai como "já informado", sem o valor. O modelo não precisa da
+ * data de nascimento para não perguntá-la de novo.
+ */
+export function oQueJaSabe(estado = {}, { paradoHa = null } = {}) {
+  const e = estado ?? {}
+  const tem = (v) => v !== null && v !== undefined && String(v).trim() !== ''
+  const sabido = []
+  const falta = []
+
+  // A ordem da falta é a ordem em que se pergunta (ver ia.js).
+  if (tem(e.vaga)) sabido.push(`vaga: ${e.vaga}`)
+  else falta.push('qual vaga interessa')
+
+  if (tem(e.cidadeMora)) sabido.push(`mora em: ${e.cidadeMora}`)
+  else falta.push('em qual cidade mora')
+
+  if (tem(e.cidade)) sabido.push(`cidade onde quer trabalhar: ${e.cidade}`)
+  else falta.push('em qual cidade quer trabalhar')
+
+  if (tem(e.nome)) sabido.push(`nome completo: já informado (${String(e.nome).split(/\s+/)[0]})`)
+  else falta.push('o nome completo')
+
+  if (e.temExperiencia === true || e.temExperiencia === false || tem(e.tempoExperiencia)) {
+    const quanto = tem(e.tempoExperiencia) ? ` (${e.tempoExperiencia})` : ''
+    sabido.push(`experiência na função: ${e.temExperiencia === false ? 'não tem' : 'tem'}${quanto}`)
+  } else {
+    falta.push('se tem experiência na função, e quanto tempo')
+  }
+
+  if (e.temRegistro === true || e.temRegistro === false) {
+    sabido.push(`registro em carteira na função: ${e.temRegistro ? 'sim' : 'não'}`)
+  } else {
+    falta.push('se já teve registro em carteira nesta função')
+  }
+
+  if (tem(e.dataNascimento)) sabido.push('data de nascimento: já informada')
+  else falta.push('data de nascimento')
+
+  if (tem(e.disponibilidadeInicio)) sabido.push(`pode começar: ${e.disponibilidadeInicio}`)
+  else falta.push('quando pode começar')
+
+  if (tem(e.aceitaOutrasObras)) sabido.push(`aceita obra em outra cidade: ${e.aceitaOutrasObras}`)
+  else falta.push('se aceita trabalhar em obra de outra cidade')
+
+  if (tem(e.tamanhoCamisa) && tem(e.tamanhoBota)) sabido.push('tamanho de camisa e bota: já informados')
+  else falta.push('tamanho de camisa e de bota')
+
+  if (tem(e.contatoRecadoNome) || tem(e.contatoRecadoTelefone)) sabido.push('contato de recado: já informado')
+  else falta.push('um contato de recado (nome e telefone de alguém)')
+
+  const partes = []
+
+  if (paradoHa && paradoHa > 6 * 3600_000) {
+    const horas = Math.round(paradoHa / 3600_000)
+    const quando = horas < 48 ? `${horas} horas` : `${Math.round(horas / 24)} dias`
+    partes.push(
+      `A PESSOA FICOU ${quando.toUpperCase()} SEM RESPONDER E VOLTOU AGORA. Continue de onde\n`
+      + 'parou: não se apresente de novo, não recomece e não repita pergunta respondida.',
+    )
+  }
+
+  partes.push(sabido.length
+    ? `O QUE VOCÊ JÁ SABE DESTA PESSOA — está confirmado, NUNCA pergunte de novo:\n${sabido.map(x => `- ${x}`).join('\n')}`
+    : 'Você ainda não sabe nada desta pessoa.')
+
+  partes.push(falta.length
+    ? `AINDA FALTA SABER (pergunte só a próxima, uma coisa por vez):\n${falta.map(x => `- ${x}`).join('\n')}`
+    : 'A FICHA ESTÁ COMPLETA. Não faça mais nenhuma pergunta de ficha. Responda só o que\n'
+      + 'a pessoa perguntar; se ela só agradecer ou se despedir, responda curto e encerre.')
+
+  return { sabido, falta, texto: partes.join('\n\n') }
 }
 
 /** Um nome completo de verdade tem nome e sobrenome, e não é frase. */
@@ -122,7 +209,7 @@ export function iniciarAtendimento(whatsapp) {
  * saber quem está atendendo:
  *   { estado, resposta, escalarHumano?, acao? }
  */
-export async function atender(estado, mensagem) {
+export async function atender(estado, mensagem, { paradoHa = null } = {}) {
   // Conversa que começou no roteiro continua nele: trocar de atendente no
   // meio faria a Maria Vitória aparecer sem saber o que já foi conversado.
   if (!iaDisponivel() || estado?.modo !== 'ia') {
@@ -149,7 +236,9 @@ export async function atender(estado, mensagem) {
   ].slice(-LIMITE_HISTORICO)
 
   const fatos = montarFatos({ vagas, cidades, jornada: JORNADA })
-  const saida = await conversar({ historico, fatos })
+  // O que já foi respondido vai à parte, e não só no histórico: ver oQueJaSabe().
+  const conhecido = oQueJaSabe(estado, { paradoHa }).texto
+  const saida = await conversar({ historico, fatos, conhecido })
 
   if (!saida) {
     // Ela não respondeu. O roteiro atende ESTA mensagem, mas a conversa
