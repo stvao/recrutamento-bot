@@ -24,6 +24,7 @@ const RH = {
   vagas: [
     { nome: 'Servente', salario: 2303, profissional: false, sinonimos: ['servente', 'ajudante'] },
     { nome: 'Pedreiro', salario: 2803, profissional: true, sinonimos: ['pedreiro'] },
+    { nome: 'Carpinteiro', salario: 2803, profissional: false, sinonimos: ['carpinteiro', 'carpintaria'] },
     { nome: 'Estagiário', salario: 1200, profissional: false, sinonimos: ['estagiario'] },
   ],
   cidades: [
@@ -59,7 +60,9 @@ ok('servente: R$ 2.303,00', /2\.303,00/.test(texto('quanto ganha servente?')))
 ok('servente não fala de teto', !/3\.500/.test(texto('quanto ganha servente?')))
 ok('pedreiro: inicial R$ 2.803,00', /2\.803,00/.test(texto('quanto paga pedreiro?')))
 ok('pedreiro: pode chegar a R$ 3.500,00', /3\.500,00/.test(texto('quanto paga pedreiro?')))
-ok('o teto depende de experiência comprovada', /experi[eê]ncia comprovada/.test(texto('quanto paga pedreiro?')))
+ok('o teto exige experiência comprovada EM CARTEIRA', /comprovada em carteira/.test(texto('quanto paga pedreiro?')))
+ok('carpinteiro tem as mesmas duas faixas',
+  /2\.803,00/.test(texto('quanto paga carpinteiro?')) && /3\.500,00/.test(texto('quanto paga carpinteiro?')))
 ok('estagiário: bolsa R$ 1.200,00', /1\.200,00/.test(texto('quanto ganha estagiario?')))
 ok('o teto é só do pedreiro', catalogo.tetoDe('Pedreiro') === 3500 && catalogo.tetoDe('Servente') === null)
 
@@ -74,6 +77,18 @@ ok('o teto é só do pedreiro', catalogo.tetoDe('Pedreiro') === 3500 && catalogo
   ok('alojamento: nunca mais "todas as cidades"', !/todas|exceto/i.test(geral))
 }
 ok('Bastos tem alojamento', /^Sim/.test(texto('tem alojamento em bastos?')))
+
+// ── Alojamento é só para pedreiro (dono, 12/09/2026) ───────────────────
+//
+// O ajudante de outra cidade que descobre isso só na entrevista viajou à toa.
+{
+  const r = texto('tem alojamento?', { vaga: 'Servente' })
+  ok('ajudante: alojamento é só para pedreiro', /só para pedreiro/.test(r))
+  ok('ajudante: tem que morar na cidade da obra', /mora na cidade da obra/.test(r))
+  ok('ajudante: não recebe a lista de cidades com alojamento', !/Bastos/.test(r))
+}
+ok('pedreiro continua recebendo as cidades', /Bastos/.test(texto('tem alojamento?', { vaga: 'Pedreiro' })))
+ok('quem cita a função na pergunta também', /só para pedreiro/.test(texto('sou ajudante, tem alojamento?')))
 ok('Pereiras tem alojamento', /^Sim/.test(texto('tem alojamento em pereiras?')))
 {
   const buritama = texto('tem alojamento em buritama?')
@@ -82,6 +97,21 @@ ok('Pereiras tem alojamento', /^Sim/.test(texto('tem alojamento em pereiras?')))
 }
 ok('as cidades vêm do RH, não de lista escrita à mão',
   /Caraguatatuba/.test(texto('quais cidades tem vaga?')) && !/Praia Grande/.test(texto('quais cidades tem vaga?')))
+
+// ── Experiência virou FAIXA, não porta (dono, 12/09/2026) ──────────
+//
+// Dizer "pedreiro precisa de experiência" espantaria justamente quem a
+// empresa contrata por R$ 2.803.
+{
+  const r = texto('precisa de experiencia?', { vaga: 'Pedreiro' })
+  ok('pedreiro: dá para começar sem experiência', /começar sem experiência/.test(r))
+  ok('pedreiro: as duas faixas na mesma frase', /2\.803,00/.test(r) && /3\.500,00/.test(r))
+  ok('pedreiro: a faixa maior exige carteira', /comprovada em carteira/.test(r))
+  ok('pedreiro: nunca mais "é necessário ter experiência"', !/necessário ter experiência/.test(r))
+}
+ok('servente: não precisa de experiência', /não é preciso experiência/.test(texto('precisa de experiencia?', { vaga: 'Servente' })))
+ok('sem vaga escolhida: explica as duas funções',
+  /Pedreiro e Carpinteiro/.test(texto('precisa de experiencia?')))
 
 // ── Registro: formas de contratação, e NUNCA quando ────────────────────
 {
@@ -174,6 +204,8 @@ ok('jornada continua', /segunda a quinta/i.test(texto('qual o horario?')) && JOR
 {
   const f = montarFatos({ vagas: catalogo.vagasAtuais(), cidades: catalogo.cidadesAtuais(), jornada: JORNADA })
   ok('fatos: salários do RH', /Servente: R\$ 2303,00/.test(f) && /Pedreiro: R\$ 2803,00/.test(f))
+  ok('fatos: alojamento só para pedreiro', /S[ÓO] PARA PEDREIRO/.test(f) && /MORA na cidade da obra/.test(f))
+  ok('fatos: o teto exige carteira', /COMPROVADA EM CARTEIRA/.test(f))
   ok('fatos: teto só na linha do pedreiro',
     /Pedreiro:.*3500,00/.test(f) && !/Servente:.*3500/.test(f) && !/Estagi.rio:.*3500/.test(f))
   ok('fatos: alojamento como está no RH', /Bastos: tem alojamento/.test(f) && /Buritama: NÃO tem alojamento/.test(f))

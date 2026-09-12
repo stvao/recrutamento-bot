@@ -194,11 +194,32 @@ export function cidadesAtuais() {
  * responsável, na entrevista. Escrito como promessa no WhatsApp do
  * candidato, viraria salário combinado.
  */
-const TETO_SALARIAL = { pedreiro: 3500 }
+const TETO_SALARIAL = { pedreiro: 3500, carpinteiro: 3500 }
 
 export function tetoDe(nomeVaga) {
   return TETO_SALARIAL[norm(nomeVaga ?? '')] ?? null
 }
+
+/**
+ * Quem pode ficar no alojamento.
+ *
+ * Informado pelo dono em 12/09/2026: hoje só se contrata PEDREIRO para ficar
+ * alojado. Ajudante precisa morar na cidade da obra.
+ *
+ * Isto não é detalhe de benefício: é o que decide se vale a pessoa se
+ * candidatar. Um ajudante de outra cidade que descobre isso só na entrevista
+ * viajou à toa — e é o tipo de coisa que o robô tem que dizer na primeira
+ * mensagem.
+ */
+const ALOJAMENTO_SO_PARA = ['pedreiro']
+
+export function alojamentoVale(nomeVaga) {
+  const v = norm(nomeVaga ?? '')
+  return v ? ALOJAMENTO_SO_PARA.some(f => v.includes(f)) : null
+}
+
+/** As funções que podem ficar alojadas, para dizer em voz alta. */
+export const funcoesComAlojamento = () => [...ALOJAMENTO_SO_PARA]
 
 /**
  * Auxílio-transporte do estágio, além da bolsa.

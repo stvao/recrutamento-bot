@@ -9,7 +9,10 @@
  */
 
 import { norm, melhorMatch, contemAlgum } from './texto.js'
-import { vagasAtuais, cidadesAtuais, termosDasVagas, tetoDe, AUXILIO_TRANSPORTE_ESTAGIO } from './catalogo.js'
+import {
+  vagasAtuais, cidadesAtuais, termosDasVagas, tetoDe, alojamentoVale,
+  AUXILIO_TRANSPORTE_ESTAGIO,
+} from './catalogo.js'
 
 // ─── Base de conhecimento ────────────────────────────────────────────────────
 // As vagas vêm do RH (ver vagas.js). Antes moravam aqui, com salário escrito
@@ -132,7 +135,7 @@ function faixaSalarial(v) {
   if (!v.salario) return 'a combinar'
   const teto = tetoDe(v.nome)
   return teto
-    ? `${fmtMoeda(v.salario)} (inicial — com experiência comprovada pode chegar a ${fmtMoeda(teto)})`
+    ? `${fmtMoeda(v.salario)} sem experiência comprovada, e ${fmtMoeda(teto)} para quem tem experiência comprovada em carteira`
     : fmtMoeda(v.salario)
 }
 
@@ -232,6 +235,19 @@ export function responderFAQ(msg, estado = {}) {
     return { texto: 'A empresa fornece o almoço na obra. Quem fica no alojamento tem também café da manhã e janta. 🍽️' }
   }
   if (temAlguma(msg, ['alojamento', 'moradia', 'dormir', 'ficar', 'hospeda', 'morar', 'estadia'])) {
+    /*
+      O alojamento depende da FUNÇÃO antes de depender da cidade.
+
+      Hoje só pedreiro fica alojado; ajudante precisa morar na cidade da obra
+      (dono, 12/09/2026). Dizer isso na primeira pergunta evita o pior
+      desfecho: o ajudante de outra cidade que só descobre na entrevista, e
+      viajou à toa.
+    */
+    const vagaEmJogo = matchVaga(msg)?.nome ?? estado.vaga ?? null
+    if (vagaEmJogo && alojamentoVale(vagaEmJogo) === false) {
+      return { texto: `O alojamento hoje é só para pedreiro. Para ${vagaEmJogo.toLowerCase()}, a gente contrata quem mora na cidade da obra. 🙂` }
+    }
+
     const cidades = cidadesAtuais()
     const comAlojamento = cidades.filter(c => c.alojamento).map(c => c.nome)
     const onde = comAlojamento.length ? ` Hoje o alojamento é em ${juntar(comAlojamento)}.` : ''
@@ -253,10 +269,22 @@ export function responderFAQ(msg, estado = {}) {
     return { texto: 'Funciona assim: a gente conversa aqui e eu já preencho a sua ficha. Depois o responsável te liga, e aí marcamos a entrevista. 🙂' }
   }
   if (temAlguma(msg, ['experiencia', 'precisa saber', 'sou iniciante', 'nunca trabalhei'])) {
-    const v = estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null
-    if (v && !v.profissional) return { texto: `Para ${v.nome} não é preciso experiência. 🙂` }
-    if (v && v.profissional) return { texto: `Para ${v.nome} é necessário ter experiência na função.` }
-    return { texto: `Para Servente não precisa de experiência, e Pedreiro precisa ter experiência na função. Para estágio não precisa de experiência, mas ${REQUISITO_ESTAGIO.charAt(0).toLowerCase()}${REQUISITO_ESTAGIO.slice(1)}` }
+    const v = matchVaga(msg) || (estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null)
+    /*
+      Experiência deixou de ser porta e virou FAIXA (dono, 12/09/2026): para
+      pedreiro e carpinteiro dá para começar sem experiência, e quem tem
+      carteira assinada na função entra na faixa maior. Dizer "precisa de
+      experiência" espantaria quem a empresa contrata.
+    */
+    if (v) {
+      const teto = tetoDe(v.nome)
+      if (teto && v.salario) {
+        return { texto: `Para ${v.nome} dá para começar sem experiência (${fmtMoeda(v.salario)}); com experiência comprovada em carteira, ${fmtMoeda(teto)}. 🙂` }
+      }
+      if (!v.profissional) return { texto: `Para ${v.nome} não é preciso experiência. 🙂` }
+      return { texto: `Para ${v.nome} é necessário ter experiência na função.` }
+    }
+    return { texto: `Para Servente não precisa de experiência. Para Pedreiro e Carpinteiro dá para começar sem, e quem tem experiência comprovada em carteira entra numa faixa maior. Para estágio, ${REQUISITO_ESTAGIO.charAt(0).toLowerCase()}${REQUISITO_ESTAGIO.slice(1)}` }
   }
   if (temAlguma(msg, ['cidade', 'onde tem', 'qual cidade', 'tem vaga em', 'regiao', 'local'])) {
     const c = matchCidade(msg)

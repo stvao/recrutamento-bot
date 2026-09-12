@@ -156,7 +156,7 @@ export function montarFatos({ vagas, cidades, jornada }) {
     const salario = typeof v.salario === 'number' ? reais(v.salario) : 'a combinar conforme experiência'
     const teto = typeof v.salario === 'number' ? tetoDe(v.nome) : null
     const faixa = teto
-      ? ` inicial; com experiência COMPROVADA pode chegar a ${reais(teto)} — quem define é o responsável na entrevista`
+      ? ` para quem NÃO tem experiência comprovada; ${reais(teto)} para quem tem experiência COMPROVADA EM CARTEIRA`
       : ''
     const exp = v.profissional ? ' (exige experiência na função)' : ' (não precisa de experiência)'
     return `- ${v.nome}: ${salario}${faixa}${exp}`
@@ -173,6 +173,11 @@ ${linhasVagas}
 
 CIDADES COM OBRA (todas estão contratando):
 ${linhasCidades}
+
+ALOJAMENTO: só nas cidades marcadas acima, e SÓ PARA PEDREIRO. Ajudante
+(servente) a empresa contrata quem MORA na cidade da obra — se a pessoa quer
+vaga de ajudante em cidade onde não mora, diga isso antes de qualquer outra
+coisa, para ela não viajar à toa.
 
 JORNADA: ${jornada}
 
