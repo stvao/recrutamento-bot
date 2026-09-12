@@ -31,6 +31,7 @@ import * as observacao from './observacao.js'
 import { criarFiltro } from './recebimento.js'
 import * as maoHumana from './mao-humana.js'
 import { criarAgrupador } from './rajada.js'
+import { transcrever, audioDisponivel } from './ia-audio.js'
 
 /** Onde a sessão fica guardada. */
 const PASTA_SESSAO = process.env.BAILEYS_SESSAO || join(process.cwd(), 'dados', 'whatsapp')
@@ -135,8 +136,8 @@ async function carregarGrupos() {
       const achado = [...nomeDoGrupo.entries()]
         .find(([jid, nome]) => jid === alvo || normalizar(nome) === normalizar(alvo))
       console.log(achado
-        ? `[whatsapp] ✅ grupo "${achado[1]}" encontrado (${achado[0]})`
-        : `[whatsapp] ⚠ NÃO achei nenhum grupo chamado "${alvo}" — confira o nome em GASTOS_GRUPOS`)
+        ?`[whatsapp]  grupo "${achado[1]}" encontrado (${achado[0]})`
+        : `[whatsapp]  NÃO achei nenhum grupo chamado "${alvo}" — confira o nome em GASTOS_GRUPOS`)
     }
   } catch (e) {
     console.warn('[whatsapp] não consegui listar os grupos:', e.message)
@@ -176,6 +177,21 @@ function anexoDaMensagem(msg) {
     }
   }
   return null
+}
+
+/**
+ * O áudio da mensagem, se houver.
+ *
+ * Separado do anexo de comprovante de propósito: comprovante é imagem ou
+ * PDF, e áudio não serve para o módulo de gastos. Aqui ele serve para
+ * conversar — 6% do que chega de candidato é áudio, e quem está na obra fala
+ * em vez de digitar.
+ */
+function audioDaMensagem(msg) {
+  const m = msg.message ?? {}
+  const a = m.audioMessage
+  if (!a) return null
+  return { tipo: a.mimetype || 'audio/ogg', tamanho: Number(a.fileLength ?? 0) }
 }
 
 /**
@@ -254,7 +270,7 @@ export async function conectar(aoReceber) {
     const { connection, lastDisconnect, qr } = u
 
     if (qr) {
-      console.log('\n📱 Leia este QR code no WhatsApp do número do robô:')
+      console.log('\n Leia este QR code no WhatsApp do número do robô:')
       console.log('   WhatsApp → Configurações → Aparelhos conectados → Conectar aparelho\n')
       qrcode.generate(qr, { small: true })
     }
@@ -262,7 +278,7 @@ export async function conectar(aoReceber) {
     if (connection === 'open') {
       conectado = true
       const meu = numeroDoJid(sock.user?.id)
-      console.log(`\n✅ WhatsApp conectado no número ${meu}. A Maria Vitória está atendendo.\n`)
+      console.log(`\n WhatsApp conectado no número ${meu}. A Maria Vitória está atendendo.\n`)
       carregarGrupos()
     }
 
@@ -274,7 +290,7 @@ export async function conectar(aoReceber) {
       // em laço só geraria erro infinito. Precisa ler o QR de novo.
       if (motivo === DisconnectReason.loggedOut) {
         console.error(
-          '\n❌ A sessão foi encerrada no celular.\n'
+          '\n A sessão foi encerrada no celular.\n'
           + `   Apague a pasta ${PASTA_SESSAO} e rode de novo para ler outro QR code.\n`,
         )
         return
@@ -325,7 +341,7 @@ export async function conectar(aoReceber) {
       const jid = msg.key.remoteJid
       const texto = textoDaMensagem(msg)
       if (foraDoAr) {
-        console.log(`[whatsapp] mensagem que chegou com o robô fora do ar — atendendo agora (${grupo ? 'grupo' : 'privado'})`)
+        console.log(`[whatsapp] mensagem que chegou com o robô fora do ar — atendendo agora (${grupo ?'grupo' : 'privado'})`)
       }
       const anexo = anexoDaMensagem(msg)
 
@@ -361,7 +377,23 @@ export async function conectar(aoReceber) {
       */
       const vaiServir = Boolean(anexo) && (grupo || gastos.autorizado(de, false))
 
-      if (pessoal && !vaiServir && !texto?.trim()) {
+      /*
+        Áudio: ouve, em vez de mandar a pessoa digitar.
+
+        A transcrição entra na conversa como se ela tivesse escrito — quem
+        conduz continua sendo o mesmo cérebro, com as mesmas regras.
+      */
+      let doAudio = null
+      const audio = pessoal && !texto?.trim() ? audioDaMensagem(msg) : null
+      if (audio && audioDisponivel() && recrutamentoLigado()) {
+        const bytes = await baixar(msg, audio.tamanho)
+        if (bytes) doAudio = await transcrever({ arquivo: bytes, tipo: audio.tipo })
+        console.log(doAudio
+          ?`[whatsapp] áudio ouvido (${doAudio.length} caracteres)`
+          : '[whatsapp] não consegui ouvir o áudio')
+      }
+
+      if (pessoal && !vaiServir && !texto?.trim() && !doAudio) {
         // Áudio, figurinha, ou uma foto que ela não tem como usar. Ela não
         // processa, mas ficar muda é pior: a pessoa acha que não chegou.
         //
@@ -369,7 +401,9 @@ export async function conectar(aoReceber) {
         // robô se metendo na conversa para dizer "só leio texto" a quem
         // mandou áudio é pior que o silêncio.
         if (recrutamentoLigado()) {
-          await responder(jid, 'Consigo ler só mensagem de texto, viu? Pode escrever aí que eu te ajudo. 🙂')
+          await responder(jid, audio
+            ?'não consegui ouvir seu áudio, pode escrever pra mim?'
+            : 'consigo ler só mensagem de texto, pode escrever pra mim?')
         }
         continue
       }
@@ -388,7 +422,7 @@ export async function conectar(aoReceber) {
           No grupo de comprovantes, não: lá cada foto é um lançamento, e
           juntar duas seria pior que responder duas vezes.
         */
-        let textoAtendido = texto?.trim() || null
+        let textoAtendido = texto?.trim() || doAudio || null
         if (!grupo && textoAtendido && !arquivo) {
           textoAtendido = await agrupar(jid, textoAtendido)
           if (textoAtendido === null) continue
@@ -507,8 +541,8 @@ async function observar(msg, type = 'notify') {
     const tipo = observacao.tipoDe(msg.message)
     if (!tipo) return
 
-    const autor = !msg.key.fromMe ? 'candidato'
-      : observacao.foiORobo(msg.key.id) ? 'robo' : 'empresa'
+    const autor = !msg.key.fromMe ?'candidato'
+      : observacao.foiORobo(msg.key.id) ?'robo' : 'empresa'
     // O robô já anotou o que ele mesmo mandou, na hora de enviar.
     if (autor === 'robo') return
 

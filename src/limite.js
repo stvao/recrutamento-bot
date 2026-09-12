@@ -77,7 +77,7 @@ export function registrar(numero, agora = Date.now()) {
 /** O que dizer a quem passou do limite. */
 export function textoDoAviso() {
   return 'Recebi bastante mensagem sua de uma vez e preciso de um tempinho '
-    + 'para acompanhar. Daqui a pouco eu te respondo, tá? 🙂'
+    + 'para acompanhar. Daqui a pouco eu te respondo, tá?'
 }
 
 /** Para os testes: começa do zero. */

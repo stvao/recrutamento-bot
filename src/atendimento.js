@@ -30,7 +30,7 @@ const LIMITE_HISTORICO = 20
 const EMPRESA = process.env.EMPRESA_NOME || 'KE Engenharia'
 
 const PRIMEIRA_MENSAGEM =
-  `Oi! Aqui é a Maria Vitória, do RH da ${EMPRESA}. 😊\n`
+  `Oi! Aqui é a Maria Vitória, do RH da ${EMPRESA}. \n`
   + 'Vi que você tem interesse nas nossas vagas. Me conta: qual função você procura?'
 
 /**
@@ -214,7 +214,7 @@ export async function atender(estado, mensagem) {
     estado: novo,
     resposta: saida.resposta,
     escalarHumano: Boolean(saida.precisaHumano) || perguntouSeEhIA,
-    motivoEscalada: perguntouSeEhIA ? 'perguntou_se_e_ia' : 'pediu_atendimento',
+    motivoEscalada: perguntouSeEhIA ?'perguntou_se_e_ia' : 'pediu_atendimento',
     ultimaMensagem: mensagem,
   }
 
@@ -244,15 +244,15 @@ export async function atender(estado, mensagem) {
         cidadePreferencia: novo.cidade,
         whatsapp: novo.whatsapp ?? null,
         tempoExperiencia: novo.tempoExperiencia
-          || (novo.temExperiencia === true ? 'Com experiência'
-            : novo.temExperiencia === false ? 'Sem experiência' : null),
+          || (novo.temExperiencia === true ?'Com experiência'
+            : novo.temExperiencia === false ?'Sem experiência' : null),
         bairro: novo.bairro ?? null,
         cidade: novo.cidadeMora ?? null,
         cep: novo.cep ?? null,
         dataNascimento: novo.dataNascimento ?? null,
         disponibilidadeInicio: novo.disponibilidadeInicio ?? null,
-        aceitaOutrasObras: novo.aceitaOutrasObras === 'sim' ? 'Sim'
-          : novo.aceitaOutrasObras === 'nao' ? 'Não' : null,
+        aceitaOutrasObras: novo.aceitaOutrasObras === 'sim' ?'Sim'
+          : novo.aceitaOutrasObras === 'nao' ?'Não' : null,
         tamanhoCamisa: novo.tamanhoCamisa ?? null,
         tamanhoBota: novo.tamanhoBota ?? null,
         contatoRecadoNome: novo.contatoRecadoNome ?? null,
@@ -260,14 +260,14 @@ export async function atender(estado, mensagem) {
         resumoExperiencia: [
           'Conversa por WhatsApp (Maria Vitória).',
           novo.resumo,
-          novo.temRegistro === true ? 'Já teve registro em carteira na função.'
-            : novo.temRegistro === false ? 'Nunca teve registro na função.' : null,
+          novo.temRegistro === true ?'Já teve registro em carteira na função.'
+            : novo.temRegistro === false ?'Nunca teve registro na função.' : null,
         ].filter(Boolean).join(' '),
         dadosBrutos: { origem: 'whatsapp-bot', historico: novo.historico },
       },
     }
     resultado.respostaFalha =
-      `${saida.resposta}\n\n(Tive um probleminha para salvar aqui no sistema. ` +
+      `${saida.resposta}\n\n(Tive um probleminha para salvar aqui no sistema.` +
       'Já avisei a equipe, pode deixar que a gente registra.)'
   }
 

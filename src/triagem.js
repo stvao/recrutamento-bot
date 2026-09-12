@@ -155,7 +155,7 @@ export function conferir(saida) {
     // lido por mais gente e guardado por mais tempo.
     console.warn(`[triagem] resposta descartada — continha ${proibido.join(', ')}`)
     return {
-      resposta: 'Deixa eu chamar alguém da equipe pra falar com você. 🙂',
+      resposta: 'Deixa eu chamar alguém da equipe pra falar com você.',
       intencao: 'informacao',
       pedindoNome: false,
       precisaHumano: true,
@@ -175,7 +175,7 @@ export function conferir(saida) {
 
 /** A saudação de quem não disse nada além de "oi". */
 export function saudacao() {
-  return `Oi! Aqui é do RH da ${EMPRESA}. 😊\nEm que posso ajudar?`
+  return `Oi! Aqui é do RH da ${EMPRESA}. \nEm que posso ajudar?`
 }
 
 /**
@@ -203,7 +203,7 @@ export async function atender({ texto, historico = [], esperandoNome = false }) 
   // Sinais fortes não precisam de modelo: respondem na hora, sempre igual.
   if (JA_TRABALHA.test(t)) {
     return {
-      resposta: 'Ah, então você é da equipe! Me diz seu nome completo que eu localizo seu cadastro. 🙂',
+      resposta: 'Ah, então você é da equipe! Me diz seu nome completo que eu localizo seu cadastro.',
       intencao: 'ja_trabalha',
       pedindoNome: true,
     }
@@ -217,7 +217,7 @@ export async function atender({ texto, historico = [], esperandoNome = false }) 
     // a pessoa quer vaga.
     if (SO_CUMPRIMENTO.test(t)) return { resposta: saudacao(), intencao: 'nao_sei_ainda' }
     return {
-      resposta: 'Deixa eu chamar alguém da equipe pra te atender. 🙂',
+      resposta: 'Deixa eu chamar alguém da equipe pra te atender.',
       intencao: 'informacao',
       escalarHumano: true,
       motivoEscalada: 'primeiro contato sem IA',

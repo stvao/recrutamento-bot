@@ -69,8 +69,8 @@ const ASSUNTO_PESSOAL = new RegExp([
 /**
  * Isto é um PEDIDO, e não uma pergunta?
  *
- * A diferença decide quem responde. "Que horas eu entro?" é um fato, e o
- * robô sabe. "Preciso trocar meu horário" é um pedido, e quem decide é
+ * A diferença decide quem responde."Que horas eu entro?" é um fato, e o
+ * robô sabe."Preciso trocar meu horário" é um pedido, e quem decide é
  * gente — responder com a tabela da jornada seria ignorar o que a pessoa
  * falou, que é a forma mais rápida de ela desistir de escrever de novo.
  */
@@ -87,7 +87,7 @@ function respostaFixa(texto, ficha) {
   }
   if (/(onde (fica|é|e) a obra|endereco|endereço|como chego|localiza)/.test(t)) {
     return ficha.obraEndereco
-      ? `A obra ${ficha.obra ?? ''} fica em: ${ficha.obraEndereco}`.trim()
+      ?`A obra ${ficha.obra ?? ''} fica em: ${ficha.obraEndereco}`.trim()
       : 'Não tenho o endereço aqui — o encarregado da obra te passa certinho.'
   }
   if (/(epi|capacete|bota|botina|luva|uniforme|camisa)/.test(t)) {
@@ -113,7 +113,7 @@ const EMPRESA = process.env.EMPRESA_NOME || 'KE Engenharia'
 function instrucoes(ficha) {
   return `Você é do RH da ${EMPRESA}, uma construtora que reforma escolas
 estaduais em São Paulo. Está conversando por WhatsApp com ${ficha.primeiroNome},
-que TRABALHA na empresa${ficha.funcao ? ` como ${ficha.funcao}` : ''}${ficha.obra ? `, na obra ${ficha.obra}` : ''}.
+que TRABALHA na empresa${ficha.funcao ?` como ${ficha.funcao}` : ''}${ficha.obra ?`, na obra ${ficha.obra}` : ''}.
 
 COMO VOCÊ FALA
 - Português do Brasil, informal e respeitoso, como gente do RH fala.
@@ -145,8 +145,8 @@ ${JORNADA_TEXTO}
 EPI e uniforme: fornecidos pela empresa, pedidos ao encarregado da obra.
 Atestado: entregar em até 48 horas ao encarregado.
 Férias e folga: pedidos ao encarregado, que fala com o RH.
-${ficha.obra ? `Obra dele: ${ficha.obra}.` : ''}
-${ficha.obraEndereco ? `Endereço da obra: ${ficha.obraEndereco}.` : ''}`
+${ficha.obra ?`Obra dele: ${ficha.obra}.` : ''}
+${ficha.obraEndereco ?`Endereço da obra: ${ficha.obraEndereco}.` : ''}`
 }
 
 const ESQUEMA = {
@@ -198,8 +198,8 @@ export function conferir(saida) {
 
 /** A resposta padrão para tudo que é pessoal. */
 export function respostaDeAssuntoPessoal(nome) {
-  return `${nome ? `${nome}, ` : ''}isso eu não consigo ver por aqui — é com uma pessoa do RH. `
-    + 'Já avisei a equipe, vão falar com você. 👍'
+  return `${nome ?`${nome}, ` : ''}isso eu não consigo ver por aqui — é com uma pessoa do RH.`
+    + 'Já avisei a equipe, vão falar com você.'
 }
 
 /**
@@ -225,7 +225,7 @@ export async function atender({ ficha, texto, historico = [] }) {
 
   if (!iaDisponivel()) {
     return {
-      resposta: `${nome ? `Oi, ${nome}! ` : ''}Deixa eu chamar alguém do RH pra te responder direitinho.`,
+      resposta: `${nome ?`Oi, ${nome}!` : ''}Deixa eu chamar alguém do RH pra te responder direitinho.`,
       escalarHumano: true,
       motivoEscalada: 'sem IA disponível',
     }
@@ -239,7 +239,7 @@ export async function atender({ ficha, texto, historico = [] }) {
 
   if (!saida) {
     return {
-      resposta: `${nome ? `Oi, ${nome}! ` : ''}Vou chamar alguém do RH pra falar com você, tá?`,
+      resposta: `${nome ?`Oi, ${nome}!` : ''}Vou chamar alguém do RH pra falar com você, tá?`,
       escalarHumano: true,
       motivoEscalada: 'modelo não respondeu',
     }

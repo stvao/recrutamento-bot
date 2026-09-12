@@ -61,7 +61,7 @@ ok('o download depende disso', /vaiServir \? await baixar\(/.test(fonte))
 // Quem manda foto sem legenda no privado tem que receber resposta. Sem esta
 // ordem, a foto do desconhecido deixaria de ser baixada E de ser respondida.
 const posVaiServir = fonte.indexOf('const vaiServir =')
-const posResposta = fonte.indexOf('Consigo ler s')
+const posResposta = fonte.indexOf('ler só mensagem de texto')
 ok('a decisão vem antes da resposta padrão',
   posVaiServir > 0 && posResposta > 0 && posVaiServir < posResposta)
 
