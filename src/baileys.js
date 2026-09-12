@@ -30,6 +30,7 @@ import { recrutamentoLigado } from './config.js'
 import * as observacao from './observacao.js'
 import { criarFiltro } from './recebimento.js'
 import * as maoHumana from './mao-humana.js'
+import { criarAgrupador } from './rajada.js'
 
 /** Onde a sessão fica guardada. */
 const PASTA_SESSAO = process.env.BAILEYS_SESSAO || join(process.cwd(), 'dados', 'whatsapp')
@@ -287,6 +288,9 @@ export async function conectar(aoReceber) {
   // Um filtro por conexão: lembra o que já foi atendido (ver recebimento.js).
   const deveAtender = criarFiltro()
 
+  // Espera a pessoa terminar de escrever antes de responder (ver rajada.js).
+  const agrupar = criarAgrupador()
+
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     // 'notify' é o que chega agora; 'append' inclui o que chegou com o robô
     // FORA DO AR. Antes o 'append' era descartado inteiro, e o comprovante
@@ -372,13 +376,31 @@ export async function conectar(aoReceber) {
 
       try {
         const arquivo = vaiServir ? await baixar(msg, anexo.tamanho) : null
+
+        /*
+          Na conversa com uma pessoa, espera a rajada terminar.
+
+          Ninguém escreve um parágrafo no WhatsApp: escreve em pedaços. Sem
+          isto o robô responde CADA pedaço — um candidato mandou o telefone,
+          o nome e "minha filha" em dez segundos e recebeu a mesma frase de
+          encerramento três vezes.
+
+          No grupo de comprovantes, não: lá cada foto é um lançamento, e
+          juntar duas seria pior que responder duas vezes.
+        */
+        let textoAtendido = texto?.trim() || null
+        if (!grupo && textoAtendido && !arquivo) {
+          textoAtendido = await agrupar(jid, textoAtendido)
+          if (textoAtendido === null) continue
+        }
+
         const resposta = await aoReceber({
           canal: 'whatsapp',
           de,
           chat: grupo ? jid : de,
           chatNome: grupo ? (nomeDoGrupo.get(jid) ?? null) : null,
           ehGrupo: grupo,
-          texto: texto?.trim() || null,
+          texto: textoAtendido,
           arquivo,
           tipo: anexo?.tipo ?? null,
           nomeArquivo: anexo?.nome ?? null,
@@ -513,8 +535,32 @@ async function observar(msg, type = 'notify') {
 }
 
 /** Envia, com a pausa e o "digitando…" que fazem parecer gente. */
+/**
+ * O que o robô acabou de dizer em cada conversa.
+ *
+ * Rede de segurança contra repetição: duas mensagens iguais seguidas, no
+ * mesmo minuto, nunca são intenção — são duas entregas do mesmo raciocínio.
+ * No grupo de comprovantes NÃO vale: lá duas fotos iguais geram, de
+ * propósito, duas confirmações iguais.
+ */
+const ultimaFalada = new Map()
+const REPETICAO_MS = 120_000
+
+function jaFalouIgual(jid, texto, agora = Date.now()) {
+  if (jid.endsWith('@g.us')) return false
+  const anterior = ultimaFalada.get(jid)
+  if (anterior && anterior.texto === texto && agora - anterior.em < REPETICAO_MS) return true
+  ultimaFalada.set(jid, { texto, em: agora })
+  if (ultimaFalada.size > 2000) ultimaFalada.delete(ultimaFalada.keys().next().value)
+  return false
+}
+
 async function responder(jid, texto, { citar = null, rapido = false } = {}) {
   if (!sock) return { ok: false }
+  if (jaFalouIgual(jid, texto)) {
+    console.log('[whatsapp] mesma frase de novo no mesmo minuto — não repeti.')
+    return { ok: true, id: null, repetida: true }
+  }
   try {
     // A pausa existe para o robô não se denunciar na conversa com candidato.
     // No grupo interno todo mundo sabe que é robô, e demorar 10 segundos
