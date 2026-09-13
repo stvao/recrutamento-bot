@@ -26,6 +26,8 @@ const CAMPOS_DA_FICHA = [
   'bairro', 'cidade', 'cep', 'dataNascimento', 'disponibilidadeInicio',
   'aceitaOutrasObras', 'tamanhoCamisa', 'tamanhoBota',
   'contatoRecadoNome', 'contatoRecadoTelefone',
+  // CPF é o cadastro único no RH; os dois são opcionais para o candidato.
+  'cpf', 'rg',
 ]
 
 /**
@@ -79,6 +81,31 @@ export async function enviarCandidatura(dados) {
     }
   }
   return { ok: false, motivo: 'desconhecido' }
+}
+
+/**
+ * Anexa à candidatura um documento que o candidato mandou.
+ *
+ * 404 quer dizer "ainda não tem candidatura deste número": quem chama guarda
+ * o documento e manda de novo depois que a ficha for registrada.
+ */
+export async function enviarDocumento({ whatsapp, tipo, nome, arquivo, extraido }) {
+  if (!RH_API_URL || !RH_API_TOKEN) return { ok: false, motivo: 'nao-configurado' }
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/candidatura/documento`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RH_API_TOKEN}` },
+      body: JSON.stringify({ whatsapp, tipo, nome, extraido, base64: Buffer.from(arquivo).toString('base64') }),
+      signal: AbortSignal.timeout(20000),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (r.ok) return { ok: true, ...j }
+    if (r.status !== 404) console.error('[rh-client] documento recusado pelo RH:', r.status, j.error)
+    return { ok: false, status: r.status }
+  } catch (e) {
+    console.error('[rh-client] documento não enviado:', e.message)
+    return { ok: false, motivo: e.message }
+  }
 }
 
 /**

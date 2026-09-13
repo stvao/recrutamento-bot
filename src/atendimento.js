@@ -20,6 +20,7 @@ import {
 import { conversar, montarFatos, iaDisponivel } from './ia.js'
 import { vagasAtuais, cidadesAtuais } from './catalogo.js'
 import { norm } from './texto.js'
+import { cpfValido } from './ia-documento.js'
 
 /**
  * Quantas mensagens da conversa mandar junto.
@@ -134,6 +135,13 @@ export function oQueJaSabe(estado = {}, { paradoHa = null } = {}) {
   if (tem(e.contatoRecadoNome) || tem(e.contatoRecadoTelefone)) sabido.push('contato de recado: já informado')
   else falta.push('um contato de recado (nome e telefone de alguém)')
 
+  // CPF e RG: opcionais (regra do dono, 13/09/2026). Pede uma vez, depois do
+  // nome, e não insiste. O número nunca vai para o modelo.
+  const opcional = []
+  if (tem(e.cpf)) sabido.push('CPF: já informado')
+  else if (e.recusouDocumentos) sabido.push('CPF e RG: preferiu não informar — NÃO peça de novo')
+  else if (tem(e.nome)) opcional.push('CPF e RG, ou foto do documento — opcional, pedir uma vez só')
+
   const partes = []
 
   if (paradoHa && paradoHa > 6 * 3600_000) {
@@ -154,7 +162,11 @@ export function oQueJaSabe(estado = {}, { paradoHa = null } = {}) {
     : 'A FICHA ESTÁ COMPLETA. Não faça mais nenhuma pergunta de ficha. Responda só o que\n'
       + 'a pessoa perguntar; se ela só agradecer ou se despedir, responda curto e encerre.')
 
-  return { sabido, falta, texto: partes.join('\n\n') }
+  if (opcional.length) {
+    partes.push(`OPCIONAL (peça uma vez, sem insistir; se ela não quiser, siga):\n${opcional.map(x => `- ${x}`).join('\n')}`)
+  }
+
+  return { sabido, falta, opcional, texto: partes.join('\n\n') }
 }
 
 /** Um nome completo de verdade tem nome e sobrenome, e não é frase. */
@@ -293,6 +305,11 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
     temExperiencia: simNaoOuNulo(saida.temExperiencia) ?? estado.temExperiencia ?? null,
     temRegistro:    simNaoOuNulo(saida.temRegistro) ?? estado.temRegistro ?? null,
     nome: nomeValido(saida.nomeCompleto) ?? estado.nome ?? null,
+    // CPF só vale com dígito verificador certo: número digitado errado não
+    // vira cadastro único de ninguém.
+    cpf: cpfValido(saida.cpf) ? String(saida.cpf).replace(/\D/g, '') : estado.cpf ?? null,
+    rg: /^[\dXx.\-\s]{5,15}$/.test(saida.rg?.trim() ?? '') ? saida.rg.trim() : estado.rg ?? null,
+    recusouDocumentos: saida.recusouDocumentos === true || Boolean(estado.recusouDocumentos),
     resumo: saida.resumoExperiencia?.trim() || estado.resumo || null,
     // Campos da ficha, em texto livre: valem como a pessoa falou, e quem
     // confere é o RH ao chamar para entrevista.
@@ -357,6 +374,8 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
         tamanhoBota: novo.tamanhoBota ?? null,
         contatoRecadoNome: novo.contatoRecadoNome ?? null,
         contatoRecadoTelefone: novo.contatoRecadoTelefone ?? null,
+        cpf: novo.cpf ?? null,
+        rg: novo.rg ?? null,
         resumoExperiencia: [
           'Conversa por WhatsApp (Maria Vitória).',
           novo.resumo,

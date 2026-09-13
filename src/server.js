@@ -23,7 +23,8 @@ import {
 } from './store.js'
 import { getVagas, origemDaLista, intervaloDeAtualizacao } from './catalogo.js'
 import { enviarMensagem, parseWebhook, baixarMidiaCloud } from './connectors.js'
-import { enviarCandidatura, avisarRH, quemE } from './rh-client.js'
+import { enviarCandidatura, enviarDocumento, avisarRH, quemE } from './rh-client.js'
+import { lerDocumentoCandidato, MAX_DOCUMENTO_BYTES } from './ia-documento.js'
 import * as funcionario from './funcionario.js'
 import * as triagem from './triagem.js'
 import * as gastos from './gastos.js'
@@ -316,10 +317,18 @@ async function rotear(msg) {
   }
 
 
-  // Arquivo de candidato: ela não lê, mas ficar muda faz a pessoa achar que
-  // não chegou.
-  if (msg.arquivo && !msg.texto) {
-    return 'Recebi seu arquivo, mas aqui eu consigo ler só texto. Pode escrever pra mim? 🙂'
+  /*
+    Arquivo de candidato: currículo, carteira de trabalho, RG, CPF.
+
+    Antes a resposta era "consigo ler só texto" e o arquivo era jogado fora.
+    Agora ele é lido e anexado à candidatura no RH. Com legenda, a legenda
+    segue a conversa normal e o arquivo é anexado em silêncio; onde uma
+    pessoa da empresa já está atendendo, também em silêncio.
+  */
+  if (msg.arquivo) {
+    const calado = Boolean(msg.texto) || maoHumana.atendidaPorGente(msg.de).atendida
+    if (calado) receberDocumento(msg, { calado: true }).catch(e => console.error('[documento]', e.message))
+    else return receberDocumento(msg)
   }
   if (!msg.texto) return null
 
@@ -394,6 +403,73 @@ async function rotear(msg) {
   if (ficha?.tipo === 'candidato') return atenderCandidatoConhecido(msg, ficha)
 
   return primeiroContato(msg)
+}
+
+/**
+ * Documento que chegou antes de a ficha existir no RH.
+ *
+ * Quem manda o currículo na primeira mensagem ainda não tem candidatura: o
+ * RH responde 404. Fica guardado aqui até a ficha ser registrada. Na
+ * memória, e com teto — o servidor tem 911 MB e divide a máquina com o RH;
+ * perder um currículo num reinício é melhor que derrubar os dois.
+ */
+const documentosGuardados = new Map()
+const PRAZO_GUARDADO_MS = 24 * 3600_000
+const MAX_GUARDADOS = 20
+
+function guardarDocumento(de, doc) {
+  const agora = Date.now()
+  for (const [k, lista] of documentosGuardados) {
+    if (lista.every(x => agora - x.em > PRAZO_GUARDADO_MS)) documentosGuardados.delete(k)
+  }
+  const total = [...documentosGuardados.values()].reduce((s, l) => s + l.length, 0)
+  if (total >= MAX_GUARDADOS) return false
+  const lista = (documentosGuardados.get(de) ?? []).slice(-2)
+  lista.push({ doc, em: agora })
+  documentosGuardados.set(de, lista)
+  return true
+}
+
+async function mandarDocumentosGuardados(de) {
+  const lista = documentosGuardados.get(de)
+  if (!lista) return
+  documentosGuardados.delete(de)
+  for (const { doc, em } of lista) {
+    if (Date.now() - em < PRAZO_GUARDADO_MS) await enviarDocumento(doc)
+  }
+}
+
+async function receberDocumento(msg, { calado = false } = {}) {
+  if (msg.arquivo.length > MAX_DOCUMENTO_BYTES) {
+    return calado ? null : 'esse arquivo ficou grande pra mim, consegue mandar uma foto?'
+  }
+  // Funcionário mandando documento é assunto do RH, não do recrutamento.
+  const ficha = await quemE({ whatsapp: msg.de }).catch(() => null)
+  if (ficha?.tipo === 'funcionario') return null
+
+  const lido = await lerDocumentoCandidato({ arquivo: msg.arquivo, tipo: msg.tipo })
+  const tipo = lido?.tipo ?? 'outro'
+
+  // A conversa fica sabendo: não pede CPF de quem acabou de mandar o RG.
+  const estado = getEstado(msg.de)
+  if (estado && (estado.modo === 'ia' || estado.modo === 'roteiro')) {
+    setEstado(msg.de, {
+      ...estado,
+      documentos: [...(estado.documentos ?? []), tipo].slice(-10),
+      cpf: estado.cpf ?? lido?.cpf ?? null,
+      rg: estado.rg ?? lido?.rg ?? null,
+    })
+  }
+
+  const doc = { whatsapp: msg.de, tipo, nome: msg.nomeArquivo, arquivo: msg.arquivo, extraido: lido }
+  const env = await enviarDocumento(doc)
+  const guardado = !env.ok && env.status === 404 && guardarDocumento(msg.de, doc)
+  console.log(`[documento] ${discreto(msg.de)}: ${tipo} — ${env.ok ? 'anexado à candidatura' : guardado ? 'guardado até a ficha' : 'não enviado'}`)
+
+  if (calado) return null
+  const oQue = { curriculo: 'seu currículo', ctps: 'a foto da carteira', rg: 'o documento', cpf: 'o documento', cnh: 'o documento' }[tipo]
+  const recebi = oQue ? `recebi ${oQue}, obrigada` : 'recebi aqui, obrigada'
+  return estado?.vaga ? recebi : `${recebi}. qual vaga vc tá procurando?`
 }
 
 /**
@@ -632,6 +708,8 @@ async function aplicarResultado(from, r, text) {
       // de "abandonou" nas métricas; sem isso, toda conclusão viraria abandono
       // quando a conversa expirasse sozinha.
       if (r.acao.primeiraVez) marcarConcluida(from)
+      // O currículo que chegou antes da ficha agora tem onde ficar.
+      mandarDocumentosGuardados(from).catch(e => console.error('[documento]', e.message))
       return r.resposta
     }
     console.warn('[processar] candidatura não registrada:', env)

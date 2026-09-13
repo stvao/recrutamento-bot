@@ -398,7 +398,9 @@ export async function conectar(aoReceber) {
         A pergunta é respondida aqui em cima porque a resposta muda duas
         coisas: se vale a pena baixar, e o que dizer a quem mandou.
       */
-      const vaiServir = Boolean(anexo) && (grupo || gastos.autorizado(de, false))
+      // No privado, com o recrutamento ligado, o arquivo também serve: é o
+      // currículo, a carteira de trabalho ou o documento do candidato.
+      const vaiServir = Boolean(anexo) && (grupo || gastos.autorizado(de, false) || recrutamentoLigado())
 
       /*
         Áudio: ouve, em vez de mandar a pessoa digitar.

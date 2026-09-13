@@ -116,6 +116,19 @@ const arquivoDoMes = (quando) => {
 let ultimaLimpeza = 0
 
 /**
+ * CPF e RG escritos na conversa saem do arquivo de observação.
+ *
+ * A observação serve para aprender COMO as pessoas falam; o número do
+ * documento não ensina nada e só aumenta o que vaza se o arquivo vazar. O
+ * CPF segue para o RH pela ficha, que é onde ele deve estar.
+ */
+export function semDocumento(texto) {
+  return texto
+    .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '[cpf]')
+    .replace(/\b\d{1,2}\.?\d{3}\.?\d{3}-?[\dXx]\b/g, '[rg]')
+}
+
+/**
  * Anota uma mensagem.
  *
  * `chave` identifica a conversa (o endereço do chat); `final` são os quatro
@@ -141,7 +154,7 @@ export function anotar({ chave, final = null, autor, tipo, texto = null, em = Da
       final: final ? String(final).slice(-4) : null,
       autor,
       tipo,
-      texto: texto ? String(texto).slice(0, MAX_TEXTO) : null,
+      texto: texto ? semDocumento(String(texto)).slice(0, MAX_TEXTO) : null,
     }
     appendFileSync(arquivoDoMes(em), JSON.stringify(registro) + '\n', 'utf8')
     return true

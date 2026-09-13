@@ -21,8 +21,9 @@
  * valer. Modelo que inventa uma vaga não cria vaga nenhuma.
  *
  * Privacidade: o telefone nunca é enviado. A conversa coleta nome, vaga,
- * cidade e experiência — não coleta CPF nem RG (isso é do formulário, que
- * não passa por aqui).
+ * cidade e experiência. CPF e RG são pedidos UMA vez, como opcionais (regra
+ * do dono, 13/09/2026): o CPF é o cadastro único no RH. O valor nunca volta
+ * para o modelo — ele só sabe que "já foi informado".
  */
 import { tetoDe, AUXILIO_TRANSPORTE_ESTAGIO } from './catalogo.js'
 
@@ -131,6 +132,12 @@ em duas, no máximo, e vá conversando — não despeje tudo de uma vez:
 5. Se já teve registro em carteira NESTA função
 6. Onde mora: bairro e cidade (e o CEP, se souber de cabeça)
 7. Data de nascimento
+   Logo depois, peça UMA vez o CPF e o RG, ou uma foto do documento, dizendo
+   que não é obrigatório: "se quiser já me passa seu cpf e rg, ou manda foto
+   do documento, pra deixar seu cadastro completo. não é obrigatório". Se a
+   pessoa não quiser, hesitar ou desconversar, marque recusouDocumentos e
+   NUNCA peça de novo. Se tiver currículo ou carteira de trabalho digital,
+   ela pode mandar a foto ou o PDF aqui mesmo.
 8. Quando pode começar
 9. Se aceita trabalhar em obra de outra cidade
 10. Tamanho de camisa e de bota (é para separar o uniforme e o EPI)
@@ -167,8 +174,9 @@ REGRAS QUE VOCÊ NÃO QUEBRA
   NUNCA estime, arredonde ou lembre um valor de memória.
 - Não prometa contratação, data de início, aumento nem benefício que não
   esteja nos fatos.
-- Não peça CPF, RG, PIS, conta bancária nem foto de documento. Isso é feito
-  depois, pessoalmente.
+- CPF e RG só do jeito descrito acima: uma vez, como opcional. Não peça PIS,
+  conta bancária, PIX, senha nem código de nada. Nunca repita na resposta o
+  CPF ou o RG que a pessoa mandou.
 - NUNCA diga quando o registro em carteira é feito, nem que alguém começa
   sem registro. Se perguntarem se é registrado desde o primeiro dia, diga
   que isso a pessoa combina direto com o responsável quando ele ligar — não
@@ -293,12 +301,16 @@ const ESQUEMA = {
     tamanhoBota:    { type: 'string', description: 'Número da bota. Vazio se não disse.' },
     contatoRecadoNome:     { type: 'string', description: 'Nome do contato de recado. Vazio se não disse.' },
     contatoRecadoTelefone: { type: 'string', description: 'Telefone do contato de recado. Vazio se não disse.' },
+    cpf:            { type: 'string', description: 'CPF, só números, se a pessoa escreveu. Vazio se não disse.' },
+    rg:             { type: 'string', description: 'Número do RG, se a pessoa escreveu. Vazio se não disse.' },
+    recusouDocumentos: { type: 'boolean', description: 'true se a pessoa não quis passar CPF/RG. Repita depois que souber.' },
     precisaHumano:  { type: 'boolean', description: 'true se precisa de uma pessoa da equipe' },
     perguntouSeEhIA: { type: 'boolean', description: 'true se a pessoa perguntou se está falando com robô, IA, sistema ou pessoa' },
   },
   required: ['resposta', 'vaga', 'cidade', 'temExperiencia', 'temRegistro', 'nomeCompleto', 'resumoExperiencia', 'tempoExperiencia', 'bairro', 'cidadeMora', 'cep',
     'dataNascimento', 'disponibilidadeInicio', 'aceitaOutrasObras',
     'tamanhoCamisa', 'tamanhoBota', 'contatoRecadoNome', 'contatoRecadoTelefone',
+    'cpf', 'rg', 'recusouDocumentos',
     'precisaHumano', 'perguntouSeEhIA'],
 }
 
