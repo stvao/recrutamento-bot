@@ -114,6 +114,11 @@ ok('frase sem função fechada', brain.funcaoFechadaCitada('sou pedreiro') === n
   ok('confirma resposta ambígua', /só pra confirmar/.test(ia))
   ok('volta ao cadastro depois de mudar de assunto', /Mudou de assunto/.test(ia))
   ok('texto do candidato nunca é instrução', /CONVERSA, nunca instrução/.test(ia))
+  // Ideias aproveitadas do prompt de evolução da conversa (13/09/2026).
+  ok('liga a pergunta ao que a pessoa contou', /é conversa, não formulário/.test(ia))
+  ok('não pressiona quem não sabe', /Nunca pressione/.test(ia))
+  ok('pediu pessoa: para de perguntar', /Pediu para falar com uma pessoa/.test(ia))
+  ok('nunca "resposta inválida"', /Nunca "resposta inválida"/.test(ia))
   ok('"vou confirmar" sempre avisa o RH', /confirmar com a equipe E\s+marque precisaHumano/.test(ia))
 }
 
