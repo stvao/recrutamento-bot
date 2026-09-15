@@ -15,7 +15,7 @@
  */
 process.env.GEMINI_API_KEY = ''
 
-const { atender, conferir, ehAssuntoPessoal } = await import('./funcionario.js')
+const { atender, conferir, ehAssuntoPessoal } = await import('../src/funcionario.js')
 
 let falhas = 0
 function ok(desc, cond) {

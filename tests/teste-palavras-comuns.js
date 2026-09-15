@@ -13,8 +13,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-const { melhorMatch } = await import('./texto.js')
-const brain = await import('./brain.js')
+const { melhorMatch } = await import('../src/texto.js')
+const brain = await import('../src/brain.js')
 
 let falhas = 0
 function ok(nome, condicao) {
@@ -86,7 +86,7 @@ ok('frase sem função fechada', brain.funcaoFechadaCitada('sou pedreiro') === n
 
 // ── A reserva só oferece o que está aberto ─────────────────────────────
 {
-  const nomes = (await import('./catalogo.js')).vagasAtuais().map(v => v.nome)
+  const nomes = (await import('../src/catalogo.js')).vagasAtuais().map(v => v.nome)
   ok('reserva sem armador, serralheiro e eletricista',
     !nomes.includes('Armador') && !nomes.includes('Serralheiro') && !nomes.includes('Eletricista'))
   ok('reserva com as quatro vagas abertas',
@@ -96,8 +96,8 @@ ok('frase sem função fechada', brain.funcaoFechadaCitada('sou pedreiro') === n
 // ── "Só leio texto" só para áudio que falhou ───────────────────────────
 {
   const aqui = dirname(fileURLToPath(import.meta.url))
-  const baileys = readFileSync(join(aqui, 'baileys.js'), 'utf8')
-  const ia = readFileSync(join(aqui, 'ia.js'), 'utf8')
+  const baileys = readFileSync(join(aqui, '..', 'src', 'baileys.js'), 'utf8')
+  const ia = readFileSync(join(aqui, '..', 'src', 'ia.js'), 'utf8')
   // Entre aspas simples: como TEXTO DE RESPOSTA. O comentário que explica por
   // que a frase saiu a cita entre aspas duplas, e deve continuar lá.
   ok('a frase "consigo ler só mensagem de texto" saiu', !/'consigo ler só mensagem de texto/.test(baileys))

@@ -25,7 +25,7 @@ function ok(nome, condicao) {
 }
 
 const AQUI = dirname(fileURLToPath(import.meta.url))
-const fonte = readFileSync(join(AQUI, 'baileys.js'), 'utf8')
+const fonte = readFileSync(join(AQUI, '..', 'src', 'baileys.js'), 'utf8')
 
 // ── A regra existe no código ───────────────────────────────────────────
 ok('o limite de tamanho está definido', /MAX_ARQUIVO_BYTES\s*=/.test(fonte))

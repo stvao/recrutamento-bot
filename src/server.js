@@ -19,11 +19,17 @@ import { iniciarAtendimento as iniciar, atender } from './atendimento.js'
 import { iaDisponivel } from './ia.js'
 import {
   getEstado, setEstado, limpar, getAbandonada,
-  marcarConcluida, marcarEscalada, metricas,
+  marcarConcluida, marcarEscalada, metricas, sessoesParaLembrete, marcarLembrado,
 } from './store.js'
 import { getVagas, origemDaLista, intervaloDeAtualizacao } from './catalogo.js'
 import { enviarMensagem, parseWebhook, baixarMidiaCloud } from './connectors.js'
-import { enviarCandidatura, enviarDocumento, avisarRH, quemE } from './rh-client.js'
+import {
+  enviarCandidatura, enviarDocumento, avisarRH, quemE,
+  pendenciasDe, salvarPix, quemLembrarDocumentos, marcarLembreteDocumentos,
+} from './rh-client.js'
+import * as guardados from './documentos-guardados.js'
+import * as lembrete from './lembrete-cadastro.js'
+import { chavePixNoTexto, respostaDaPendencia } from './contratacao.js'
 import { lerDocumentoCandidato, MAX_DOCUMENTO_BYTES } from './ia-documento.js'
 import * as funcionario from './funcionario.js'
 import * as triagem from './triagem.js'
@@ -249,6 +255,26 @@ app.post('/simular', async (req, res) => {
 })
 
 /**
+ * O RH pede documentos a um aprovado: o robô manda a mensagem.
+ *
+ * Mesma porta do simulador (localhost ou o token compartilhado). O texto
+ * vem pronto do RH, que é quem sabe o que foi pedido.
+ */
+app.post('/enviar-pedido', async (req, res) => {
+  if (!simuladorAutorizado(req)) return res.sendStatus(404)
+  const { whatsapp, texto } = req.body || {}
+  const numero = String(whatsapp ?? '').replace(/\D/g, '')
+  if (numero.length < 10 || typeof texto !== 'string' || !texto.trim() || texto.length > 1000) {
+    return res.status(422).json({ ok: false, error: 'whatsapp e texto são obrigatórios' })
+  }
+  if (!recrutamentoLigado()) return res.status(503).json({ ok: false, error: 'O recrutamento está desligado no robô.' })
+  const destino = numero.length <= 11 ? `55${numero}` : numero
+  const r = await enviarMensagem(destino, texto.trim())
+  console.log(`[contratacao] pedido de documentos para ${discreto(destino)}: ${r?.ok ? 'enviado' : 'falhou'}`)
+  res.status(r?.ok ? 200 : 502).json({ ok: Boolean(r?.ok), error: r?.ok ? undefined : 'WhatsApp não enviou (desconectado?)' })
+})
+
+/**
  * Quem atende esta mensagem.
  *
  * O robô tem dois módulos, e a regra de qual atende é de SEGURANÇA, não de
@@ -400,6 +426,10 @@ async function rotear(msg) {
   }
 
   if (ficha?.tipo === 'funcionario') return atenderFuncionario(msg, ficha)
+  if (ficha?.tipo === 'candidato' && ficha.situacao === 'avancou') {
+    const r = await atenderAprovado(msg, ficha)
+    if (r !== undefined) return r
+  }
   if (ficha?.tipo === 'candidato') return atenderCandidatoConhecido(msg, ficha)
 
   return primeiroContato(msg)
@@ -413,30 +443,8 @@ async function rotear(msg) {
  * memória, e com teto — o servidor tem 911 MB e divide a máquina com o RH;
  * perder um currículo num reinício é melhor que derrubar os dois.
  */
-const documentosGuardados = new Map()
-const PRAZO_GUARDADO_MS = 24 * 3600_000
-const MAX_GUARDADOS = 20
-
-function guardarDocumento(de, doc) {
-  const agora = Date.now()
-  for (const [k, lista] of documentosGuardados) {
-    if (lista.every(x => agora - x.em > PRAZO_GUARDADO_MS)) documentosGuardados.delete(k)
-  }
-  const total = [...documentosGuardados.values()].reduce((s, l) => s + l.length, 0)
-  if (total >= MAX_GUARDADOS) return false
-  const lista = (documentosGuardados.get(de) ?? []).slice(-2)
-  lista.push({ doc, em: agora })
-  documentosGuardados.set(de, lista)
-  return true
-}
-
 async function mandarDocumentosGuardados(de) {
-  const lista = documentosGuardados.get(de)
-  if (!lista) return
-  documentosGuardados.delete(de)
-  for (const { doc, em } of lista) {
-    if (Date.now() - em < PRAZO_GUARDADO_MS) await enviarDocumento(doc)
-  }
+  for (const doc of guardados.retirar(de)) await enviarDocumento(doc)
 }
 
 async function receberDocumento(msg, { calado = false } = {}) {
@@ -463,13 +471,51 @@ async function receberDocumento(msg, { calado = false } = {}) {
 
   const doc = { whatsapp: msg.de, tipo, nome: msg.nomeArquivo, arquivo: msg.arquivo, extraido: lido }
   const env = await enviarDocumento(doc)
-  const guardado = !env.ok && env.status === 404 && guardarDocumento(msg.de, doc)
+  const guardado = !env.ok && env.status === 404 && guardados.guardar(msg.de, doc)
   console.log(`[documento] ${discreto(msg.de)}: ${tipo} — ${env.ok ? 'anexado à candidatura' : guardado ? 'guardado até a ficha' : 'não enviado'}`)
 
   if (calado) return null
+
+  // Aprovado com pedido de documentos: diz o que ainda falta.
+  if (env.ok) {
+    const pend = await pendenciasDe(msg.de)
+    if (pend) return respostaDaPendencia(pend)
+  }
+  if (!lido) console.warn(`[documento] ${discreto(msg.de)}: a leitura automática falhou — o RH vai ver o aviso na ficha`)
+
   const oQue = { curriculo: 'seu currículo', ctps: 'a foto da carteira', rg: 'o documento', cpf: 'o documento', cnh: 'o documento' }[tipo]
   const recebi = oQue ? `recebi ${oQue}, obrigada` : 'recebi aqui, obrigada'
   return estado?.vaga ? recebi : `${recebi}. qual vaga vc tá procurando?`
+}
+
+/**
+ * Aprovado a quem o RH pediu documentos.
+ *
+ * Aqui não se conversa de vaga: o que se espera são fotos e a chave PIX. A
+ * chave vai para o RH como "a confirmar". Qualquer outra coisa chama gente —
+ * aprovado com dúvida é contratação em andamento, e não é o robô que resolve.
+ *
+ * Devolve undefined quando não há pedido: segue o atendimento de sempre.
+ */
+async function atenderAprovado(msg, ficha) {
+  const pend = await pendenciasDe(msg.de)
+  if (!pend) return undefined
+
+  const chave = chavePixNoTexto(msg.texto)
+  if (chave) {
+    const r = await salvarPix(msg.de, chave)
+    if (r.ok) {
+      console.log(`[contratacao] ${discreto(msg.de)}: chave PIX recebida — a confirmar pelo RH`)
+      return respostaDaPendencia({ faltam: r.faltam ?? pend.faltam, pixFalta: false }, 'anotei sua chave pix')
+    }
+  }
+
+  const anterior = getEstado(msg.de)
+  marcarEscalada(msg.de)
+  avisarRH({ whatsapp: msg.de, motivo: `aprovado ${ficha.primeiroNome} escreveu (fase de documentos)`, trecho: msg.texto })
+  if (anterior?.modo === 'aprovado' && Date.now() - (anterior.avisadoEm ?? 0) < 12 * 3600_000) return null
+  setEstado(msg.de, { modo: 'aprovado', whatsapp: msg.de, avisadoEm: Date.now() })
+  return `oi ${ficha.primeiroNome}, vou pedir pra alguém do rh te responder`
 }
 
 /**
@@ -787,6 +833,35 @@ gastos.iniciarRonda()
 // mensagem automática diária é decisão de quem usa, não do código.
 const { agendar: agendarResumo } = await import('./resumo-diario.js')
 agendarResumo()
+
+/*
+  A mensagem para quem parou no meio do cadastro, e o lembrete de documentos.
+
+  Regras aprovadas pelo dono em 14/09/2026 (ver lembrete-cadastro.js). Para
+  desligar: LEMBRETE_CADASTRO=off no .env.
+*/
+async function rodarLembretes() {
+  if (!recrutamentoLigado() || process.env.LEMBRETE_CADASTRO === 'off') return
+  if (!lembrete.horarioComercial()) return
+  for (const [telefone, sessao] of sessoesParaLembrete()) {
+    const d = lembrete.decidir(sessao, { atendidaPorGente: maoHumana.atendidaPorGente(telefone).atendida })
+    if (!d.lembrar) continue
+    const texto = lembrete.texto(sessao.estado)
+    // Marca ANTES de enviar: se o envio travar e o laço rodar de novo, a
+    // pessoa não recebe duas vezes. Uma a menos é melhor que uma a mais.
+    marcarLembrado(telefone, texto)
+    const r = await enviarMensagem(telefone, texto)
+    console.log(`[lembrete] cadastro parado ${discreto(telefone)}: ${r?.ok ? 'lembrado' : 'falhou'}`)
+  }
+  for (const { whatsapp, texto } of await quemLembrarDocumentos()) {
+    const numero = String(whatsapp).replace(/\D/g, '')
+    await marcarLembreteDocumentos(whatsapp)
+    const r = await enviarMensagem(numero.length <= 11 ? `55${numero}` : numero, texto)
+    console.log(`[lembrete] documentos ${discreto(numero)}: ${r?.ok ? 'lembrado' : 'falhou'}`)
+  }
+}
+const relogioLembretes = setInterval(() => rodarLembretes().catch(e => console.error('[lembrete]', e.message)), 15 * 60 * 1000)
+relogioLembretes.unref?.()
 
 if (gastos.gastosAtivo()) {
   const s = gastos.situacao()

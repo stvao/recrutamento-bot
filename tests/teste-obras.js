@@ -52,7 +52,7 @@ const extras = { obra: 'Bastos Tsuya', valor: 2500, categoria: 'MATERIAL', data:
 {
   const srv = await servidor(() => ({ status: 201, corpo: { ok: true, id: 'uuid-1', mensagem: 'Comprovante recebido. Você tem 3 esperando lançamento.', pendentes: 3 } }))
   process.env.OBRAS_API_URL = `http://127.0.0.1:${srv.porta}`
-  const { enviarComprovante, _esquecerDescoberta } = await import(`./obras-client.js?t=${Date.now()}`)
+  const { enviarComprovante, _esquecerDescoberta } = await import(`../src/obras-client.js?t=${Date.now()}`)
   _esquecerDescoberta()
 
   const r = await enviarComprovante({ arquivo, nomeArquivo: 'c.jpg', tipo: 'image/jpeg', texto: 'linha', idMensagem: 'wamid.1', extras })
@@ -76,7 +76,7 @@ const extras = { obra: 'Bastos Tsuya', valor: 2500, categoria: 'MATERIAL', data:
     return { status: 201, corpo: { ok: true, id: 'uuid-2', mensagem: 'Comprovante recebido.', pendentes: 1 } }
   })
   process.env.OBRAS_API_URL = `http://127.0.0.1:${srv.porta}`
-  const { enviarComprovante, _esquecerDescoberta } = await import(`./obras-client.js?t=${Date.now()}`)
+  const { enviarComprovante, _esquecerDescoberta } = await import(`../src/obras-client.js?t=${Date.now()}`)
   _esquecerDescoberta()
 
   const r = await enviarComprovante({ arquivo, nomeArquivo: 'c.jpg', tipo: 'image/jpeg', texto: 'linha', idMensagem: 'wamid.2', extras })
@@ -102,7 +102,7 @@ const extras = { obra: 'Bastos Tsuya', valor: 2500, categoria: 'MATERIAL', data:
 {
   const srv = await servidor(() => ({ status: 401, corpo: { erro: 'token revogado' } }))
   process.env.OBRAS_API_URL = `http://127.0.0.1:${srv.porta}`
-  const { enviarComprovante, _esquecerDescoberta } = await import(`./obras-client.js?t=${Date.now()}`)
+  const { enviarComprovante, _esquecerDescoberta } = await import(`../src/obras-client.js?t=${Date.now()}`)
   _esquecerDescoberta()
 
   const r = await enviarComprovante({ arquivo, nomeArquivo: 'c.jpg', tipo: 'image/jpeg', texto: 'x', idMensagem: 'wamid.4', extras })
@@ -114,7 +114,7 @@ const extras = { obra: 'Bastos Tsuya', valor: 2500, categoria: 'MATERIAL', data:
 
 // ── 4. O que nem sai daqui ────────────────────────────────────────────────
 {
-  const { enviarComprovante } = await import(`./obras-client.js?t=${Date.now()}`)
+  const { enviarComprovante } = await import(`../src/obras-client.js?t=${Date.now()}`)
   const grande = await enviarComprovante({ arquivo: Buffer.alloc(21 * 1024 * 1024), tipo: 'image/jpeg', idMensagem: 'w5' })
   ok('arquivo acima de 20 MB não é enviado', grande.ok === false && grande.motivo === 'grande-demais')
 

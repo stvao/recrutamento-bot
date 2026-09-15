@@ -21,16 +21,18 @@ function ok(nome, condicao) {
   else { falhas++; console.log(`FALHOU ${nome}`) }
 }
 
-const PASTA = dirname(fileURLToPath(import.meta.url))
+// O código mora em src/; os testes, aqui. Os dois são conferidos.
+const AQUI = dirname(fileURLToPath(import.meta.url))
+const PASTAS = [join(AQUI, '..', 'src'), AQUI]
 
 // Tudo abaixo do espaço, menos tabulação, quebra de linha e retorno de carro.
 const INVISIVEL = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/
 
-const arquivos = readdirSync(PASTA).filter(n => n.endsWith('.js'))
+const arquivos = PASTAS.flatMap(p => readdirSync(p).filter(n => n.endsWith('.js')).map(n => join(p, n)))
 ok('há arquivos para conferir', arquivos.length > 10)
 
 for (const nome of arquivos) {
-  const linhas = readFileSync(join(PASTA, nome), 'utf8').split('\n')
+  const linhas = readFileSync(nome, 'utf8').split('\n')
   const ruins = linhas
     .map((l, i) => (INVISIVEL.test(l) ? i + 1 : null))
     .filter(Boolean)

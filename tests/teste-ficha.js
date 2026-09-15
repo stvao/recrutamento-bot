@@ -5,9 +5,9 @@
  * simplesmente não chegava do outro lado. Teste que os prenda é a única
  * forma de não voltarem na próxima refatoração.
  */
-import { _corpoDaCandidatura } from './rh-client.js'
-import { _envelhecer, _expirar, setEstado, getEstado, _limparTudo, metricas } from './store.js'
-import { atender } from './atendimento.js'
+import { _corpoDaCandidatura } from '../src/rh-client.js'
+import { _envelhecer, _expirar, setEstado, getEstado, _limparTudo, metricas } from '../src/store.js'
+import { atender } from '../src/atendimento.js'
 
 let falhas = 0
 function ok(desc, cond) {

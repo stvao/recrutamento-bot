@@ -2,7 +2,7 @@
  * Teste rápido do cérebro (sem servidor, sem RH). Roda uma conversa de exemplo.
  *   node src/teste-conversa.js
  */
-import { iniciar, responder } from './brain.js'
+import { iniciar, responder } from '../src/brain.js'
 
 const roteiro = [
   'vi o anuncio, tenho interesse',

@@ -9,7 +9,7 @@
  * candidato; responder automaticamente a quem cobra pagamento custa uma
  * conversa gravada que vira reclamação trabalhista. Na dúvida, silêncio.
  */
-import { ehCobranca, decidir, atendeFuncionario } from './quem-atender.js'
+import { ehCobranca, decidir, atendeFuncionario } from '../src/quem-atender.js'
 
 let falhas = 0
 function ok(nome, condicao) {

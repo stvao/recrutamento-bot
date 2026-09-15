@@ -14,7 +14,7 @@
  */
 process.env.GEMINI_API_KEY = ''
 
-const { atender, conferir, pareceNome, saudacao, _regras } = await import('./triagem.js')
+const { atender, conferir, pareceNome, saudacao, _regras } = await import('../src/triagem.js')
 
 let falhas = 0
 function ok(desc, cond) {
@@ -153,7 +153,7 @@ for (const frase of ['tem vaga?', 'quero trabalhar com vocês', 'mando o curríc
   recrutamento aproveita a primeira mensagem.
 */
 {
-  const atendimento = await import('./atendimento.js')
+  const atendimento = await import('../src/atendimento.js')
   const ini = atendimento.iniciarAtendimento('5511900000099')
   const r = await atendimento.atender(ini.estado, 'quero uma vaga de pedreiro em Buritama')
   ok('a vaga informada na primeira mensagem é aproveitada', r.estado.vaga === 'Pedreiro')

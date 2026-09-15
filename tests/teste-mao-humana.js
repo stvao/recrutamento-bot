@@ -5,7 +5,7 @@
  * para te ligarem" e, no mesmo minuto, o robô perguntou "você está procurando
  * vaga por aqui?" — para o candidato, a empresa falando duas coisas.
  */
-import { gentesRespondeu, atendidaPorGente, _limpar, situacao } from './mao-humana.js'
+import { gentesRespondeu, atendidaPorGente, _limpar, situacao } from '../src/mao-humana.js'
 
 let falhas = 0
 function ok(nome, condicao) {

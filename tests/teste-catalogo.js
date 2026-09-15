@@ -14,7 +14,7 @@
 delete process.env.RH_API_URL
 delete process.env.RH_API_TOKEN
 
-const { getVagas, vagasAtuais, termosDasVagas, origemDaLista, _limparCache } = await import('./catalogo.js')
+const { getVagas, vagasAtuais, termosDasVagas, origemDaLista, _limparCache } = await import('../src/catalogo.js')
 
 let falhas = 0
 function conf(desc, ok) {
@@ -31,7 +31,7 @@ conf('a reserva NUNCA traz salário', semRH.every(v => v.salario === null))
 
 // Mesma ideia para alojamento: sem confirmar com o RH, a resposta segura é
 // "não tenho" — prometer errado custa a mudança de alguém.
-const { cidadesAtuais } = await import('./catalogo.js')
+const { cidadesAtuais } = await import('../src/catalogo.js')
 conf('a reserva NUNCA promete alojamento', cidadesAtuais().every(c => c.alojamento === false))
 conf('a origem é declarada honestamente', origemDaLista().includes('reserva'))
 
@@ -61,7 +61,7 @@ async function comRespostaDoRH(corpo, status = 200) {
   process.env.RH_API_TOKEN = 'x'
   globalThis.fetch = async () => ({ ok: status < 400, status, json: async () => corpo })
   // catalogo.js lê as variáveis no carregamento, então recarrega o módulo
-  const m = await import(`./catalogo.js?t=${Math.random()}`)
+  const m = await import(`../src/catalogo.js?t=${Math.random()}`)
   const v = await m.getVagas()
   return { vagas: v, cidades: m.cidadesAtuais(), origem: m.origemDaLista() }
 }

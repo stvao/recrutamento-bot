@@ -15,9 +15,9 @@ process.env.GASTOS_GRUPOS = '120363000000000000@g.us'
 process.env.OBRAS_API_TOKEN = 'token-de-teste'
 process.env.GASTOS_ESPERA_DESCRICAO_MS = '50'
 
-const { autorizado, origemAceita, montarTexto, tratar, _limparPendentes } = await import('./gastos.js')
-const { conferir, CATEGORIAS } = await import('./ia-visao.js')
-const { parseWebhook } = await import('./connectors.js')
+const { autorizado, origemAceita, montarTexto, tratar, _limparPendentes } = await import('../src/gastos.js')
+const { conferir, CATEGORIAS } = await import('../src/ia-visao.js')
+const { parseWebhook } = await import('../src/connectors.js')
 
 let falhas = 0
 function ok(desc, cond) {
@@ -151,7 +151,7 @@ ok('webhook de texto segue sem mídia', soTexto?.texto === 'quero a vaga' && soT
 // Ninguém sabe de cabeça que o grupo é "120363...@g.us", mas todo mundo sabe
 // que ele se chama "Comprovantes".
 {
-  const mod = await import('./gastos.js?porNome=1')
+  const mod = await import('../src/gastos.js?porNome=1')
   // (mesma configuração do topo do arquivo — o módulo já está carregado)
   ok('grupo pelo identificador continua valendo', mod.origemAceita('120363000000000000@g.us'))
 }

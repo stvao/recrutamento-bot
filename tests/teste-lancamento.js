@@ -5,7 +5,7 @@
  * separada por vírgula. Uma divisão ingênua parte o valor no meio e lança
  * 2.500 como "2" — erro que ninguém percebe até fechar o mês.
  */
-import { interpretar, acharValor, acharTipo, acharNaFrase, apelidosDe, acharObra, acharPagador, combinar } from './lancamento.js'
+import { interpretar, acharValor, acharTipo, acharNaFrase, apelidosDe, acharObra, acharPagador, combinar } from '../src/lancamento.js'
 
 /** As obras de verdade, como estão no .env de produção. */
 const OBRAS = ['Bastos Tsuya', 'Bastos haia', 'Peruibe', 'Caraguatatuba', 'Praia Grande', 'Buritama', 'Pereiras', 'Itapevi']

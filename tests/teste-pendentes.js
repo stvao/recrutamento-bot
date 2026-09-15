@@ -19,7 +19,7 @@ const PASTA = mkdtempSync(join(tmpdir(), 'pendentes-teste-'))
 process.env.GASTOS_PENDENTES_DIR = PASTA
 process.env.GASTOS_VALIDADE_DIAS = '7'
 
-const pendentes = await import('./pendentes.js')
+const pendentes = await import('../src/pendentes.js')
 
 let falhas = 0
 function ok(nome, condicao) {

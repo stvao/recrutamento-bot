@@ -5,7 +5,7 @@
  * achando que era histórico — e é assim que o WhatsApp entrega o que chegou
  * durante um reinício. Um comprovante mandado no grupo naquele minuto sumia.
  */
-import { criarFiltro, JANELA_FORA_DO_AR_MS } from './recebimento.js'
+import { criarFiltro, JANELA_FORA_DO_AR_MS } from '../src/recebimento.js'
 
 let falhas = 0
 function ok(nome, condicao) {

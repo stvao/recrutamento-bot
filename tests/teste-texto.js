@@ -7,7 +7,7 @@
  *
  *   node src/teste-texto.js
  */
-import { melhorMatch, contemAlgum, discreto } from './texto.js'
+import { melhorMatch, contemAlgum, discreto } from '../src/texto.js'
 
 const VAGAS = [
   { valor: 'Servente',    termos: ['servente', 'ajudante', 'auxiliar', 'meio oficial', 'servico geral'] },

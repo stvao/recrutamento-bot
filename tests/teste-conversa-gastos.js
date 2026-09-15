@@ -92,10 +92,10 @@ const srv = createServer((req, res) => {
 await new Promise(r => srv.listen(0, '127.0.0.1', r))
 process.env.OBRAS_API_URL = `http://127.0.0.1:${srv.address().port}`
 
-const { tratar, iniciarRonda, _limparPendentes } = await import('./gastos.js')
-const { _limparCacheObras } = await import('./obras-client.js')
-const memoria = await import('./memoria.js')
-const resumo = await import('./resumo-diario.js')
+const { tratar, iniciarRonda, _limparPendentes } = await import('../src/gastos.js')
+const { _limparCacheObras } = await import('../src/obras-client.js')
+const memoria = await import('../src/memoria.js')
+const resumo = await import('../src/resumo-diario.js')
 iniciarRonda()
 
 const foto = Buffer.from('imagem-do-comprovante')
@@ -320,7 +320,7 @@ const enviados = () => lancados() + naCaixa()
   ok('está esperando', p.ditos.some(t => /obra/i.test(t)))
 
   // Simula a subida seguinte: um módulo novo, relendo do disco.
-  const outro = await import(`./pendentes.js?reinicio=${Date.now()}`)
+  const outro = await import(`../src/pendentes.js?reinicio=${Date.now()}`)
   ok('o comprovante é relido do disco', outro.carregar() >= 1)
   const recuperado = outro.todos().find(x => x.idMensagem === 'foto-sobrevive')
   ok('com a ficha inteira', Boolean(recuperado))

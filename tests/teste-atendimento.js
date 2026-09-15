@@ -13,7 +13,7 @@ process.env.GEMINI_API_KEY = 'chave-de-teste'
 // novo, e aqui o teste simula a cota acabando e a IA voltando em seguida.
 process.env.IA_PAUSA_COTA_MS = '0'
 
-const { atender, iniciarAtendimento } = await import('./atendimento.js')
+const { atender, iniciarAtendimento } = await import('../src/atendimento.js')
 
 let falhas = 0
 function conf(desc, ok) {

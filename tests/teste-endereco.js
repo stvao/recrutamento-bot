@@ -6,7 +6,7 @@
  * endereço de telefone. Toda mensagem de candidato morria no filtro, calada,
  * enquanto o grupo de comprovantes seguia funcionando.
  */
-import { ehConversaPessoal, tipoIgnorado, telefoneDe, numeroDoJid } from './endereco.js'
+import { ehConversaPessoal, tipoIgnorado, telefoneDe, numeroDoJid } from '../src/endereco.js'
 
 let falhas = 0
 function ok(nome, condicao) {

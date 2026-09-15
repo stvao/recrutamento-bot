@@ -19,7 +19,12 @@ const CHAVE = process.env.GEMINI_API_KEY || ''
 const PRAZO_MS = Number(process.env.IA_DOCUMENTO_PRAZO_MS || 30000)
 const ENDPOINT_FIXO = process.env.IA_DOCUMENTO_ENDPOINT || null
 
-export const TIPOS_DOCUMENTO = ['curriculo', 'ctps', 'rg', 'cpf', 'cnh', 'outro']
+export const TIPOS_DOCUMENTO = [
+  'curriculo', 'ctps', 'rg', 'cpf', 'cnh',
+  // Os da contratação, pedidos pelo RH depois de aprovado.
+  'comprovante_residencia', 'pis', 'titulo_eleitor', 'reservista', 'certidao', 'foto3x4',
+  'outro',
+]
 
 /** O RH aceita até 10 MB; maior que isso nem vale ler. */
 export const MAX_DOCUMENTO_BYTES = 10 * 1024 * 1024
@@ -28,7 +33,10 @@ const INSTRUCOES = `Você lê um documento que um candidato a vaga de obra mando
 Diga o que ele é e extraia só o que está ESCRITO nele. Nunca invente.
 
 - tipo: "curriculo", "ctps" (carteira de trabalho, física ou digital), "rg",
-  "cpf", "cnh" ou "outro".
+  "cpf", "cnh", "comprovante_residencia" (conta de luz, água, telefone),
+  "pis" (cartão ou extrato com o PIS/NIS/NIT), "titulo_eleitor",
+  "reservista", "certidao" (nascimento ou casamento), "foto3x4" (só o rosto,
+  foto de documento) ou "outro".
 - nome: nome completo como está no documento. Vazio se não houver.
 - cpf: só os números, se estiver escrito. Vazio se não houver.
 - rg: número do RG, se estiver escrito. Vazio se não houver.

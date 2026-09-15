@@ -135,6 +135,27 @@ export function oQueJaSabe(estado = {}, { paradoHa = null } = {}) {
   if (tem(e.contatoRecadoNome) || tem(e.contatoRecadoTelefone)) sabido.push('contato de recado: já informado')
   else falta.push('um contato de recado (nome e telefone de alguém)')
 
+  // Estágio sem curso não é estágio (Lei 11.788): é obrigatório perguntar.
+  if (/estagi/i.test(e.vaga ?? '')) {
+    if (tem(e.cursoEstagio)) sabido.push(`curso: ${e.cursoEstagio}`)
+    else falta.push('curso, semestre e horário da faculdade')
+  }
+
+  // O que ajuda quem contrata, se a conversa der (dono, 14/09/2026).
+  const seDer = []
+  const profissional = /pedreiro|carpinteiro/i.test(e.vaga ?? '')
+  for (const [campo, rotulo, soProfissional] of [
+    ['especialidade', 'especialidade', true], ['ultimaObra', 'última obra ou empresa', true],
+    ['anosRegistro', 'tempo com registro', true], ['nrs', 'NRs', true],
+    ['ferramentaPropria', 'ferramenta própria', true], ['conducao', 'como chega na obra', false],
+  ]) {
+    if (soProfissional && !profissional) continue
+    if (tem(e[campo])) sabido.push(`${rotulo}: ${e[campo]}`)
+    else seDer.push(rotulo)
+  }
+  if (tem(e.referenciaNome)) sabido.push('referência: já informada')
+  else seDer.push('uma referência (nome e telefone de encarregado ou empresa anterior)')
+
   // CPF e RG: opcionais (regra do dono, 13/09/2026). Pede uma vez, depois do
   // nome, e não insiste. O número nunca vai para o modelo.
   const opcional = []
@@ -162,11 +183,15 @@ export function oQueJaSabe(estado = {}, { paradoHa = null } = {}) {
     : 'A FICHA ESTÁ COMPLETA. Não faça mais nenhuma pergunta de ficha. Responda só o que\n'
       + 'a pessoa perguntar; se ela só agradecer ou se despedir, responda curto e encerre.')
 
+  if (seDer.length && tem(e.nome)) {
+    partes.push(`SE A CONVERSA DER (sem alongar, ligado ao que ela contou):\n${seDer.map(x => `- ${x}`).join('\n')}`)
+  }
+
   if (opcional.length) {
     partes.push(`OPCIONAL (peça uma vez, sem insistir; se ela não quiser, siga):\n${opcional.map(x => `- ${x}`).join('\n')}`)
   }
 
-  return { sabido, falta, opcional, texto: partes.join('\n\n') }
+  return { sabido, falta, opcional, seDer, texto: partes.join('\n\n') }
 }
 
 /** Um nome completo de verdade tem nome e sobrenome, e não é frase. */
@@ -317,6 +342,7 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
       'tempoExperiencia', 'bairro', 'cidadeMora', 'cep', 'dataNascimento',
       'disponibilidadeInicio', 'tamanhoCamisa', 'tamanhoBota',
       'contatoRecadoNome', 'contatoRecadoTelefone',
+      'especialidade', 'ultimaObra', 'anosRegistro', 'nrs', 'ferramentaPropria', 'conducao', 'cursoEstagio', 'referenciaNome', 'referenciaTelefone',
     ]),
     aceitaOutrasObras: saida.aceitaOutrasObras && saida.aceitaOutrasObras !== 'nao_sei'
       ? saida.aceitaOutrasObras
@@ -376,6 +402,15 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
         contatoRecadoTelefone: novo.contatoRecadoTelefone ?? null,
         cpf: novo.cpf ?? null,
         rg: novo.rg ?? null,
+        especialidade: novo.especialidade ?? null,
+        ultimaObra: novo.ultimaObra ?? null,
+        anosRegistro: novo.anosRegistro ?? null,
+        nrs: novo.nrs ?? null,
+        ferramentaPropria: novo.ferramentaPropria ?? null,
+        conducao: novo.conducao ?? null,
+        cursoEstagio: novo.cursoEstagio ?? null,
+        referenciaNome: novo.referenciaNome ?? null,
+        referenciaTelefone: novo.referenciaTelefone ?? null,
         resumoExperiencia: [
           'Conversa por WhatsApp (Maria Vitória).',
           novo.resumo,

@@ -4,7 +4,7 @@
  * Caso real, 12/09/2026: "3584387250", "Manu", "Minha filha" em dez segundos,
  * e o robô respondeu as três com a mesma frase de encerramento.
  */
-import { criarAgrupador } from './rajada.js'
+import { criarAgrupador } from '../src/rajada.js'
 
 let falhas = 0
 function ok(nome, condicao) {

@@ -28,6 +28,8 @@ const CAMPOS_DA_FICHA = [
   'contatoRecadoNome', 'contatoRecadoTelefone',
   // CPF é o cadastro único no RH; os dois são opcionais para o candidato.
   'cpf', 'rg',
+  // O que ajuda quem contrata (dono, 14/09/2026).
+  'especialidade', 'ultimaObra', 'anosRegistro', 'nrs', 'ferramentaPropria', 'conducao', 'cursoEstagio', 'referenciaNome', 'referenciaTelefone',
 ]
 
 /**
@@ -105,6 +107,59 @@ export async function enviarDocumento({ whatsapp, tipo, nome, arquivo, extraido 
   } catch (e) {
     console.error('[rh-client] documento não enviado:', e.message)
     return { ok: false, motivo: e.message }
+  }
+}
+
+/**
+ * Fase de contratação: o que o RH pediu a este número e o que falta.
+ * Null quando não há pedido ou o RH não respondeu.
+ */
+export async function pendenciasDe(whatsapp) {
+  if (!RH_API_URL || !RH_API_TOKEN) return null
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/candidatura/pendencias?whatsapp=${encodeURIComponent(whatsapp)}`, {
+      headers: { Authorization: `Bearer ${RH_API_TOKEN}` }, signal: AbortSignal.timeout(8000),
+    })
+    const j = await r.json().catch(() => null)
+    return r.ok && j?.pedido ? j : null
+  } catch (e) {
+    console.warn('[rh-client] pendências indisponíveis:', e.message)
+    return null
+  }
+}
+
+async function postarPendencia(corpo) {
+  if (!RH_API_URL || !RH_API_TOKEN) return { ok: false }
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/candidatura/pendencias`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RH_API_TOKEN}` },
+      body: JSON.stringify(corpo), signal: AbortSignal.timeout(8000),
+    })
+    const j = await r.json().catch(() => ({}))
+    return { ok: r.ok, ...j }
+  } catch (e) {
+    console.warn('[rh-client] pendência não enviada:', e.message)
+    return { ok: false }
+  }
+}
+
+/** Guarda a chave PIX na candidatura, como "a confirmar". */
+export const salvarPix = (whatsapp, chavePix) => postarPendencia({ whatsapp, chavePix })
+/** Marca que o lembrete de documentos saiu (o RH não devolve de novo). */
+export const marcarLembreteDocumentos = (whatsapp) => postarPendencia({ whatsapp, lembrado: true })
+
+/** Quem recebeu o pedido há 2+ dias e ainda deve algo: [{ whatsapp, texto }]. */
+export async function quemLembrarDocumentos() {
+  if (!RH_API_URL || !RH_API_TOKEN) return []
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/candidatura/pendencias?lembrar=1`, {
+      headers: { Authorization: `Bearer ${RH_API_TOKEN}` }, signal: AbortSignal.timeout(10000),
+    })
+    const j = await r.json().catch(() => ({}))
+    return r.ok && Array.isArray(j.lembrar) ? j.lembrar : []
+  } catch {
+    return []
   }
 }
 

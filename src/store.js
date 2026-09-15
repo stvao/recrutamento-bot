@@ -186,6 +186,29 @@ export function marcarEscalada(telefone) {
   sujo = true
 }
 
+/** As conversas guardadas, para o lembrete de cadastro parado decidir. */
+export function sessoesParaLembrete() {
+  return [...sessoes.entries()]
+}
+
+/**
+ * Registra que o lembrete saiu.
+ *
+ * NÃO mexe em `atualizadoEm`: o relógio da conversa é o da última mensagem
+ * de verdade. Se o lembrete reiniciasse o prazo, a conversa nunca expiraria.
+ * Entra no histórico para o modelo saber o que foi dito quando ela voltar.
+ */
+export function marcarLembrado(telefone, texto) {
+  const s = sessoes.get(telefone)
+  if (!s?.estado) return
+  s.estado = {
+    ...s.estado,
+    lembradoEm: Date.now(),
+    historico: [...(s.estado.historico ?? []), { de: 'maria', texto }].slice(-40),
+  }
+  sujo = true
+}
+
 export function limpar(telefone) {
   sessoes.delete(telefone)
   sujo = true

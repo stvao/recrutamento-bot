@@ -13,7 +13,7 @@
  *
  *   node src/teste-resposta-segura.js
  */
-import { proibidoEm } from './resposta-segura.js'
+import { proibidoEm } from '../src/resposta-segura.js'
 
 let falhas = 0
 function ok(desc, cond) {
@@ -76,8 +76,8 @@ for (const v of [null, undefined, '', '   ', 42, {}, []]) {
 // É o que impede a divergência de voltar: se uma delas parar de importar
 // daqui, este teste continua passando, mas o de triagem/funcionário mostra a
 // diferença. Aqui se garante ao menos que a fonte é única.
-const { conferir: conferirTriagem } = await import('./triagem.js')
-const { conferir: conferirFuncionario } = await import('./funcionario.js')
+const { conferir: conferirTriagem } = await import('../src/triagem.js')
+const { conferir: conferirFuncionario } = await import('../src/funcionario.js')
 
 for (const [nome, fn] of [['triagem', conferirTriagem], ['funcionario', conferirFuncionario]]) {
   for (const texto of ['clica em bit.ly/abc', 'Seu código de acesso chegou', 'São dois mil reais']) {

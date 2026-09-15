@@ -39,7 +39,7 @@ const srv = createServer((req, res) => {
 await new Promise(r => srv.listen(0, '127.0.0.1', r))
 process.env.IA_AUDIO_ENDPOINT = `http://127.0.0.1:${srv.address().port}/gerar`
 
-const { transcrever, audioDisponivel, MAX_AUDIO_BYTES } = await import('./ia-audio.js')
+const { transcrever, audioDisponivel, MAX_AUDIO_BYTES } = await import('../src/ia-audio.js')
 
 const audio = Buffer.from('isto faz de conta que e um audio')
 

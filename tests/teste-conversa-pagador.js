@@ -75,9 +75,9 @@ const srv = createServer((req, res) => {
 await new Promise(r => srv.listen(0, '127.0.0.1', r))
 process.env.OBRAS_API_URL = `http://127.0.0.1:${srv.address().port}`
 
-const { tratar, _limparPendentes } = await import('./gastos.js')
-const { _limparCacheObras } = await import('./obras-client.js')
-const memoria = await import('./memoria.js')
+const { tratar, _limparPendentes } = await import('../src/gastos.js')
+const { _limparCacheObras } = await import('../src/obras-client.js')
+const memoria = await import('../src/memoria.js')
 
 const foto = Buffer.from('imagem-do-comprovante')
 const base = { chat: '123@g.us', chatNome: 'Comprovantes', ehGrupo: true }
@@ -234,7 +234,7 @@ const pagadorEnviado = () => {
 // A regra mais importante do arquivo. Se esta pergunta pudesse segurar um
 // comprovante para sempre, ela teria custado mais do que resolveu.
 {
-  const { _rodarRonda } = await import('./gastos.js')
+  const { _rodarRonda } = await import('../src/gastos.js')
 
   const p = pessoa('5511900000108')
   await p.foto('haia cimento 250')

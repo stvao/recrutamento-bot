@@ -13,7 +13,7 @@
  */
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { parse } from './config.js'
+import { parse } from '../src/config.js'
 
 let falhas = 0
 function ok(desc, cond) {
@@ -71,7 +71,7 @@ CHAVE-INVALIDA=x
   process.env.VAR_JA_NO_AMBIENTE = 'do-ambiente'
   process.env.ENV_FILE = arquivo
 
-  const { carregar } = await import(`./config.js?t=${Date.now()}`)
+  const { carregar } = await import(`../src/config.js?t=${Date.now()}`)
   const r = carregar()
 
   ok('achou o arquivo apontado', r.achou === true)
@@ -88,7 +88,7 @@ CHAVE-INVALIDA=x
 // ── Arquivo ausente é dito em voz alta, não engolido ──────────────────────
 {
   process.env.ENV_FILE = join(process.cwd(), 'dados', 'nao-existe', '.env')
-  const { carregar } = await import(`./config.js?t=${Date.now()}b`)
+  const { carregar } = await import(`../src/config.js?t=${Date.now()}b`)
   const r = carregar()
   ok('diz que não achou', r.achou === false)
   ok('e informa onde procurou', r.caminho.includes('nao-existe'))

@@ -8,7 +8,7 @@
  * Por isso os casos são sobre as duas pontas: a enxurrada tem que parar, e
  * quem só conversa normalmente NUNCA pode ser barrado.
  */
-import { registrar, textoDoAviso, _limpar, situacao } from './limite.js'
+import { registrar, textoDoAviso, _limpar, situacao } from '../src/limite.js'
 
 let falhas = 0
 function ok(nome, condicao) {

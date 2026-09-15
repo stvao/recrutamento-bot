@@ -18,8 +18,8 @@ import { tmpdir } from 'node:os'
 // O store grava num arquivo; o teste usa um descartável.
 process.env.ESTADO_ARQUIVO = join(mkdtempSync(join(tmpdir(), 'memoria-')), 'conversas.json')
 
-const { oQueJaSabe } = await import('./atendimento.js')
-const { podeRetomar, _prazos } = await import('./store.js')
+const { oQueJaSabe } = await import('../src/atendimento.js')
+const { podeRetomar, _prazos } = await import('../src/store.js')
 
 let falhas = 0
 function ok(nome, condicao) {
@@ -110,9 +110,9 @@ const DIA = 24 * HORA
 // ── A ligação: o modelo recebe mesmo o que já sabe ─────────────────────
 {
   const aqui = dirname(fileURLToPath(import.meta.url))
-  const ia = readFileSync(join(aqui, 'ia.js'), 'utf8')
-  const at = readFileSync(join(aqui, 'atendimento.js'), 'utf8')
-  const sv = readFileSync(join(aqui, 'server.js'), 'utf8')
+  const ia = readFileSync(join(aqui, '..', 'src', 'ia.js'), 'utf8')
+  const at = readFileSync(join(aqui, '..', 'src', 'atendimento.js'), 'utf8')
+  const sv = readFileSync(join(aqui, '..', 'src', 'server.js'), 'utf8')
   ok('atender manda o conhecido ao modelo', /conversar\(\{ historico, fatos, conhecido \}\)/.test(at))
   ok('as instruções incluem o conhecido', /instrucoes\(fatos, conhecido\)/.test(ia))
   ok('histórico de 40 mensagens', /LIMITE_HISTORICO = 40/.test(at))

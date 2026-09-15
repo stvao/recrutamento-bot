@@ -143,6 +143,18 @@ em duas, no máximo, e vá conversando — não despeje tudo de uma vez:
 10. Tamanho de camisa e de bota (é para separar o uniforme e o EPI)
 11. Um contato de recado: nome e telefone de alguém
 
+SE A CONVERSA DER — ajuda quem vai contratar, mas não alongue a ficha por isso.
+Pergunte no meio da conversa, ligado ao que a pessoa contou:
+- Pedreiro e carpinteiro: a especialidade (alvenaria, reboco, acabamento,
+  estrutura, forma, telhado), a última obra ou empresa e quando saiu, quanto
+  tempo teve registro na carteira, se tem NR-18 ou NR-35, se tem ferramenta
+  própria.
+- Todos: como chega na obra (tem condução?), e uma referência — nome e
+  telefone de um encarregado ou empresa anterior.
+- ESTÁGIO: curso, semestre e horário da faculdade. Para estágio isso é
+  obrigatório, pergunte sempre.
+Nunca pergunte sobre saúde, gravidez, filhos, religião ou estado civil.
+
 Se a pessoa já contou alguma dessas coisas, NÃO pergunte de novo.
 
 COMO LIDAR COM O QUE A PESSOA ESCREVE
@@ -321,6 +333,15 @@ const ESQUEMA = {
     contatoRecadoTelefone: { type: 'string', description: 'Telefone do contato de recado. Vazio se não disse.' },
     cpf:            { type: 'string', description: 'CPF, só números, se a pessoa escreveu. Vazio se não disse.' },
     rg:             { type: 'string', description: 'Número do RG, se a pessoa escreveu. Vazio se não disse.' },
+    especialidade: { type: 'string', description: 'Especialidade na obra (alvenaria, reboco, acabamento...). Vazio se não disse.' },
+    ultimaObra: { type: 'string', description: 'Última obra ou empresa, e quando saiu. Vazio se não disse.' },
+    anosRegistro: { type: 'string', description: 'Quanto tempo teve registro em carteira na função. Vazio se não disse.' },
+    nrs: { type: 'string', description: 'Cursos de NR que tem (NR-18, NR-35...). Vazio se não disse.' },
+    ferramentaPropria: { type: 'string', description: 'Se tem ferramenta própria, como ela falou. Vazio se não disse.' },
+    conducao: { type: 'string', description: 'Como chega na obra (carro, moto, ônibus...). Vazio se não disse.' },
+    cursoEstagio: { type: 'string', description: 'Estágio: curso, semestre e horário da faculdade. Vazio se não disse.' },
+    referenciaNome: { type: 'string', description: 'Nome de uma referência profissional. Vazio se não disse.' },
+    referenciaTelefone: { type: 'string', description: 'Telefone da referência. Vazio se não disse.' },
     recusouDocumentos: { type: 'boolean', description: 'true se a pessoa não quis passar CPF/RG. Repita depois que souber.' },
     precisaHumano:  { type: 'boolean', description: 'true se precisa de uma pessoa da equipe' },
     perguntouSeEhIA: { type: 'boolean', description: 'true se a pessoa perguntou se está falando com robô, IA, sistema ou pessoa' },
@@ -329,6 +350,7 @@ const ESQUEMA = {
     'dataNascimento', 'disponibilidadeInicio', 'aceitaOutrasObras',
     'tamanhoCamisa', 'tamanhoBota', 'contatoRecadoNome', 'contatoRecadoTelefone',
     'cpf', 'rg', 'recusouDocumentos',
+    'especialidade', 'ultimaObra', 'anosRegistro', 'nrs', 'ferramentaPropria', 'conducao', 'cursoEstagio', 'referenciaNome', 'referenciaTelefone',
     'precisaHumano', 'perguntouSeEhIA'],
 }
 

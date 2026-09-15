@@ -44,13 +44,13 @@ await new Promise(r => srv.listen(0, '127.0.0.1', r))
 process.env.RH_API_URL = `http://127.0.0.1:${srv.address().port}`
 process.env.RH_API_TOKEN = 'token-de-teste'
 
-const catalogo = await import('./catalogo.js')
+const catalogo = await import('../src/catalogo.js')
 catalogo._limparCache()
 await catalogo.getVagas()
 ok('o catálogo veio do RH', catalogo.origemDaLista() === 'RH')
 
-const { responderFAQ, JORNADA } = await import('./brain.js')
-const { montarFatos } = await import('./ia.js')
+const { responderFAQ, JORNADA } = await import('../src/brain.js')
+const { montarFatos } = await import('../src/ia.js')
 
 const diz = (msg, estado) => responderFAQ(msg, estado) ?? { texto: '' }
 const texto = (msg, estado) => diz(msg, estado).texto

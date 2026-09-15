@@ -12,10 +12,10 @@ import { tmpdir } from 'node:os'
 
 process.env.ESTADO_ARQUIVO = join(mkdtempSync(join(tmpdir(), 'documento-')), 'conversas.json')
 
-const { cpfValido, conferirLeitura } = await import('./ia-documento.js')
-const { oQueJaSabe } = await import('./atendimento.js')
-const { semDocumento } = await import('./observacao.js')
-const { _corpoDaCandidatura } = await import('./rh-client.js')
+const { cpfValido, conferirLeitura } = await import('../src/ia-documento.js')
+const { oQueJaSabe } = await import('../src/atendimento.js')
+const { semDocumento } = await import('../src/observacao.js')
+const { _corpoDaCandidatura } = await import('../src/rh-client.js')
 
 let falhas = 0
 function ok(nome, condicao) {
@@ -74,10 +74,10 @@ ok('texto comum fica igual', semDocumento('sou pedreiro há 8 anos, salário 350
 // ── A ligação ──────────────────────────────────────────────────────────
 {
   const aqui = dirname(fileURLToPath(import.meta.url))
-  const sv = readFileSync(join(aqui, 'server.js'), 'utf8')
-  const bl = readFileSync(join(aqui, 'baileys.js'), 'utf8')
-  const ia = readFileSync(join(aqui, 'ia.js'), 'utf8')
-  const at = readFileSync(join(aqui, 'atendimento.js'), 'utf8')
+  const sv = readFileSync(join(aqui, '..', 'src', 'server.js'), 'utf8')
+  const bl = readFileSync(join(aqui, '..', 'src', 'baileys.js'), 'utf8')
+  const ia = readFileSync(join(aqui, '..', 'src', 'ia.js'), 'utf8')
+  const at = readFileSync(join(aqui, '..', 'src', 'atendimento.js'), 'utf8')
   ok('arquivo não recebe mais "consigo ler só texto"', !/'Recebi seu arquivo/.test(sv))
   ok('arquivo do candidato é anexado', /return receberDocumento\(msg\)/.test(sv))
   ok('funcionário mandando documento: calado', /ficha\?\.tipo === 'funcionario'\) return null/.test(sv))

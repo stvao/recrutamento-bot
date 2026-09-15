@@ -16,7 +16,7 @@ process.env.OBSERVACAO_DIR = PASTA
 process.env.OBSERVAR = 'on'
 process.env.OBSERVACAO_DIAS = '180'
 
-const obs = await import('./observacao.js')
+const obs = await import('../src/observacao.js')
 
 let falhas = 0
 function ok(nome, condicao) {
