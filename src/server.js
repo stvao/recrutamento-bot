@@ -30,6 +30,7 @@ import {
 import * as guardados from './documentos-guardados.js'
 import * as lembrete from './lembrete-cadastro.js'
 import { chavePixNoTexto, respostaDaPendencia } from './contratacao.js'
+import * as resumoRecrutamento from './resumo-recrutamento.js'
 import { lerDocumentoCandidato, MAX_DOCUMENTO_BYTES } from './ia-documento.js'
 import * as funcionario from './funcionario.js'
 import * as triagem from './triagem.js'
@@ -860,6 +861,21 @@ async function rodarLembretes() {
     console.log(`[lembrete] documentos ${discreto(numero)}: ${r?.ok ? 'lembrado' : 'falhou'}`)
   }
 }
+/*
+  Resumo do recrutamento às 8h no WhatsApp do gestor. Só com
+  RESUMO_RECRUTAMENTO_PARA no .env; sem número, não manda nada.
+*/
+async function rodarResumoRecrutamento() {
+  if (!resumoRecrutamento.deveEnviar()) return
+  const texto = await resumoRecrutamento.buscarTexto()
+  if (!texto) return
+  resumoRecrutamento.marcarEnviado()
+  const r = await enviarMensagem(resumoRecrutamento.destino(), texto)
+  console.log(`[resumo-recrutamento] ${r?.ok ? 'enviado' : 'falhou'}`)
+}
+const relogioResumo = setInterval(() => rodarResumoRecrutamento().catch(e => console.error('[resumo-recrutamento]', e.message)), 10 * 60 * 1000)
+relogioResumo.unref?.()
+
 const relogioLembretes = setInterval(() => rodarLembretes().catch(e => console.error('[lembrete]', e.message)), 15 * 60 * 1000)
 relogioLembretes.unref?.()
 

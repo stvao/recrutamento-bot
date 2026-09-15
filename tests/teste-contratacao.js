@@ -81,6 +81,21 @@ ok('número solto que não fecha formato: nada', chavePixNoTexto('3500') === nul
 ok('resposta com o que falta', respostaDaPendencia({ faltam: ['pis'], pixFalta: true }) === 'recebi, obrigada. ainda falta: PIS e sua chave pix')
 ok('resposta quando está tudo', /já tá tudo aqui/.test(respostaDaPendencia({})))
 
+// ── Resumo do recrutamento às 8h ───────────────────────────────────────
+{
+  process.env.RESUMO_RECRUTAMENTO_ARQUIVO = join(mkdtempSync(join(tmpdir(), 'resumo-')), 'r.json')
+  const rr = await import('../src/resumo-recrutamento.js')
+  delete process.env.RESUMO_RECRUTAMENTO_PARA
+  ok('sem número configurado: não manda', !rr.deveEnviar(new Date('2026-09-15T12:00:00Z')))
+  process.env.RESUMO_RECRUTAMENTO_PARA = '5511999998888'
+  ok('antes das 8h: não', !rr.deveEnviar(new Date('2026-09-15T10:00:00Z')))
+  ok('às 9h: manda', rr.deveEnviar(new Date('2026-09-15T12:00:00Z')))
+  rr.marcarEnviado(new Date('2026-09-15T12:00:00Z'))
+  ok('uma vez por dia', !rr.deveEnviar(new Date('2026-09-15T15:00:00Z')))
+  ok('no dia seguinte, de novo', rr.deveEnviar(new Date('2026-09-16T12:00:00Z')))
+  delete process.env.RESUMO_RECRUTAMENTO_PARA
+}
+
 // ── A ligação ──────────────────────────────────────────────────────────
 {
   const aqui = dirname(fileURLToPath(import.meta.url))
@@ -90,6 +105,7 @@ ok('resposta quando está tudo', /já tá tudo aqui/.test(respostaDaPendencia({}
   ok('  e o pedido exige autorização', /'\/enviar-pedido', async \(req, res\) => \{\s+if \(!simuladorAutorizado\(req\)\)/.test(sv))
   ok('aprovado com pedido tem atendimento próprio', /atenderAprovado\(msg, ficha\)/.test(sv))
   ok('lembrete de cadastro agendado', /lembrete\.decidir\(/.test(sv))
+  ok('resumo do recrutamento agendado', /rodarResumoRecrutamento/.test(sv))
   ok('lembrete de documentos agendado', /quemLembrarDocumentos\(\)/.test(sv))
   ok('o lembrete não reinicia o relógio da conversa', /export function marcarLembrado/.test(st) && !/marcarLembrado[\s\S]{0,400}atualizadoEm: Date\.now\(\)/.test(st))
   ok('documento guardado agora é em disco', /guardados\.guardar\(/.test(sv) && !/const documentosGuardados = new Map/.test(sv))
