@@ -111,6 +111,27 @@ export async function enviarDocumento({ whatsapp, tipo, nome, arquivo, extraido 
 }
 
 /**
+ * A ficha que o RH já tem desta pessoa.
+ *
+ * É o que deixa a conversa continuar de onde parou mesmo semanas depois: o
+ * robô guarda a conversa por 7 dias, a ficha fica no RH para sempre.
+ * Devolve null quando não há ficha aberta ou o RH não respondeu.
+ */
+export async function fichaDoCandidato(whatsapp) {
+  if (!RH_API_URL || !RH_API_TOKEN) return null
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/candidatura/ficha?whatsapp=${encodeURIComponent(whatsapp)}`, {
+      headers: { Authorization: `Bearer ${RH_API_TOKEN}` }, signal: AbortSignal.timeout(8000),
+    })
+    const j = await r.json().catch(() => null)
+    return r.ok && j?.tem ? j : null
+  } catch (e) {
+    console.warn('[rh-client] ficha indisponível:', e.message)
+    return null
+  }
+}
+
+/**
  * Fase de contratação: o que o RH pediu a este número e o que falta.
  * Null quando não há pedido ou o RH não respondeu.
  */

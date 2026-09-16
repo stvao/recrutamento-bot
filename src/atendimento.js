@@ -159,7 +159,7 @@ export function oQueJaSabe(estado = {}, { paradoHa = null } = {}) {
   // CPF e RG: opcionais (regra do dono, 13/09/2026). Pede uma vez, depois do
   // nome, e não insiste. O número nunca vai para o modelo.
   const opcional = []
-  if (tem(e.cpf)) sabido.push('CPF: já informado')
+  if (tem(e.cpf) || e.cpfJaInformado) sabido.push('CPF: já informado')
   else if (e.recusouDocumentos) sabido.push('CPF e RG: preferiu não informar — NÃO peça de novo')
   else if (tem(e.nome)) opcional.push('CPF e RG, ou foto do documento — opcional, pedir uma vez só')
 

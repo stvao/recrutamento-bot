@@ -25,10 +25,11 @@ import { getVagas, origemDaLista, intervaloDeAtualizacao } from './catalogo.js'
 import { enviarMensagem, parseWebhook, baixarMidiaCloud } from './connectors.js'
 import {
   enviarCandidatura, enviarDocumento, avisarRH, quemE,
-  pendenciasDe, salvarPix, quemLembrarDocumentos, marcarLembreteDocumentos,
+  pendenciasDe, salvarPix, quemLembrarDocumentos, marcarLembreteDocumentos, fichaDoCandidato,
 } from './rh-client.js'
 import * as guardados from './documentos-guardados.js'
 import * as lembrete from './lembrete-cadastro.js'
+import { estadoDaFicha, paradoHaDaFicha } from './ficha-rh.js'
 import { chavePixNoTexto, respostaDaPendencia } from './contratacao.js'
 import * as resumoRecrutamento from './resumo-recrutamento.js'
 import { lerDocumentoCandidato, MAX_DOCUMENTO_BYTES } from './ia-documento.js'
@@ -571,15 +572,16 @@ async function atenderCandidatoConhecido(msg, ficha) {
     mensagem seguinte recebia a mesma frase. Agora abre uma conversa normal
     já sabendo o que o RH sabe, e responde o que a pessoa perguntou.
   */
-  const semente = {
-    ...iniciar(msg.de).estado,
-    historico: [],
-    vaga: ficha.vaga ?? null,
-    cidade: ficha.cidade ?? null,
-    registrado: true,
-  }
+  /*
+    Sem conversa guardada aqui, mas com ficha no RH: começa a conversa JÁ
+    SABENDO o que ela respondeu antes — e com a conversa anterior no
+    histórico. A ficha é uma só; o que ela contar agora é acrescentado nela.
+  */
+  const doRH = await fichaDoCandidato(msg.de).catch(() => null)
+  const base = { ...iniciar(msg.de).estado, historico: [], vaga: ficha.vaga ?? null, cidade: ficha.cidade ?? null, registrado: true }
+  const semente = estadoDaFicha(doRH, base) ?? base
   setEstado(msg.de, semente)
-  return aplicarResultado(msg.de, await atender(semente, msg.texto), msg.texto)
+  return aplicarResultado(msg.de, await atender(semente, msg.texto, { paradoHa: paradoHaDaFicha(doRH) }), msg.texto)
 }
 
 /**

@@ -11,7 +11,7 @@
     "test:texto": "node tests/teste-texto.js",
     "test:catalogo": "node tests/teste-catalogo.js",
     "test:atendimento": "node tests/teste-atendimento.js",
-    "test": "npm run test:fonte && npm run test:config && npm run test:texto && npm run test:catalogo && npm run test:conhecimento && npm run test:palavras-comuns && npm run test:atendimento && npm run test:memoria-conversa && npm run test:documento && npm run test:contratacao && npm run test:ficha && npm run test:lancamento && npm run test:obras && npm run test:gastos && npm run test:resposta-segura && npm run test:audio && npm run test:rajada && npm run test:mao-humana && npm run test:quem-atender && npm run test:triagem && npm run test:funcionario && npm run test:pendentes && npm run test:endereco && npm run test:recebimento && npm run test:observacao && npm run test:limite && npm run test:arquivo && npm run test:conversa-gastos && npm run test:conversa-pagador && npm run test:conversa",
+    "test": "npm run test:fonte && npm run test:config && npm run test:texto && npm run test:catalogo && npm run test:conhecimento && npm run test:palavras-comuns && npm run test:atendimento && npm run test:memoria-conversa && npm run test:documento && npm run test:contratacao && npm run test:ficha-unica && npm run test:ficha && npm run test:lancamento && npm run test:obras && npm run test:gastos && npm run test:resposta-segura && npm run test:audio && npm run test:rajada && npm run test:mao-humana && npm run test:quem-atender && npm run test:triagem && npm run test:funcionario && npm run test:pendentes && npm run test:endereco && npm run test:recebimento && npm run test:observacao && npm run test:limite && npm run test:arquivo && npm run test:conversa-gastos && npm run test:conversa-pagador && npm run test:conversa",
     "test:ficha": "node tests/teste-ficha.js",
     "test:gastos": "node tests/teste-gastos.js",
     "test:lancamento": "node tests/teste-lancamento.js",
@@ -38,6 +38,7 @@
     "test:memoria-conversa": "node tests/teste-memoria-conversa.js",
     "test:documento": "node tests/teste-documento.js",
     "test:contratacao": "node tests/teste-contratacao.js",
+    "test:ficha-unica": "node tests/teste-ficha-unica.js",
     "test:palavras-comuns": "node tests/teste-palavras-comuns.js"
   },
   "dependencies": {
