@@ -122,5 +122,47 @@ ok('frase sem função fechada', brain.funcaoFechadaCitada('sou pedreiro') === n
   ok('"vou confirmar" sempre avisa o RH', /confirmar com a equipe E\s+marque precisaHumano/.test(ia))
 }
 
+// ── Bloqueiro e broqueiro são pedreiro de alvenaria (dono, 16/09/2026) ─
+//
+// Saiu das conversas reais: "sou bloqueiro e fachadeiro", "3 meses
+// trabalhando como bloqueiro em Sorocaba", "VCS estão contratando bloqueiro?".
+{
+  const pedreiro = (await import('../src/catalogo.js')).vagasAtuais().find(v => v.nome === 'Pedreiro')
+  ok('a reserva conhece bloqueiro', pedreiro.sinonimos.includes('bloqueiro'))
+  ok('e broqueiro', pedreiro.sinonimos.includes('broqueiro'))
+  ok('"sou bloqueiro" não vira recusa de vaga', !/não temos vaga/.test(brain.responderFAQ('sou bloqueiro', {})?.texto ?? ''))
+}
+
+// ── Passagem para chegar na obra: reembolso só ao chegar ───────────────
+//
+// Perguntado mais de trinta vezes em 180 dias por quem mora em outro estado.
+{
+  const pergunta = (frase) => brain.responderFAQ(frase, {})?.texto ?? ''
+  for (const frase of ['vcs pagam passagem?', 'a empresa fornece passagem pra mim chegar ai?', 'vcs mandam a passagem', 'tem ajuda de custo pra viagem?']) {
+    const r = pergunta(frase)
+    ok(`"${frase}": reembolso quando chega`, /reembolsa quando você chega/.test(r))
+    ok('  e não manda nada antes', /não manda dinheiro nem passagem antes/.test(r))
+  }
+  ok('vale-transporte continua com a resposta dele', /vale-transporte é a partir do primeiro dia/i.test(pergunta('tem vale transporte?')))
+}
+
+// ── Ficha pronta: chama gente em vez de repetir a mesma frase ──────────
+//
+// "Sua candidatura já está com o nosso RH" foi a frase mais repetida do robô:
+// 126 vezes em 180 dias, sempre igual, para quem perguntava outra coisa.
+{
+  const r1 = brain.responder({ etapa: 'fim', whatsapp: 'x' }, 'e aí, saiu alguma coisa?')
+  ok('primeira vez depois da ficha: chama gente', r1.escalarHumano === true && /vou pedir pra alguém/.test(r1.resposta))
+  const r2 = brain.responder(r1.estado, 'e agora?')
+  ok('  e não repete a mesma frase', !/vou pedir pra alguém/.test(r2.resposta) && !r2.escalarHumano)
+}
+
+{
+  const iaTexto = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'ia.js'), 'utf8')
+  ok('a IA sabe da passagem reembolsada', /PASSAGEM PARA CHEGAR NA OBRA/.test(iaTexto))
+  ok('a IA avisa quem mora em outro estado', /Quem mora em OUTRO ESTADO/.test(iaTexto))
+  ok('indicação de colega: pede para ele falar aqui', /passar este contato para a pessoa falar aqui/.test(iaTexto))
+}
+
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)

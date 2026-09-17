@@ -50,7 +50,7 @@ const RESERVA = [
   // armador, serralheiro e eletricista — e é ela que atende quando o RH não
   // responde, justamente quando ninguém está olhando.
   { nome: 'Servente',    salario: null, profissional: false, sinonimos: ['servente', 'ajudante', 'auxiliar', 'meio oficial'] },
-  { nome: 'Pedreiro',    salario: null, profissional: false, sinonimos: ['pedreiro', 'alvenaria'] },
+  { nome: 'Pedreiro',    salario: null, profissional: false, sinonimos: ['pedreiro', 'alvenaria', 'bloqueiro', 'broqueiro'] },
   { nome: 'Carpinteiro', salario: null, profissional: false, sinonimos: ['carpinteiro', 'carpintaria'] },
   { nome: 'Estagiário',  salario: null, profissional: false, sinonimos: ['estagiario', 'estagiaria', 'estagio'] },
 ]

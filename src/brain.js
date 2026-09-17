@@ -279,7 +279,22 @@ export function responderFAQ(msg, estado = {}) {
       return { texto: REQUISITO_ESTAGIO }
     }
   }
-  if (temAlguma(msg, ['vale', 'passe', 'transporte', 'conducao', 'passagem', 'onibus'])) {
+  /*
+    PASSAGEM para chegar na obra é outra coisa que o vale-transporte, e é a
+    pergunta que mais aparece de quem mora longe: em 180 dias de conversa,
+    mais de trinta vezes ("vcs pagam passagem?", "só dá certo se a empresa
+    fornecer passagem pra mim chegar aí").
+
+    A regra do dono (16/09/2026): a empresa REEMBOLSA quando a pessoa chega
+    no local da obra. Não manda dinheiro nem passagem antes. Dizer isso claro
+    e cedo evita que alguém atravesse o país esperando outra coisa.
+
+    Vem antes do vale-transporte porque "vcs pagam passagem?" casaria com ele.
+  */
+  if (temAlguma(msg, ['passagem', 'passagens', 'ajuda de custo', 'custo da viagem', 'comprar passagem'])) {
+    return { texto: 'A passagem pra chegar na obra a gente reembolsa quando você chega no local de trabalho. A empresa não manda dinheiro nem passagem antes.' }
+  }
+  if (temAlguma(msg, ['vale', 'passe', 'transporte', 'conducao', 'onibus'])) {
     const pedeAgora = temAlguma(msg, ['amanha', 'hoje', 'agora', 'ir trabalhar', 'me da', 'me dar', 'manda', 'enviar'])
     return { texto: 'O vale-transporte é a partir do primeiro dia de trabalho. A gente não consegue adiantar: você começa e, chegando lá, o RH envia o vale.', escalar: pedeAgora }
   }
@@ -508,7 +523,22 @@ function avancar(estado, mensagem) {
         respostaFalha: `${nome.split(' ')[0]}, recebi todos os seus dados! Tive um probleminha técnico para registrar agora, mas já anotei tudo e o RH vai te procurar.`,
       }
     }
+    /*
+      Ficha pronta e a pessoa continua escrevendo algo que a FAQ não cobre.
+
+      Era a frase mais repetida do robô: 126 vezes em 180 dias, sempre igual,
+      para quem estava perguntando outra coisa. Agora a primeira vez chama
+      gente — é o momento em que uma pessoa resolve —, e depois ele para de
+      repetir a mesma frase.
+    */
     default:
-      return { estado, resposta: 'Sua candidatura já está com o nosso RH.  Se tiver mais alguma dúvida, é só perguntar! (ou escreva "recomeçar" para uma nova candidatura)' }
+      if (!estado.avisouPosFicha) {
+        return {
+          estado: { ...estado, avisouPosFicha: true },
+          resposta: 'sua ficha já está com o rh. vou pedir pra alguém te responder por aqui',
+          escalarHumano: true,
+        }
+      }
+      return { estado, resposta: 'assim que tiver novidade te falam por aqui' }
   }
 }
