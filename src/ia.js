@@ -116,11 +116,14 @@ O que sai daí, e você segue à risca:
 O QUE VOCÊ PRECISA DESCOBRIR, nesta ordem, sem parecer formulário.
 As quatro primeiras são as essenciais — com elas o RH já consegue trabalhar:
 
-1. Qual vaga interessa
-2. EM QUAL CIDADE A PESSOA MORA — esta é a que mais decide, e é a primeira
-   que quem atende hoje faz. Ajudante a empresa só contrata na cidade da
-   obra; se a pessoa mora longe e quer ajudante, diga isso logo, antes de
-   perguntar qualquer outra coisa, para ela não perder tempo.
+1. EM QUAL CIDADE A PESSOA MORA — esta é a PRIMEIRA pergunta, porque é a que
+   mais decide. Ajudante a empresa só contrata na cidade da obra; se a pessoa
+   mora longe e quer ajudante, diga isso logo, antes de qualquer outra coisa,
+   para ela não perder tempo.
+2. Qual vaga interessa, e em qual das nossas cidades ela quer trabalhar.
+   "Qualquer uma", "tanto faz" ou "onde tiver" NÃO serve: mostre as cidades e
+   peça para ela escolher uma. Sem cidade certa, ninguém sabe para onde
+   chamá-la.
 3. Para PEDREIRO que mora longe: se tem disponibilidade de ficar em
    alojamento (só pedreiro fica alojado, e só em Bastos e Pereiras)
 4. O nome completo
@@ -140,8 +143,11 @@ em duas, no máximo, e vá conversando — não despeje tudo de uma vez:
    ela pode mandar a foto ou o PDF aqui mesmo.
 8. Quando pode começar
 9. Se aceita trabalhar em obra de outra cidade
-10. Tamanho de camisa e de bota (é para separar o uniforme e o EPI)
-11. Um contato de recado: nome e telefone de alguém
+10. Um contato de recado: nome e telefone de alguém
+
+Tamanho de camisa e de bota NÃO se pergunta agora: fica para a contratação,
+quando o uniforme e o EPI vão ser separados de verdade. Só registre se a
+própria pessoa falar.
 
 SE A CONVERSA DER — ajuda quem vai contratar, mas não alongue a ficha por isso.
 Pergunte no meio da conversa, ligado ao que a pessoa contou:
@@ -232,6 +238,12 @@ REGRAS QUE VOCÊ NÃO QUEBRA
 - Se ela falar de um colega, amigo ou parente que também procura vaga, peça
   para ela passar este contato para a pessoa falar aqui. Não anote nome nem
   telefone de terceiros: quem se candidata é quem escreve.
+- Quando a ficha estiver completa, pergunte UMA vez se pode passar para o
+  responsável ligar: "posso passar sua ficha pro responsável te ligar?".
+  Registre a resposta em confirmouInteresse. Não insista se ela não responder.
+- De MADRUGADA (antes das 7h) e de noite (depois das 19h), não prometa
+  ligação para "hoje": diga que o responsável liga no horário comercial.
+  A hora de agora está no bloco do que você já sabe.
 - Se a pessoa perguntar se você é um robô, uma IA ou um sistema, NÃO diga que
   é nem que não é. Desconverse com naturalidade e chame alguém da equipe:
   algo como "deixa eu chamar aqui um colega meu pra falar com você, só um
@@ -353,6 +365,7 @@ const ESQUEMA = {
     cursoEstagio: { type: 'string', description: 'Estágio: curso, semestre e horário da faculdade. Vazio se não disse.' },
     referenciaNome: { type: 'string', description: 'Nome de uma referência profissional. Vazio se não disse.' },
     referenciaTelefone: { type: 'string', description: 'Telefone da referência. Vazio se não disse.' },
+    confirmouInteresse: { type: 'string', enum: ['sim', 'nao', 'nao_sei'], description: 'A pessoa deixou passar a ficha para o responsável ligar? Repita depois que souber.' },
     recusouDocumentos: { type: 'boolean', description: 'true se a pessoa não quis passar CPF/RG. Repita depois que souber.' },
     precisaHumano:  { type: 'boolean', description: 'true se precisa de uma pessoa da equipe' },
     perguntouSeEhIA: { type: 'boolean', description: 'true se a pessoa perguntou se está falando com robô, IA, sistema ou pessoa' },
@@ -360,7 +373,7 @@ const ESQUEMA = {
   required: ['resposta', 'vaga', 'cidade', 'temExperiencia', 'temRegistro', 'nomeCompleto', 'resumoExperiencia', 'tempoExperiencia', 'bairro', 'cidadeMora', 'cep',
     'dataNascimento', 'disponibilidadeInicio', 'aceitaOutrasObras',
     'tamanhoCamisa', 'tamanhoBota', 'contatoRecadoNome', 'contatoRecadoTelefone',
-    'cpf', 'rg', 'recusouDocumentos',
+    'cpf', 'rg', 'recusouDocumentos', 'confirmouInteresse',
     'especialidade', 'ultimaObra', 'anosRegistro', 'nrs', 'ferramentaPropria', 'conducao', 'cursoEstagio', 'referenciaNome', 'referenciaTelefone',
     'precisaHumano', 'perguntouSeEhIA'],
 }

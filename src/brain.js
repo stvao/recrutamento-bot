@@ -379,18 +379,23 @@ export function responderFAQ(msg, estado = {}) {
 // ─── Fluxo ────────────────────────────────────────────────────────────────────
 export function iniciar(whatsapp) {
   return {
-    estado: { etapa: 'vaga', whatsapp },
+    // A CIDADE vem antes da vaga (dono, 17/09/2026): é ela que decide quase
+    // tudo — ajudante a empresa só contrata na cidade da obra, e alojamento
+    // só existe em duas cidades. Perguntar a vaga primeiro fazia gente
+    // escolher função para depois descobrir que não dava.
+    estado: { etapa: 'cidade', whatsapp },
     resposta:
       'Olá!  Que bom seu interesse em fazer parte da nossa equipe!\n\n' +
-      'Vou te ajudar com a candidatura, é rapidinho. Para qual vaga você quer se candidatar?\n' +
+      'Vou te ajudar com a candidatura, é rapidinho. Em qual cidade você quer trabalhar?\n' +
       '(responda o número ou o nome)\n\n' +
-      listaVagasTexto(),
+      listaCidadesTexto(),
   }
 }
 
 function promptAtual(estado) {
   switch (estado.etapa) {
     case 'vaga':        return `Para qual vaga você quer se candidatar? (número ou nome)\n\n${listaVagasTexto()}`
+    case 'cidadeQualquer': return `Em qual cidade você quer trabalhar?\n\n${listaCidadesTexto()}`
     case 'vagaOutros':  return 'Qual é a função que você procura? Pode escrever.'
     case 'cidade':      return `Em qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto()}`
     case 'experiencia': return `Você tem experiência na função de ${estado.vaga}?`
@@ -443,10 +448,12 @@ function avancar(estado, mensagem) {
         const dica = ''
         return { estado: { ...estado, tentativasVaga: tent }, resposta: `Não consegui identificar a vaga. Pode me dizer o número ou o nome?\n\n${listaVagasTexto()}${dica}` }
       }
-      return {
-        estado: { ...estado, etapa: 'cidade', vaga: v.nome, vagaProfissional: v.profissional, tentativasVaga: 0 },
-        resposta: `Boa escolha! Vaga de *${v.nome}*${v.salario ? ` (${fmtMoeda(v.salario)})` : ' (salário a combinar)'}.\n\nEm qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto()}`,
+      const base = { ...estado, vaga: v.nome, vagaProfissional: v.profissional, tentativasVaga: 0 }
+      const escolha = `Boa escolha! Vaga de *${v.nome}*${v.salario ? ` (${fmtMoeda(v.salario)})` : ' (salário a combinar)'}.`
+      if (v.profissional) {
+        return { estado: { ...base, etapa: 'experiencia' }, resposta: `${escolha}\n\nVocê tem experiência na função de ${v.nome}? (sim ou não)` }
       }
+      return { estado: { ...base, etapa: 'nome' }, resposta: `${escolha}\n\nPara finalizar, qual é o seu nome completo?` }
     }
     case 'vagaOutros': {
       const funcao = mensagem.trim()
@@ -455,9 +462,12 @@ function avancar(estado, mensagem) {
       // A função dita é uma das abertas: segue com ela.
       const aberta = vagaCitadaExata(funcao) ?? matchVaga(funcao)
       if (aberta) {
+        const proxima = aberta.profissional ? 'experiencia' : 'nome'
         return {
-          estado: { ...estado, etapa: 'cidade', vaga: aberta.nome, vagaProfissional: aberta.profissional, tentativasVaga: 0 },
-          resposta: `certo, ${aberta.nome.toLowerCase()}. em qual cidade vc quer trabalhar?\n\n${listaCidadesTexto()}`,
+          estado: { ...estado, etapa: proxima, vaga: aberta.nome, vagaProfissional: aberta.profissional, tentativasVaga: 0 },
+          resposta: aberta.profissional
+            ? `certo, ${aberta.nome.toLowerCase()}. vc tem experiência nessa função? (sim ou não)`
+            : `certo, ${aberta.nome.toLowerCase()}. pra finalizar, qual seu nome completo?`,
         }
       }
 
@@ -470,17 +480,35 @@ function avancar(estado, mensagem) {
       }
     }
     case 'cidade': {
-      const c = matchCidade(mensagem)
-      if (!c) return { estado, resposta: `Não encontrei essa cidade. Responda o número ou o nome:\n\n${listaCidadesTexto()}` }
-      if (estado.vagaProfissional) {
-        return {
-          estado: { ...estado, etapa: 'experiencia', cidade: c.nome },
-          resposta: `Perfeito, ${c.nome}.${c.alojamento ? ' (Temos alojamento aí.)' : ''}\n\nVocê tem experiência na função de ${estado.vaga}? (sim ou não)`,
-        }
+      /*
+        "Qualquer uma / a combinar" era a resposta mais escolhida (48 fichas),
+        e não serve para nada: o gestor não sabe para onde chamar, e a nota de
+        proximidade fica no meio. Aqui ele pede uma cidade de verdade.
+      */
+      if (temAlguma(mensagem, ['qualquer', 'tanto faz', 'a combinar', 'qualquer lugar', 'onde tiver', 'qualquer cidade'])) {
+        return { estado, resposta: `Nossas obras são nestas cidades — me diz qual fica melhor pra você:\n\n${listaCidadesTexto()}` }
       }
+      const c = matchCidade(mensagem)
+      if (!c) return { estado, resposta: `Não encontrei essa cidade. Nossas obras são no interior e no litoral de São Paulo:\n\n${listaCidadesTexto()}` }
+      const comCidade = { ...estado, cidade: c.nome }
+      const ondeEh = `Perfeito, ${c.nome}.${c.alojamento ? ' (Temos alojamento aí, para pedreiro.)' : ''}`
+
+      /*
+        Disse a cidade E a função na mesma frase ("quero vaga de pedreiro em
+        Buritama"): registra as duas e segue. Perguntar de novo o que ela
+        acabou de falar é o jeito mais rápido de parecer que ninguém leu.
+      */
+      const jaDisse = funcaoFechadaCitada(mensagem) ? null : matchVaga(mensagem)
+      if (jaDisse) {
+        const base = { ...comCidade, vaga: jaDisse.nome, vagaProfissional: jaDisse.profissional, tentativasVaga: 0 }
+        return jaDisse.profissional
+          ? { estado: { ...base, etapa: 'experiencia' }, resposta: `${ondeEh}\n\nVocê tem experiência na função de ${jaDisse.nome}? (sim ou não)` }
+          : { estado: { ...base, etapa: 'nome' }, resposta: `${ondeEh}\n\nPara finalizar, qual é o seu nome completo?` }
+      }
+
       return {
-        estado: { ...estado, etapa: 'nome', cidade: c.nome },
-        resposta: `Perfeito, ${c.nome}.${c.alojamento ? ' (Temos alojamento aí.)' : ''}\n\nPara finalizar, qual é o seu nome completo?`,
+        estado: { ...comCidade, etapa: 'vaga' },
+        resposta: `${ondeEh}\n\nPara qual vaga você quer se candidatar? (número ou nome)\n\n${listaVagasTexto()}`,
       }
     }
     case 'experiencia': {

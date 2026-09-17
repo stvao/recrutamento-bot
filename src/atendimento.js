@@ -88,7 +88,7 @@ function manterPreenchidos(estado, saida, campos) {
  * Dado pessoal vai como "já informado", sem o valor. O modelo não precisa da
  * data de nascimento para não perguntá-la de novo.
  */
-export function oQueJaSabe(estado = {}, { paradoHa = null } = {}) {
+export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } = {}) {
   const e = estado ?? {}
   const tem = (v) => v !== null && v !== undefined && String(v).trim() !== ''
   const sabido = []
@@ -129,8 +129,9 @@ export function oQueJaSabe(estado = {}, { paradoHa = null } = {}) {
   if (tem(e.aceitaOutrasObras)) sabido.push(`aceita obra em outra cidade: ${e.aceitaOutrasObras}`)
   else falta.push('se aceita trabalhar em obra de outra cidade')
 
+  // Camisa e bota saíram da ficha (dono, 17/09/2026): metade das fichas
+  // ficava incompleta, e esse dado só é usado na contratação.
   if (tem(e.tamanhoCamisa) && tem(e.tamanhoBota)) sabido.push('tamanho de camisa e bota: já informados')
-  else falta.push('tamanho de camisa e de bota')
 
   if (tem(e.contatoRecadoNome) || tem(e.contatoRecadoTelefone)) sabido.push('contato de recado: já informado')
   else falta.push('um contato de recado (nome e telefone de alguém)')
@@ -163,7 +164,19 @@ export function oQueJaSabe(estado = {}, { paradoHa = null } = {}) {
   else if (e.recusouDocumentos) sabido.push('CPF e RG: preferiu não informar — NÃO peça de novo')
   else if (tem(e.nome)) opcional.push('CPF e RG, ou foto do documento — opcional, pedir uma vez só')
 
+  // Deixar passar para o responsável ligar é o que separa quem só perguntava
+  // de quem quer mesmo a vaga.
+  if (e.confirmouInteresse === 'sim') sabido.push('deixou passar a ficha para o responsável ligar')
+  else if (e.confirmouInteresse === 'nao') sabido.push('NÃO quis passar a ficha por enquanto — não insista')
+
   const partes = []
+
+  if (agora) {
+    const hora = Number(new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false }).format(agora)) % 24
+    const periodo = hora < 7 ? 'MADRUGADA' : hora < 12 ? 'manhã' : hora < 19 ? 'tarde' : 'NOITE'
+    partes.push(`AGORA SÃO ${String(hora).padStart(2, '0')}h em Brasília (${periodo}).`
+      + (hora < 7 || hora >= 19 ? ' Não prometa ligação para hoje: o responsável liga no horário comercial.' : ''))
+  }
 
   if (paradoHa && paradoHa > 6 * 3600_000) {
     const horas = Math.round(paradoHa / 3600_000)
@@ -347,6 +360,9 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
     aceitaOutrasObras: saida.aceitaOutrasObras && saida.aceitaOutrasObras !== 'nao_sei'
       ? saida.aceitaOutrasObras
       : estado.aceitaOutrasObras ?? null,
+    confirmouInteresse: saida.confirmouInteresse && saida.confirmouInteresse !== 'nao_sei'
+      ? saida.confirmouInteresse
+      : estado.confirmouInteresse ?? null,
   }
 
   // Perguntar se é um sistema sempre chama gente: é o momento em que a
@@ -402,6 +418,8 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
         contatoRecadoTelefone: novo.contatoRecadoTelefone ?? null,
         cpf: novo.cpf ?? null,
         rg: novo.rg ?? null,
+        confirmouInteresse: novo.confirmouInteresse === 'sim' ? 'Sim'
+          : novo.confirmouInteresse === 'nao' ? 'Não' : null,
         especialidade: novo.especialidade ?? null,
         ultimaObra: novo.ultimaObra ?? null,
         anosRegistro: novo.anosRegistro ?? null,

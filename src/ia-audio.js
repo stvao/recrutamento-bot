@@ -67,6 +67,18 @@ export async function transcrever({ arquivo, tipo }) {
     }
     if (i + 1 < MODELOS.length) console.warn(`[ia-audio] "${MODELOS[i]}" não respondeu — tentando "${MODELOS[i + 1]}"`)
   }
+  /*
+    Segunda rodada no primeiro modelo antes de desistir.
+
+    Muita gente de obra só manda áudio, e "não consegui ouvir" saiu 32 vezes
+    em 180 dias. A falha aqui costuma ser passageira (503, tempo estourado);
+    insistir uma vez custa segundos e salva a mensagem.
+  */
+  const ultima = await umaTentativa({ arquivo, tipo, modelo: MODELOS[0] })
+  if (ultima) {
+    console.log('[ia-audio] transcrição veio na segunda tentativa.')
+    return ultima
+  }
   console.warn('[ia-audio] nenhum modelo transcreveu o áudio.')
   return null
 }

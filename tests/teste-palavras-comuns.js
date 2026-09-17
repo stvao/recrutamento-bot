@@ -81,7 +81,7 @@ ok('frase sem função fechada', brain.funcaoFechadaCitada('sou pedreiro') === n
 }
 {
   const r = brain.responder({ etapa: 'vagaOutros', whatsapp: 'x' }, 'pedreiro')
-  ok('outra função que é aberta: segue com ela', r.estado.vaga === 'Pedreiro' && r.estado.etapa === 'cidade')
+  ok('outra função que é aberta: segue com ela', r.estado.vaga === 'Pedreiro' && ['experiencia', 'nome'].includes(r.estado.etapa))
 }
 
 // ── A reserva só oferece o que está aberto ─────────────────────────────

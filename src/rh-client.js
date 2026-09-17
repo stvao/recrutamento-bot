@@ -27,7 +27,7 @@ const CAMPOS_DA_FICHA = [
   'aceitaOutrasObras', 'tamanhoCamisa', 'tamanhoBota',
   'contatoRecadoNome', 'contatoRecadoTelefone',
   // CPF é o cadastro único no RH; os dois são opcionais para o candidato.
-  'cpf', 'rg',
+  'cpf', 'rg', 'confirmouInteresse',
   // O que ajuda quem contrata (dono, 14/09/2026).
   'especialidade', 'ultimaObra', 'anosRegistro', 'nrs', 'ferramentaPropria', 'conducao', 'cursoEstagio', 'referenciaNome', 'referenciaTelefone',
 ]
