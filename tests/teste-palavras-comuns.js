@@ -140,7 +140,7 @@ ok('frase sem função fechada', brain.funcaoFechadaCitada('sou pedreiro') === n
   const pergunta = (frase) => brain.responderFAQ(frase, {})?.texto ?? ''
   for (const frase of ['vcs pagam passagem?', 'a empresa fornece passagem pra mim chegar ai?', 'vcs mandam a passagem', 'tem ajuda de custo pra viagem?']) {
     const r = pergunta(frase)
-    ok(`"${frase}": reembolso quando chega`, /reembolsa quando você chega/.test(r))
+    ok(`"${frase}": reembolso quando chega`, /reembolsa o valor que você gastou/.test(r))
     ok('  e não manda nada antes', /não manda dinheiro nem passagem antes/.test(r))
   }
   ok('vale-transporte continua com a resposta dele', /vale-transporte é a partir do primeiro dia/i.test(pergunta('tem vale transporte?')))

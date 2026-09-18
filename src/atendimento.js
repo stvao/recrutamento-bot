@@ -164,6 +164,16 @@ export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } 
   else if (e.recusouDocumentos) sabido.push('CPF e RG: preferiu não informar — NÃO peça de novo')
   else if (tem(e.nome)) opcional.push('CPF e RG, ou foto do documento — opcional, pedir uma vez só')
 
+  // O que o recrutador já conferiu: não pergunta de novo.
+  if (e.avaliacaoTecnica) sabido.push(`já conferiu o que sabe fazer (${e.avaliacaoTecnica})`)
+  else if (tem(e.vaga) && tem(e.nome)) falta.push('uma ou duas perguntas do que sabe fazer na função')
+  if (/pedreiro/i.test(e.vaga ?? '') && tem(e.cidadeMora) && tem(e.cidade)
+    && String(e.cidadeMora).toLowerCase() !== String(e.cidade).toLowerCase()) {
+    if (e.alojamentoFirme) sabido.push(`disponibilidade real de alojamento: ${e.alojamentoFirme}`)
+    else falta.push('se tem disponibilidade REAL de ficar no alojamento, longe de casa')
+  }
+  if (tem(e.sinais)) sabido.push(`o que você já percebeu dela: ${e.sinais}`)
+
   // Deixar passar para o responsável ligar é o que separa quem só perguntava
   // de quem quer mesmo a vaga.
   if (e.confirmouInteresse === 'sim') sabido.push('deixou passar a ficha para o responsável ligar')
@@ -356,6 +366,7 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
       'disponibilidadeInicio', 'tamanhoCamisa', 'tamanhoBota',
       'contatoRecadoNome', 'contatoRecadoTelefone',
       'especialidade', 'ultimaObra', 'anosRegistro', 'nrs', 'ferramentaPropria', 'conducao', 'cursoEstagio', 'referenciaNome', 'referenciaTelefone',
+      'respostasTecnicas', 'indicadoPor',
     ]),
     aceitaOutrasObras: saida.aceitaOutrasObras && saida.aceitaOutrasObras !== 'nao_sei'
       ? saida.aceitaOutrasObras
@@ -363,6 +374,15 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
     confirmouInteresse: saida.confirmouInteresse && saida.confirmouInteresse !== 'nao_sei'
       ? saida.confirmouInteresse
       : estado.confirmouInteresse ?? null,
+    alojamentoFirme: saida.alojamentoFirme && saida.alojamentoFirme !== 'nao_sei'
+      ? saida.alojamentoFirme
+      : estado.alojamentoFirme ?? null,
+    avaliacaoTecnica: saida.avaliacaoTecnica && saida.avaliacaoTecnica !== 'nao_sei'
+      ? saida.avaliacaoTecnica
+      : estado.avaliacaoTecnica ?? null,
+    // O que se percebe acumula: um sinal da primeira conversa continua valendo.
+    sinais: [estado.sinais, saida.sinais?.trim()].filter(Boolean)
+      .filter((v, i, a) => a.indexOf(v) === i).join('; ').slice(-400) || null,
   }
 
   // Perguntar se é um sistema sempre chama gente: é o momento em que a
@@ -420,6 +440,11 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
         rg: novo.rg ?? null,
         confirmouInteresse: novo.confirmouInteresse === 'sim' ? 'Sim'
           : novo.confirmouInteresse === 'nao' ? 'Não' : null,
+        alojamentoFirme: { sim: 'Sim', nao: 'Não', duvida: 'Em dúvida' }[novo.alojamentoFirme] ?? null,
+        avaliacaoTecnica: { boa: 'Boa', fraca: 'Fraca', nao_respondeu: 'Não respondeu' }[novo.avaliacaoTecnica] ?? null,
+        respostasTecnicas: novo.respostasTecnicas ?? null,
+        sinais: novo.sinais ?? null,
+        indicadoPor: novo.indicadoPor ?? null,
         especialidade: novo.especialidade ?? null,
         ultimaObra: novo.ultimaObra ?? null,
         anosRegistro: novo.anosRegistro ?? null,

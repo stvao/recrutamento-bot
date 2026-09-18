@@ -28,6 +28,8 @@ const CAMPOS_DA_FICHA = [
   'contatoRecadoNome', 'contatoRecadoTelefone',
   // CPF é o cadastro único no RH; os dois são opcionais para o candidato.
   'cpf', 'rg', 'confirmouInteresse',
+  // O que o robô, como recrutador, conferiu (dono, 18/09/2026).
+  'alojamentoFirme', 'avaliacaoTecnica', 'respostasTecnicas', 'sinais', 'indicadoPor',
   // O que ajuda quem contrata (dono, 14/09/2026).
   'especialidade', 'ultimaObra', 'anosRegistro', 'nrs', 'ferramentaPropria', 'conducao', 'cursoEstagio', 'referenciaNome', 'referenciaTelefone',
 ]

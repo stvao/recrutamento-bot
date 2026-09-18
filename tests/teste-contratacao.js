@@ -45,7 +45,7 @@ ok('triagem ou funcionário: não', !decide(parado(25, { modo: 'triagem' })).lem
 {
   const completa = {
     vaga: 'Pedreiro', cidadeMora: 'Bastos', cidade: 'Bastos', nome: 'Carlos Alberto', temExperiencia: true, temRegistro: true,
-    dataNascimento: 'x', disponibilidadeInicio: 'já', aceitaOutrasObras: 'sim', tamanhoCamisa: 'M', tamanhoBota: '41', contatoRecadoNome: 'Manu',
+    dataNascimento: 'x', disponibilidadeInicio: 'já', aceitaOutrasObras: 'sim', tamanhoCamisa: 'M', tamanhoBota: '41', contatoRecadoNome: 'Manu', avaliacaoTecnica: 'boa',
   }
   ok('ficha completa: não', !decide(parado(25, completa)).lembrar)
 }

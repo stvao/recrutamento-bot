@@ -292,7 +292,7 @@ export function responderFAQ(msg, estado = {}) {
     Vem antes do vale-transporte porque "vcs pagam passagem?" casaria com ele.
   */
   if (temAlguma(msg, ['passagem', 'passagens', 'ajuda de custo', 'custo da viagem', 'comprar passagem'])) {
-    return { texto: 'A passagem pra chegar na obra a gente reembolsa quando você chega no local de trabalho. A empresa não manda dinheiro nem passagem antes.' }
+    return { texto: 'A empresa não faz adiantamento da passagem. Mas quando você chega no local da obra, a gente reembolsa o valor que você gastou. A empresa não manda dinheiro nem passagem antes.' }
   }
   if (temAlguma(msg, ['vale', 'passe', 'transporte', 'conducao', 'onibus'])) {
     const pedeAgora = temAlguma(msg, ['amanha', 'hoje', 'agora', 'ir trabalhar', 'me da', 'me dar', 'manda', 'enviar'])

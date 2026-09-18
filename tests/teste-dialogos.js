@@ -71,7 +71,7 @@ function ok(nome, condicao) {
   const semUniforme = {
     vaga: 'Pedreiro', cidadeMora: 'Bastos', cidade: 'Bastos', nome: 'Carlos Alberto', temExperiencia: true,
     temRegistro: true, dataNascimento: 'x', disponibilidadeInicio: 'já', aceitaOutrasObras: 'sim',
-    contatoRecadoNome: 'Manu',
+    contatoRecadoNome: 'Manu', avaliacaoTecnica: 'boa',
   }
   const r = oQueJaSabe(semUniforme)
   ok('camisa e bota não travam mais a ficha', !r.falta.some(x => /camisa|bota/.test(x)))

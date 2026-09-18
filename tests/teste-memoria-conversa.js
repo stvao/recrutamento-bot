@@ -59,7 +59,7 @@ const DIA = 24 * HORA
 {
   const r = oQueJaSabe({
     nome: 'Carlos Alberto Souza', dataNascimento: '16/04/1974',
-    contatoRecadoNome: 'Manu', contatoRecadoTelefone: '3584387250',
+    contatoRecadoNome: 'Manu', avaliacaoTecnica: 'boa', contatoRecadoTelefone: '3584387250',
   })
   ok('a data de nascimento não vai', !r.texto.includes('1974'))
   ok('o telefone do contato não vai', !r.texto.includes('3584387250'))
@@ -74,7 +74,7 @@ const DIA = 24 * HORA
   const completa = {
     vaga: 'Pedreiro', cidadeMora: 'Bastos', cidade: 'Bastos', nome: 'Carlos Alberto',
     temExperiencia: true, temRegistro: true, dataNascimento: 'x', disponibilidadeInicio: 'já',
-    aceitaOutrasObras: 'sim', tamanhoCamisa: 'M', tamanhoBota: '41', contatoRecadoNome: 'Manu',
+    aceitaOutrasObras: 'sim', tamanhoCamisa: 'M', tamanhoBota: '41', contatoRecadoNome: 'Manu', avaliacaoTecnica: 'boa',
   }
   const r = oQueJaSabe(completa)
   ok('ficha completa: nada falta', r.falta.length === 0)
