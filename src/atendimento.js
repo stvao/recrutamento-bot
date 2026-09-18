@@ -74,6 +74,23 @@ function manterPreenchidos(estado, saida, campos) {
 }
 
 /**
+ * O que o robô percebeu da pessoa, acumulado entre as mensagens.
+ *
+ * O modelo vê o que já foi percebido e costuma devolver tudo de novo, às
+ * vezes com um detalhe a mais. Juntar às cegas repetia o mesmo texto a cada
+ * mensagem ("animado; animado, quer começar já; ..."). Se o novo já contém o
+ * antigo, o novo substitui; se não, acrescenta.
+ */
+export function juntarSinais(antes, agora) {
+  const a = String(antes ?? '').trim()
+  const n = String(agora ?? '').trim()
+  if (!n) return a || null
+  if (!a || n.toLowerCase().includes(a.toLowerCase())) return n.slice(0, 400)
+  if (a.toLowerCase().includes(n.toLowerCase())) return a
+  return `${a}; ${n}`.slice(-400)
+}
+
+/**
  * O que já se sabe desta pessoa, e o que ainda falta — dito ao modelo a cada
  * mensagem.
  *
@@ -166,7 +183,8 @@ export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } 
 
   // O que o recrutador já conferiu: não pergunta de novo.
   if (e.avaliacaoTecnica) sabido.push(`já conferiu o que sabe fazer (${e.avaliacaoTecnica})`)
-  else if (tem(e.vaga) && tem(e.nome)) falta.push('uma ou duas perguntas do que sabe fazer na função')
+  // Estágio não tem pergunta de obra: o que decide é o curso.
+  else if (tem(e.vaga) && tem(e.nome) && !/estagi/i.test(e.vaga)) falta.push('uma ou duas perguntas do que sabe fazer na função')
   if (/pedreiro/i.test(e.vaga ?? '') && tem(e.cidadeMora) && tem(e.cidade)
     && String(e.cidadeMora).toLowerCase() !== String(e.cidade).toLowerCase()) {
     if (e.alojamentoFirme) sabido.push(`disponibilidade real de alojamento: ${e.alojamentoFirme}`)
@@ -381,8 +399,7 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
       ? saida.avaliacaoTecnica
       : estado.avaliacaoTecnica ?? null,
     // O que se percebe acumula: um sinal da primeira conversa continua valendo.
-    sinais: [estado.sinais, saida.sinais?.trim()].filter(Boolean)
-      .filter((v, i, a) => a.indexOf(v) === i).join('; ').slice(-400) || null,
+    sinais: juntarSinais(estado.sinais, saida.sinais),
   }
 
   // Perguntar se é um sistema sempre chama gente: é o momento em que a

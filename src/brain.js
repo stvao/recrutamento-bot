@@ -489,7 +489,21 @@ function avancar(estado, mensagem) {
         return { estado, resposta: `Nossas obras são nestas cidades — me diz qual fica melhor pra você:\n\n${listaCidadesTexto()}` }
       }
       const c = matchCidade(mensagem)
-      if (!c) return { estado, resposta: `Não encontrei essa cidade. Nossas obras são no interior e no litoral de São Paulo:\n\n${listaCidadesTexto()}` }
+      if (!c) {
+        /*
+          A pergunta era a cidade, mas a pessoa disse a VAGA ("sou pedreiro").
+          Guarda a vaga e pede só a cidade — antes ouvia "não encontrei essa
+          cidade" e depois tinha que dizer a vaga de novo.
+        */
+        const vagaDita = funcaoFechadaCitada(mensagem) ? null : matchVaga(mensagem)
+        if (vagaDita && !estado.vaga) {
+          return {
+            estado: { ...estado, vaga: vagaDita.nome, vagaProfissional: vagaDita.profissional },
+            resposta: `certo, ${vagaDita.nome.toLowerCase()}. e em qual cidade vc quer trabalhar?\n\n${listaCidadesTexto()}`,
+          }
+        }
+        return { estado, resposta: `Não encontrei essa cidade. Nossas obras são no interior e no litoral de São Paulo:\n\n${listaCidadesTexto()}` }
+      }
       const comCidade = { ...estado, cidade: c.nome }
       const ondeEh = `Perfeito, ${c.nome}.${c.alojamento ? ' (Temos alojamento aí, para pedreiro.)' : ''}`
 
@@ -504,6 +518,13 @@ function avancar(estado, mensagem) {
         return jaDisse.profissional
           ? { estado: { ...base, etapa: 'experiencia' }, resposta: `${ondeEh}\n\nVocê tem experiência na função de ${jaDisse.nome}? (sim ou não)` }
           : { estado: { ...base, etapa: 'nome' }, resposta: `${ondeEh}\n\nPara finalizar, qual é o seu nome completo?` }
+      }
+
+      // Já tinha dito a vaga antes da cidade: segue sem perguntar de novo.
+      if (estado.vaga) {
+        return estado.vagaProfissional
+          ? { estado: { ...comCidade, etapa: 'experiencia' }, resposta: `${ondeEh}\n\nVocê tem experiência na função de ${estado.vaga}? (sim ou não)` }
+          : { estado: { ...comCidade, etapa: 'nome' }, resposta: `${ondeEh}\n\nPara finalizar, qual é o seu nome completo?` }
       }
 
       return {

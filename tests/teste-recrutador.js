@@ -53,6 +53,25 @@ function ok(nome, condicao) {
   ok('  e reembolsa o valor gasto quando chega', /quando você chega no local da obra, a gente reembolsa o valor que você gastou/.test(r))
 }
 
+// ── Correções da revisão de 18/09/2026 ─────────────────────────────────
+{
+  const { juntarSinais } = await import('../src/atendimento.js')
+  ok('sinais: o novo que contém o antigo substitui', juntarSinais('animado', 'animado, quer começar já') === 'animado, quer começar já')
+  ok('sinais: o mesmo de novo não repete', juntarSinais('animado', 'animado') === 'animado')
+  ok('sinais: coisa nova acrescenta', juntarSinais('animado', 'medo de viajar') === 'animado; medo de viajar')
+  ok('sinais: vazio não apaga o que havia', juntarSinais('animado', '') === 'animado')
+
+  const est = oQueJaSabe({ vaga: 'Estagiário', nome: 'Ana Lima' })
+  ok('estágio não recebe pergunta técnica de obra', !est.falta.some(x => /sabe fazer/.test(x)))
+
+  const i = brain.iniciar('5514999990009')
+  const r = brain.responder(i.estado, 'sou pedreiro')
+  ok('disse a vaga quando a pergunta era a cidade: guarda a vaga', r.estado.vaga === 'Pedreiro' && !r.estado.cidade)
+  ok('  e pede só a cidade', /em qual cidade/i.test(r.resposta) && !/não encontrei/i.test(r.resposta))
+  const r2 = brain.responder(r.estado, 'bastos')
+  ok('  e com a cidade segue sem perguntar a vaga de novo', r2.estado.cidade === 'Bastos' && !/para qual vaga/i.test(r2.resposta))
+}
+
 // ── As instruções ──────────────────────────────────────────────────────
 {
   const aqui = dirname(fileURLToPath(import.meta.url))
