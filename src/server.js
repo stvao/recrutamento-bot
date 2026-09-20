@@ -757,6 +757,14 @@ async function aplicarResultado(from, r, text) {
       // de "abandonou" nas métricas; sem isso, toda conclusão viraria abandono
       // quando a conversa expirasse sozinha.
       if (r.acao.primeiraVez) marcarConcluida(from)
+      /*
+        A marca de "já está no RH" é dada AQUI, depois do ok — e não no
+        atendimento, que não sabe se a gravação deu certo. Com o RH fora do
+        ar, a conversa terminava marcada como registrada e nada existia lá.
+        É esta marca que faz o reenvio seguinte contar como atualização, e
+        não como uma nova conclusão nas métricas.
+      */
+      setEstado(from, { ...r.estado, registrado: true })
       // O currículo que chegou antes da ficha agora tem onde ficar.
       mandarDocumentosGuardados(from).catch(e => console.error('[documento]', e.message))
       return r.resposta

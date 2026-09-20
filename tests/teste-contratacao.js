@@ -108,6 +108,7 @@ ok('resposta quando está tudo', /já tá tudo aqui/.test(respostaDaPendencia({}
   ok('resumo do recrutamento agendado', /rodarResumoRecrutamento/.test(sv))
   ok('lembrete de documentos agendado', /quemLembrarDocumentos\(\)/.test(sv))
   ok('o lembrete não reinicia o relógio da conversa', /export function marcarLembrado/.test(st) && !/marcarLembrado[\s\S]{0,400}atualizadoEm: Date\.now\(\)/.test(st))
+  ok('a marca de registrado vem do servidor, depois do ok do RH', /setEstado\(from, \{ \.\.\.r\.estado, registrado: true \}\)/.test(sv))
   ok('documento guardado agora é em disco', /guardados\.guardar\(/.test(sv) && !/const documentosGuardados = new Map/.test(sv))
 }
 

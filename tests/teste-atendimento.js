@@ -88,7 +88,9 @@ conf('  registrando que nunca teve carteira assinada',
 
 // Reenvia a cada dado novo, para o RH ATUALIZAR a mesma candidatura — mas
 // só a primeira vez conta como conclusão nas métricas.
-const jaGravado = { ...r.estado }
+// `registrado` é marcado pelo SERVIDOR depois que o RH confirma a gravação
+// (server.js, aplicarResultado). Aqui o teste faz o papel dele.
+const jaGravado = { ...r.estado, registrado: true }
 modeloResponde({
   resposta: 'Anotado!', nomeCompleto: 'Joao da Silva', vaga: 'Pedreiro',
   cidade: 'Peruíbe', bairro: 'Centro', tamanhoBota: '42',

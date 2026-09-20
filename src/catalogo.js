@@ -202,6 +202,25 @@ export function tetoDe(nomeVaga) {
 }
 
 /**
+ * Esta vaga tem pergunta de experiência e de registro em carteira?
+ *
+ * Quem decidia era só o flag `profissional` do cadastro do RH — e Pedreiro
+ * vem com ele DESLIGADO, tanto no cadastro quanto na lista de reserva acima
+ * (experiência deixou de ser porta e virou faixa, dono 12/09/2026). O roteiro
+ * então pulava as duas perguntas e mandava a ficha ao RH sem o registro em
+ * carteira, que é justamente o que separa o salário inicial do teto.
+ *
+ * Vaga com TETO sempre pergunta: sem a resposta não dá para saber em que
+ * faixa a pessoa entra.
+ */
+export function perguntaExperiencia(nomeVaga) {
+  if (!nomeVaga) return false
+  if (tetoDe(nomeVaga)) return true
+  const alvo = norm(nomeVaga)
+  return Boolean(vagasAtuais().find(v => norm(v.nome) === alvo)?.profissional)
+}
+
+/**
  * Quem pode ficar no alojamento.
  *
  * Informado pelo dono em 12/09/2026: hoje só se contrata PEDREIRO para ficar

@@ -9,9 +9,10 @@
  */
 
 import { norm, melhorMatch, contemAlgum } from './texto.js'
+import { fraseDeRegistro } from './ficha-rh.js'
 import {
   vagasAtuais, cidadesAtuais, termosDasVagas, tetoDe, alojamentoVale,
-  AUXILIO_TRANSPORTE_ESTAGIO,
+  perguntaExperiencia, AUXILIO_TRANSPORTE_ESTAGIO,
 } from './catalogo.js'
 
 // ─── Base de conhecimento ────────────────────────────────────────────────────
@@ -131,12 +132,22 @@ function juntar(nomes) {
   return nomes.length <= 1 ? (nomes[0] ?? '') : `${nomes.slice(0, -1).join(', ')} e ${nomes.at(-1)}`
 }
 
-/** "R$ 2.803,00 (inicial — com experiência comprovada pode chegar a R$ 3.500,00)" */
+/**
+ * "a partir de R$ 2.803,00; pode chegar até R$ 3.500,00 com experiência…"
+ *
+ * O teto é ATÉ, nunca um valor fechado (regra do dono: "até R$ 3.500 só com
+ * experiência comprovada em carteira"). O texto anterior dizia
+ * "R$ 3.500,00 para quem tem experiência comprovada em carteira" — e um
+ * carpinteiro com seis meses de carteira ficava com a promessa por escrito no
+ * WhatsApp. O próprio catalogo.js diz que o teto "é dito como possibilidade,
+ * nunca como promessa", e o prompt diz que salário acima do inicial nunca é
+ * promessa; só o código dizia o contrário.
+ */
 function faixaSalarial(v) {
   if (!v.salario) return 'a combinar'
   const teto = tetoDe(v.nome)
   return teto
-    ? `${fmtMoeda(v.salario)} sem experiência comprovada, e ${fmtMoeda(teto)} para quem tem experiência comprovada em carteira`
+    ? `a partir de ${fmtMoeda(v.salario)}; pode chegar até ${fmtMoeda(teto)} com experiência comprovada em carteira — quem define é o responsável na entrevista`
     : fmtMoeda(v.salario)
 }
 
@@ -361,7 +372,8 @@ export function responderFAQ(msg, estado = {}) {
     if (v) {
       const teto = tetoDe(v.nome)
       if (teto && v.salario) {
-        return { texto: `Para ${v.nome} dá para começar sem experiência (${fmtMoeda(v.salario)}); com experiência comprovada em carteira, ${fmtMoeda(teto)}.` }
+        // "até", nunca o valor fechado: ver faixaSalarial().
+        return { texto: `Para ${v.nome} dá para começar sem experiência (${fmtMoeda(v.salario)}); com experiência comprovada em carteira pode chegar até ${fmtMoeda(teto)} — quem define é o responsável na entrevista.` }
       }
       if (!v.profissional) return { texto: `Para ${v.nome} não é preciso experiência.` }
       return { texto: `Para ${v.nome} é necessário ter experiência na função.` }
@@ -383,7 +395,10 @@ export function iniciar(whatsapp) {
     // tudo — ajudante a empresa só contrata na cidade da obra, e alojamento
     // só existe em duas cidades. Perguntar a vaga primeiro fazia gente
     // escolher função para depois descobrir que não dava.
-    estado: { etapa: 'cidade', whatsapp },
+    // `modo` vai daqui: sem ele, uma conversa começada sem GEMINI_API_KEY
+    // ficava com modo indefinido, e na segunda mensagem o servidor não a
+    // reconhecia como candidatura em andamento (ver responder(), abaixo).
+    estado: { modo: 'roteiro', etapa: 'cidade', whatsapp },
     resposta:
       'Olá!  Que bom seu interesse em fazer parte da nossa equipe!\n\n' +
       'Vou te ajudar com a candidatura, é rapidinho. Em qual cidade você quer trabalhar?\n' +
@@ -417,7 +432,24 @@ function respostaSatisfazEtapa(estado, msg) {
   }
 }
 
+/**
+ * Todo estado que SAI do roteiro leva a marca do roteiro.
+ *
+ * Sem GEMINI_API_KEY, iniciar() devolvia { etapa, whatsapp } — sem `modo`. Na
+ * mensagem seguinte, primeiroContato() só continua a conversa quando o modo é
+ * 'ia' ou 'roteiro': ela caía na triagem, que sem IA responde "deixa eu
+ * chamar alguém da equipe", escala e grava modo 'triagem' por cima. A
+ * candidatura nunca era registrada, e cada mensagem virava um alerta.
+ *
+ * A marca só é posta quando não há outra: a queda da IA define `modo` de
+ * propósito, depois de chamar o roteiro, e não pode ser desfeita aqui.
+ */
 export function responder(estado, mensagem) {
+  const r = responderPasso(estado, mensagem)
+  return r?.estado ? { ...r, estado: { modo: 'roteiro', ...r.estado } } : r
+}
+
+function responderPasso(estado, mensagem) {
   // Comando de recomeçar a qualquer momento
   if (ehReset(mensagem)) return iniciar(estado.whatsapp)
   // 1) Responde à etapa atual?
@@ -448,9 +480,18 @@ function avancar(estado, mensagem) {
         const dica = ''
         return { estado: { ...estado, tentativasVaga: tent }, resposta: `Não consegui identificar a vaga. Pode me dizer o número ou o nome?\n\n${listaVagasTexto()}${dica}` }
       }
-      const base = { ...estado, vaga: v.nome, vagaProfissional: v.profissional, tentativasVaga: 0 }
+      /*
+        Quem decide se o roteiro pergunta experiência e registro é
+        perguntaExperiencia(), não o flag `profissional` sozinho.
+
+        Pedreiro vem com profissional=false (experiência virou faixa, não
+        porta), e o roteiro ia da cidade direto para o nome: a ficha chegava
+        ao RH sem registro em carteira — o dado que separa R$ 2.803 do teto —
+        e o "pronto para ligar" marcava "experiência" como faltando.
+      */
+      const base = { ...estado, vaga: v.nome, vagaProfissional: perguntaExperiencia(v.nome), tentativasVaga: 0 }
       const escolha = `Boa escolha! Vaga de *${v.nome}*${v.salario ? ` (${fmtMoeda(v.salario)})` : ' (salário a combinar)'}.`
-      if (v.profissional) {
+      if (base.vagaProfissional) {
         return { estado: { ...base, etapa: 'experiencia' }, resposta: `${escolha}\n\nVocê tem experiência na função de ${v.nome}? (sim ou não)` }
       }
       return { estado: { ...base, etapa: 'nome' }, resposta: `${escolha}\n\nPara finalizar, qual é o seu nome completo?` }
@@ -462,10 +503,11 @@ function avancar(estado, mensagem) {
       // A função dita é uma das abertas: segue com ela.
       const aberta = vagaCitadaExata(funcao) ?? matchVaga(funcao)
       if (aberta) {
-        const proxima = aberta.profissional ? 'experiencia' : 'nome'
+        const pede = perguntaExperiencia(aberta.nome)
+        const proxima = pede ? 'experiencia' : 'nome'
         return {
-          estado: { ...estado, etapa: proxima, vaga: aberta.nome, vagaProfissional: aberta.profissional, tentativasVaga: 0 },
-          resposta: aberta.profissional
+          estado: { ...estado, etapa: proxima, vaga: aberta.nome, vagaProfissional: pede, tentativasVaga: 0 },
+          resposta: pede
             ? `certo, ${aberta.nome.toLowerCase()}. vc tem experiência nessa função? (sim ou não)`
             : `certo, ${aberta.nome.toLowerCase()}. pra finalizar, qual seu nome completo?`,
         }
@@ -498,7 +540,7 @@ function avancar(estado, mensagem) {
         const vagaDita = funcaoFechadaCitada(mensagem) ? null : matchVaga(mensagem)
         if (vagaDita && !estado.vaga) {
           return {
-            estado: { ...estado, vaga: vagaDita.nome, vagaProfissional: vagaDita.profissional },
+            estado: { ...estado, vaga: vagaDita.nome, vagaProfissional: perguntaExperiencia(vagaDita.nome) },
             resposta: `certo, ${vagaDita.nome.toLowerCase()}. e em qual cidade vc quer trabalhar?\n\n${listaCidadesTexto()}`,
           }
         }
@@ -514,15 +556,16 @@ function avancar(estado, mensagem) {
       */
       const jaDisse = funcaoFechadaCitada(mensagem) ? null : matchVaga(mensagem)
       if (jaDisse) {
-        const base = { ...comCidade, vaga: jaDisse.nome, vagaProfissional: jaDisse.profissional, tentativasVaga: 0 }
-        return jaDisse.profissional
+        const pede = perguntaExperiencia(jaDisse.nome)
+        const base = { ...comCidade, vaga: jaDisse.nome, vagaProfissional: pede, tentativasVaga: 0 }
+        return pede
           ? { estado: { ...base, etapa: 'experiencia' }, resposta: `${ondeEh}\n\nVocê tem experiência na função de ${jaDisse.nome}? (sim ou não)` }
           : { estado: { ...base, etapa: 'nome' }, resposta: `${ondeEh}\n\nPara finalizar, qual é o seu nome completo?` }
       }
 
       // Já tinha dito a vaga antes da cidade: segue sem perguntar de novo.
       if (estado.vaga) {
-        return estado.vagaProfissional
+        return perguntaExperiencia(estado.vaga)
           ? { estado: { ...comCidade, etapa: 'experiencia' }, resposta: `${ondeEh}\n\nVocê tem experiência na função de ${estado.vaga}? (sim ou não)` }
           : { estado: { ...comCidade, etapa: 'nome' }, resposta: `${ondeEh}\n\nPara finalizar, qual é o seu nome completo?` }
       }
@@ -535,17 +578,40 @@ function avancar(estado, mensagem) {
     case 'experiencia': {
       const sim = ehSim(mensagem), nao = ehNao(mensagem)
       if (!sim && !nao) return { estado, resposta: `Só para eu registrar: você *tem* experiência como ${estado.vaga}? (sim ou não)` }
+      /*
+        Quem não tem experiência NÃO ouve "normalmente é preciso experiência".
+
+        Experiência virou faixa (dono, 12/09/2026): para pedreiro e
+        carpinteiro dá para começar sem, e quem tem carteira na função entra
+        na faixa maior. A FAQ já tinha sido corrigida; esta frase ficou para
+        trás e dizia o contrário, espantando justamente quem a empresa
+        contrata.
+      */
+      const semExperiencia = tetoDe(estado.vaga)
+        ? `Sem problema, para ${estado.vaga} dá pra começar sem experiência; quem tem carteira na função entra na faixa maior.`
+        : `Entendi, vou registrar e o RH avalia.`
       return {
         estado: { ...estado, etapa: 'registro', temExperiencia: sim },
         resposta: sim
           ? `Ótimo! E você já tem (ou já teve) registro em carteira nessa função? (sim ou não)`
-          : `Entendi. Para ${estado.vaga} normalmente é preciso experiência, mas vou registrar e o RH avalia. Você já teve registro em carteira nessa função? (sim ou não)`,
+          : `${semExperiencia} Você já teve registro em carteira nessa função? (sim ou não)`,
       }
     }
     case 'registro': {
       const sim = ehSim(mensagem), nao = ehNao(mensagem)
       if (!sim && !nao) return { estado, resposta: 'Você já tem ou já teve registro em carteira nessa função? (sim ou não)' }
-      return { estado: { ...estado, etapa: 'nome', temRegistro: sim }, resposta: 'Anotado! Para finalizar, qual é o seu nome completo?' }
+      const comRegistro = { ...estado, temRegistro: sim }
+      /*
+        Com o nome já em mãos, esta etapa NÃO volta a pedir o nome.
+
+        Este passo ia sempre para 'nome'. Numa queda da IA no meio da ficha, o
+        roteiro assume em 'registro' — e só chega aqui quando o nome já
+        existe —, então a resposta era "Anotado! Para finalizar, qual é o seu
+        nome completo?" para quem tinha dado o nome três mensagens antes. Cem
+        por cento das vezes.
+      */
+      if (pareceNome(comRegistro.nome ?? '')) return avancar({ ...comRegistro, etapa: 'nome' }, comRegistro.nome)
+      return { estado: { ...comRegistro, etapa: 'nome' }, resposta: 'Anotado! Para finalizar, qual é o seu nome completo?' }
     }
     case 'nome': {
       const nome = mensagem.trim()
@@ -553,15 +619,25 @@ function avancar(estado, mensagem) {
         return { estado, resposta: 'Preciso do seu *nome completo* (nome e sobrenome), para o registro.' }
       }
       const estadoFinal = { ...estado, etapa: 'fim', nome }
+      // Se a experiência FOI perguntada, ela vai — independentemente do flag
+      // `profissional` da vaga, que hoje vem desligado para pedreiro. Antes a
+      // ficha do roteiro chegava ao RH com tempoExperiencia null mesmo com a
+      // resposta em mãos, e o "pronto para ligar" cobrava experiência.
+      const sabeDaExperiencia = typeof estado.temExperiencia === 'boolean'
       const dados = {
         nomeCompleto: nome,
         vagaPretendida: estado.vaga || null,
         cidadePreferencia: estado.cidade || null,
         whatsapp: estado.whatsapp || null,
-        tempoExperiencia: estado.vagaProfissional ? (estado.temExperiencia ? 'Com experiência' : 'Sem experiência') : null,
-        resumoExperiencia: estado.vagaProfissional
-          ? `Via WhatsApp. Experiência: ${estado.temExperiencia ? 'sim' : 'não'}. Registro em carteira na função: ${estado.temRegistro ? 'sim' : 'não'}.`
-          : 'Candidatura via WhatsApp.',
+        tempoExperiencia: sabeDaExperiencia
+          ? (estado.temExperiencia ? 'Com experiência' : 'Sem experiência')
+          : null,
+        // As frases de registro são as que o RH sabe ler (ver ficha-rh.js).
+        resumoExperiencia: [
+          'Via WhatsApp.',
+          sabeDaExperiencia ? `Experiência: ${estado.temExperiencia ? 'sim' : 'não'}.` : null,
+          fraseDeRegistro(estado.temRegistro),
+        ].filter(Boolean).join(' '),
         transcricao: estadoFinal,
       }
       // A confirmação de sucesso é enviada pelo SERVIDOR só depois de salvar.

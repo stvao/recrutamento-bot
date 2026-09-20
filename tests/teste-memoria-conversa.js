@@ -34,8 +34,11 @@ const DIA = 24 * HORA
 {
   const r = oQueJaSabe({})
   ok('sem nada, diz que não sabe nada', /ainda não sabe nada/i.test(r.texto))
-  ok('a primeira coisa a saber é a vaga', r.falta[0] === 'qual vaga interessa')
-  ok('a segunda é onde mora', r.falta[1] === 'em qual cidade mora')
+  // A cidade onde MORA vem primeiro (dono, 17/09/2026): é ela que decide quem
+  // pode ser ajudante, e perguntar a vaga antes faz a pessoa escolher função
+  // para depois descobrir que não dá.
+  ok('a primeira coisa a saber é onde mora', r.falta[0] === 'em qual cidade mora')
+  ok('a segunda é a vaga', r.falta[1] === 'qual vaga interessa')
 }
 
 // ── O caso real: nome pedido de novo ───────────────────────────────────
@@ -78,7 +81,13 @@ const DIA = 24 * HORA
   }
   const r = oQueJaSabe(completa)
   ok('ficha completa: nada falta', r.falta.length === 0)
-  ok('e manda parar de perguntar', /FICHA ESTÁ COMPLETA/.test(r.texto) && /Não faça mais nenhuma pergunta/.test(r.texto))
+  // Com a ficha cheia, falta a confirmação que decide o selo "pronto para
+  // ligar" no RH — e só depois dela é que ele para de perguntar.
+  ok('ficha completa sem confirmação: pede a confirmação, uma vez',
+    /FICHA ESTÁ COMPLETA/.test(r.texto) && /posso passar sua ficha/.test(r.texto))
+  const confirmada = oQueJaSabe({ ...completa, confirmouInteresse: 'sim' })
+  ok('com a confirmação dada, manda parar de perguntar',
+    /FICHA ESTÁ COMPLETA/.test(confirmada.texto) && /Não faça mais nenhuma pergunta/.test(confirmada.texto))
 }
 
 // ── Quem volta depois de horas ─────────────────────────────────────────

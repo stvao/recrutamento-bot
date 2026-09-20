@@ -71,3 +71,101 @@ export function proibidoEm(texto) {
     .filter(([, regra]) => regra.test(r))
     .map(([nome]) => nome)
 }
+
+/*
+  ── A barreira da CONVERSA DE RECRUTAMENTO ────────────────────────────────
+
+  A triagem e o atendimento ao funcionário passavam por proibidoEm(); a
+  conversa da Maria Vitória, não — e é justamente a que fica no celular da
+  pessoa, mensagem por mensagem, por meses. As regras do dono viviam só como
+  instrução no prompt, e instrução não é garantia: com o modelo devolvendo
+  "vc começa sem registro e a gente registra depois dos 90 dias. me passa seu
+  pix e o numero do pis", a frase saía inteira para o candidato.
+
+  As regras daqui miram a AFIRMAÇÃO, não o assunto. Barrar o assunto barraria
+  o robô fazendo o que deve: ele PRECISA perguntar "já teve registro em
+  carteira?" e PRECISA dizer que a passagem é reembolsada na chegada.
+
+  REGRAS.valor NÃO entra: recrutamento informa salário, esse é o trabalho.
+*/
+
+/** A resposta fala de registro em carteira? */
+function falaDeRegistro(t) {
+  return /registr|carteira|assinad|fichad|\bclt\b/i.test(t)
+}
+
+/**
+ * ...e diz QUANDO o registro acontece?
+ *
+ * Regra do dono: o robô nunca diz quando a carteira é assinada, nem que
+ * alguém começa sem registro. "Já teve registro em carteira nessa função?" é
+ * pergunta legítima e não casa com nenhum destes.
+ */
+const QUANDO_REGISTRA = [
+  /come[çc]a\w*\s+sem\s+(registro|carteira)/i,
+  /trabalha\w*\s+sem\s+(registro|carteira)/i,
+  /sem\s+(registro|carteira)\s+(no|nos|na|nas|por|durante|os)\b/i,
+  /(registr|assin|fich)\w*\s+(a\s+carteira\s+|te\s+|vc\s+|voc[êe]\s+)?(s[óo]\s+)?(depois|ap[óo]s)\b/i,
+  /(carteira|registro)\s+(vem|sai|fica|[ée]|s[óo])\s+(depois|ap[óo]s)/i,
+  /(depois|ap[óo]s)\s+d[eo]s?\s+\d+\s*(dias?|m[êe]s|meses|semanas?)/i,
+]
+
+/**
+ * Pede dado bancário, PIS ou senha.
+ *
+ * Regra do dono: nada de PIS nem conta bancária por chat, e PIX só depois de
+ * aprovado — o que é outro caminho no servidor (atenderAprovado), que não
+ * passa por aqui. Na conversa de recrutamento, nenhum dos dois tem o que
+ * fazer.
+ */
+const DADO_BANCARIO = new RegExp(
+  '\\b(pis|pasep|nit)\\b'
+  + '|\\bpix\\b'
+  + '|conta\\s+(banc[áa]ria|corrente|poupan[çc]a)'
+  + '|\\bag[êe]ncia\\b'
+  + '|\\b(senha|token)\\b',
+  'i',
+)
+
+/**
+ * Promete adiantar a passagem.
+ *
+ * A regra é: a empresa NÃO adianta, e reembolsa quando a pessoa chega na
+ * obra. A resposta certa fala de passagem e de adiantar — por isso o que se
+ * procura é a PROMESSA, e ela é descartada quando vem negada.
+ */
+const PROMESSAS_DE_PASSAGEM = [
+  /(vou|vamos|posso|podemos|a gente vai|a empresa vai)\s+(te\s+)?adiantar/i,
+  /(mando|mandamos|envio|enviamos|compro|compramos|pago|pagamos)\s+(a\s+|sua\s+|tua\s+)?passagem/i,
+  /(a gente|a empresa|n[óo]s)\s+(manda|envia|compra|paga)\s+(a\s+|sua\s+|tua\s+)?passagem/i,
+]
+
+function prometePassagem(t) {
+  return PROMESSAS_DE_PASSAGEM.some((re) => {
+    const achado = re.exec(t)
+    if (!achado) return false
+    const antes = t.slice(Math.max(0, achado.index - 25), achado.index)
+    return !/\bn[ãa]o\b|\bnunca\b|\bnem\b/i.test(antes)
+  })
+}
+
+/** O que a Maria Vitória diz quando a resposta dela foi barrada. */
+export const FRASE_SEGURA =
+  'deixa eu chamar aqui uma pessoa da equipe pra falar com você sobre isso, só um minutinho'
+
+/**
+ * O que há de proibido nesta resposta da conversa de recrutamento.
+ *
+ * Devolve a lista de categorias — vazia quando a resposta pode sair. Como em
+ * proibidoEm(), o TEXTO nunca entra no retorno: ele está sendo descartado
+ * justamente por conter isso.
+ */
+export function proibidoNaConversa(texto) {
+  const t = String(texto ?? '')
+  const achados = []
+  if (falaDeRegistro(t) && QUANDO_REGISTRA.some(re => re.test(t))) achados.push('quando_registra')
+  if (DADO_BANCARIO.test(t)) achados.push('dado_bancario')
+  if (REGRAS.link.test(t)) achados.push('link')
+  if (prometePassagem(t)) achados.push('passagem_adiantada')
+  return achados
+}

@@ -203,11 +203,12 @@ ok('jornada continua', /segunda a quinta/i.test(texto('qual o horario?')) && JOR
 // ── Os fatos da Maria Vitória ──────────────────────────────────────────
 {
   const f = montarFatos({ vagas: catalogo.vagasAtuais(), cidades: catalogo.cidadesAtuais(), jornada: JORNADA })
-  ok('fatos: salários do RH', /Servente: R\$ 2303,00/.test(f) && /Pedreiro: R\$ 2803,00/.test(f))
+  // Com ponto de milhar e espaço fino, como o resto do robô escreve dinheiro.
+  ok('fatos: salários do RH', /Servente: R\$\s?2\.303,00/.test(f) && /Pedreiro: a partir de R\$\s?2\.803,00/.test(f))
   ok('fatos: alojamento só para pedreiro', /S[ÓO] PARA PEDREIRO/.test(f) && /MORA na cidade da obra/.test(f))
   ok('fatos: o teto exige carteira', /COMPROVADA EM CARTEIRA/.test(f))
   ok('fatos: teto só na linha do pedreiro',
-    /Pedreiro:.*3500,00/.test(f) && !/Servente:.*3500/.test(f) && !/Estagi.rio:.*3500/.test(f))
+    /Pedreiro:.*até R\$\s?3\.500,00/.test(f) && !/Servente:.*3500/.test(f) && !/Estagi.rio:.*3500/.test(f))
   ok('fatos: alojamento como está no RH', /Bastos: tem alojamento/.test(f) && /Buritama: NÃO tem alojamento/.test(f))
   ok('fatos: formas de contratação', /CLT/.test(f) && /diária/.test(f) && /empreita/.test(f))
   ok('fatos: pagamento e vale', /5º dia útil/.test(f) && /dia 20/.test(f))

@@ -311,15 +311,33 @@ ${conhecido}` : ''}`
 
 /** Os fatos que o modelo pode usar, montados a partir do banco. */
 export function montarFatos({ vagas, cidades, jornada }) {
-  const reais = (n) => `R$ ${n.toFixed(2).replace('.', ',')}`
+  // O mesmo formato do resto do robô: com ponto de milhar. O reais() local
+  // escrevia "R$ 2803,00", e os FATOS são "a única fonte de verdade".
+  const reais = (n) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
   const linhasVagas = vagas.map(v => {
     const salario = typeof v.salario === 'number' ? reais(v.salario) : 'a combinar conforme experiência'
     const teto = typeof v.salario === 'number' ? tetoDe(v.nome) : null
+    /*
+      O teto é ATÉ, nunca um valor fechado.
+
+      Dizia "R$ 3500,00 para quem tem experiência COMPROVADA EM CARTEIRA", e
+      os FATOS são a única fonte de verdade do modelo: ele repetia o número
+      como combinado. A regra do dono é "até R$ 3.500", e o próprio
+      catalogo.js diz que o teto é possibilidade, nunca promessa.
+    */
     const faixa = teto
-      ? ` para quem NÃO tem experiência comprovada; ${reais(teto)} para quem tem experiência COMPROVADA EM CARTEIRA`
+      ? `; pode chegar até ${reais(teto)} com experiência COMPROVADA EM CARTEIRA — quem define é o responsável na entrevista`
       : ''
-    const exp = v.profissional ? ' (exige experiência na função)' : ' (não precisa de experiência)'
-    return `- ${v.nome}: ${salario}${faixa}${exp}`
+    /*
+      Com faixa, nada de "(exige experiência na função)".
+
+      A faixa já diz tudo, e é ela que carrega a regra do dono: para pedreiro
+      e carpinteiro dá para começar sem experiência. Com o flag `profissional`
+      ligado no cadastro do RH, a linha do Pedreiro se contradizia sozinha —
+      "a partir de R$ 2.803,00 … (exige experiência na função)".
+    */
+    const exp = teto ? '' : v.profissional ? ' (exige experiência na função)' : ' (não precisa de experiência)'
+    return `- ${v.nome}: ${teto ? 'a partir de ' : ''}${salario}${faixa}${exp}`
   }).join('\n')
 
   const linhasCidades = cidades.map(c =>

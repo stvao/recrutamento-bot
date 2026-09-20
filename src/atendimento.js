@@ -15,10 +15,12 @@
  */
 import {
   iniciar as iniciarRoteiro, responder as responderRoteiro, ehReset, JORNADA,
-  funcaoFechadaCitada, vagaCitadaExata,
+  funcaoFechadaCitada, vagaCitadaExata, responderFAQ,
 } from './brain.js'
 import { conversar, montarFatos, iaDisponivel } from './ia.js'
-import { vagasAtuais, cidadesAtuais } from './catalogo.js'
+import { vagasAtuais, cidadesAtuais, perguntaExperiencia } from './catalogo.js'
+import { proibidoNaConversa, FRASE_SEGURA } from './resposta-segura.js'
+import { fraseDeRegistro, PREFIXO_RESUMO } from './ficha-rh.js'
 import { norm } from './texto.js'
 import { cpfValido } from './ia-documento.js'
 
@@ -56,6 +58,21 @@ function simNaoOuNulo(v) {
   if (v === 'sim') return true
   if (v === 'nao') return false
   return null
+}
+
+/**
+ * Duas cidades são a mesma?
+ *
+ * A cidade onde a pessoa mora vem em texto livre do modelo, do jeito que ela
+ * escreveu: "Peruibe" sem acento, "Bastos - SP" com a UF colada. A comparação
+ * era só toLowerCase(), então "Peruibe" e "Peruíbe" eram cidades diferentes —
+ * e quem mora na própria cidade da obra ouvia a pergunta de ficar longe de
+ * casa sem ter saído de casa.
+ */
+function mesmaCidade(a, b) {
+  const soONome = (c) => norm(String(c ?? '').split(/\s+-\s+|\//)[0])
+  const x = soONome(a)
+  return Boolean(x) && x === soONome(b)
 }
 
 /**
@@ -112,11 +129,17 @@ export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } 
   const falta = []
 
   // A ordem da falta é a ordem em que se pergunta (ver ia.js).
-  if (tem(e.vaga)) sabido.push(`vaga: ${e.vaga}`)
-  else falta.push('qual vaga interessa')
-
+  //
+  // A CIDADE ONDE A PESSOA MORA vem primeiro (dono, 17/09/2026, commit
+  // 83579c3): é ela que decide quase tudo — ajudante só se contrata na
+  // cidade da obra, e alojamento só existe em duas cidades. O commit mudou o
+  // prompt e o roteiro, mas esta lista continuava pedindo a vaga primeiro, e
+  // o modelo recebia duas ordens opostas na mesma mensagem.
   if (tem(e.cidadeMora)) sabido.push(`mora em: ${e.cidadeMora}`)
   else falta.push('em qual cidade mora')
+
+  if (tem(e.vaga)) sabido.push(`vaga: ${e.vaga}`)
+  else falta.push('qual vaga interessa')
 
   if (tem(e.cidade)) sabido.push(`cidade onde quer trabalhar: ${e.cidade}`)
   else falta.push('em qual cidade quer trabalhar')
@@ -124,16 +147,22 @@ export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } 
   if (tem(e.nome)) sabido.push(`nome completo: já informado (${String(e.nome).split(/\s+/)[0]})`)
   else falta.push('o nome completo')
 
+  // Estágio não tem experiência na função nem registro em carteira: quem
+  // estagia está começando, e estágio não é vínculo de carteira (Lei 11.788).
+  // Perguntar as duas coisas a um estudante é conversa que não leva a nada —
+  // o que decide o estágio é o curso, logo abaixo.
+  const ehEstagio = /estagi/i.test(e.vaga ?? '')
+
   if (e.temExperiencia === true || e.temExperiencia === false || tem(e.tempoExperiencia)) {
     const quanto = tem(e.tempoExperiencia) ? ` (${e.tempoExperiencia})` : ''
     sabido.push(`experiência na função: ${e.temExperiencia === false ? 'não tem' : 'tem'}${quanto}`)
-  } else {
+  } else if (!ehEstagio) {
     falta.push('se tem experiência na função, e quanto tempo')
   }
 
   if (e.temRegistro === true || e.temRegistro === false) {
     sabido.push(`registro em carteira na função: ${e.temRegistro ? 'sim' : 'não'}`)
-  } else {
+  } else if (!ehEstagio) {
     falta.push('se já teve registro em carteira nesta função')
   }
 
@@ -143,8 +172,15 @@ export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } 
   if (tem(e.disponibilidadeInicio)) sabido.push(`pode começar: ${e.disponibilidadeInicio}`)
   else falta.push('quando pode começar')
 
+  // Obra em outra cidade não se pergunta a AJUDANTE.
+  //
+  // A empresa só contrata servente/ajudante na cidade onde ele mora (dono,
+  // 12/09/2026). A pergunta ia assim mesmo, e o "Sim" chegava à ficha do RH:
+  // uma disponibilidade registrada que a empresa não tem como aproveitar, e
+  // uma expectativa criada por escrito no celular da pessoa.
+  const ehAjudante = /servente|ajudante/i.test(e.vaga ?? '')
   if (tem(e.aceitaOutrasObras)) sabido.push(`aceita obra em outra cidade: ${e.aceitaOutrasObras}`)
-  else falta.push('se aceita trabalhar em obra de outra cidade')
+  else if (!ehAjudante) falta.push('se aceita trabalhar em obra de outra cidade')
 
   // Camisa e bota saíram da ficha (dono, 17/09/2026): metade das fichas
   // ficava incompleta, e esse dado só é usado na contratação.
@@ -177,25 +213,68 @@ export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } 
   // CPF e RG: opcionais (regra do dono, 13/09/2026). Pede uma vez, depois do
   // nome, e não insiste. O número nunca vai para o modelo.
   const opcional = []
+
+  /*
+    Quem mandou a foto do documento não é mandado mandar a foto do documento.
+
+    receberDocumento() grava `documentos`, `cpf` e `rg` no estado, e a ficha do
+    RH traz `rgJaInformado` — e nada disso era olhado aqui: só `cpf` e
+    `cpfJaInformado`. Quem mandava a foto de um RG antigo, sem CPF impresso
+    (ou quando a leitura automática falhava), ouvia em seguida "manda foto do
+    documento". O comentário do server ("não pede CPF de quem acabou de mandar
+    o RG") prometia o contrário.
+  */
+  const mandouDocumento = tem(e.rg) || Boolean(e.rgJaInformado) || (e.documentos?.length ?? 0) > 0
+  if (mandouDocumento) sabido.push('mandou foto de documento')
+
   if (tem(e.cpf) || e.cpfJaInformado) sabido.push('CPF: já informado')
   else if (e.recusouDocumentos) sabido.push('CPF e RG: preferiu não informar — NÃO peça de novo')
-  else if (tem(e.nome)) opcional.push('CPF e RG, ou foto do documento — opcional, pedir uma vez só')
+  else if (mandouDocumento) {
+    // A foto chegou mas não trouxe o número: pede só o número, uma vez.
+    opcional.push('só o NÚMERO do CPF, se ela quiser — a foto do documento já chegou, não peça de novo')
+  } else if (tem(e.nome)) opcional.push('CPF e RG, ou foto do documento — opcional, pedir uma vez só')
 
   // O que o recrutador já conferiu: não pergunta de novo.
   if (e.avaliacaoTecnica) sabido.push(`já conferiu o que sabe fazer (${e.avaliacaoTecnica})`)
   // Estágio não tem pergunta de obra: o que decide é o curso.
   else if (tem(e.vaga) && tem(e.nome) && !/estagi/i.test(e.vaga)) falta.push('uma ou duas perguntas do que sabe fazer na função')
+  /*
+    Alojamento só se pergunta onde ele existe.
+
+    A condição olhava só "é pedreiro" e "mora em outra cidade", sem conferir
+    se a cidade DA OBRA tem alojamento. Um pedreiro de Marília que escolhia
+    Buritama era perguntado se aceita ficar no alojamento — de uma cidade que
+    não tem alojamento nenhum. Ele podia chegar lá achando que tinha onde
+    dormir, contra a regra do dono (alojamento só em Bastos e Pereiras).
+
+    Onde não há alojamento a pergunta continua existindo, com outro texto: o
+    que o RH precisa saber é a mesma coisa — se o pedreiro de fora realmente
+    consegue vir e ficar. Por isso a resposta vai no MESMO campo
+    alojamentoFirme, e o selo "pronto para ligar" do RH continua acendendo.
+  */
   if (/pedreiro/i.test(e.vaga ?? '') && tem(e.cidadeMora) && tem(e.cidade)
-    && String(e.cidadeMora).toLowerCase() !== String(e.cidade).toLowerCase()) {
-    if (e.alojamentoFirme) sabido.push(`disponibilidade real de alojamento: ${e.alojamentoFirme}`)
-    else falta.push('se tem disponibilidade REAL de ficar no alojamento, longe de casa')
+    && !mesmaCidade(e.cidadeMora, e.cidade)) {
+    const cidadeDaObra = cidadesAtuais().find(c => mesmaCidade(c.nome, e.cidade))
+    if (e.alojamentoFirme) sabido.push(`disponibilidade real de ficar longe de casa: ${e.alojamentoFirme}`)
+    else if (cidadeDaObra?.alojamento) falta.push('se tem disponibilidade REAL de ficar no alojamento, longe de casa')
+    else falta.push(`se consegue chegar e se manter em ${e.cidade} por conta própria (lá não tem alojamento)`)
   }
   if (tem(e.sinais)) sabido.push(`o que você já percebeu dela: ${e.sinais}`)
 
+  // Disse uma função que não está aberta: o modelo precisa saber, ou registra
+  // a vaga mais parecida no lugar dela (ver a marca funcaoFechada em atender).
+  if (tem(e.funcaoFechada)) {
+    sabido.push(`disse que é ${e.funcaoFechada}, e NÃO temos essa vaga aberta — diga isso e`
+      + ' ofereça as vagas que estão abertas; nunca registre outra função no lugar')
+  }
+
   // Deixar passar para o responsável ligar é o que separa quem só perguntava
   // de quem quer mesmo a vaga.
+  const jaPerguntouALigacao = (e.historico ?? []).some(m =>
+    m?.de === 'maria' && /passar sua ficha|respons[aá]vel te ligar/i.test(m.texto ?? ''))
   if (e.confirmouInteresse === 'sim') sabido.push('deixou passar a ficha para o responsável ligar')
   else if (e.confirmouInteresse === 'nao') sabido.push('NÃO quis passar a ficha por enquanto — não insista')
+  else if (jaPerguntouALigacao) sabido.push('já perguntou se pode passar a ficha — não pergunte de novo')
 
   const partes = []
 
@@ -219,12 +298,35 @@ export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } 
     ? `O QUE VOCÊ JÁ SABE DESTA PESSOA — está confirmado, NUNCA pergunte de novo:\n${sabido.map(x => `- ${x}`).join('\n')}`
     : 'Você ainda não sabe nada desta pessoa.')
 
+  /*
+    Ficha completa, mas ainda sem a confirmação de que pode passar para ligar.
+
+    O bloco dizia "A FICHA ESTÁ COMPLETA. Não faça mais nenhuma pergunta de
+    ficha" — uma ordem mais direta, e mais perto do fim do prompt, do que a
+    regra fixa ("pergunte UMA vez se pode passar para o responsável ligar",
+    ia.js). O modelo obedecia à última: confirmouInteresse ficava nulo, e o
+    selo "pronto para ligar" do RH, que exige essa resposta, não acendia — o
+    gestor via "confirmar que quer a ligação" em ficha atrás de ficha.
+
+    A confirmação NÃO entra em `falta`, de propósito: quem deixa de responder
+    aqui é a pessoa, e o lembrete de cadastro (que olha falta.length) passaria
+    a cobrar "não terminamos seu cadastro" de quem já terminou. E entrando em
+    falta, o modelo repetiria a pergunta a cada turno, contra o "não insista".
+  */
+  const faltaConfirmarALigacao = !falta.length && !e.confirmouInteresse && !jaPerguntouALigacao
+
   partes.push(falta.length
     ? `AINDA FALTA SABER (pergunte só a próxima, uma coisa por vez):\n${falta.map(x => `- ${x}`).join('\n')}`
-    : 'A FICHA ESTÁ COMPLETA. Não faça mais nenhuma pergunta de ficha. Responda só o que\n'
-      + 'a pessoa perguntar; se ela só agradecer ou se despedir, responda curto e encerre.')
+    : faltaConfirmarALigacao
+      ? 'A FICHA ESTÁ COMPLETA. Falta só UMA coisa: pergunte uma vez "posso passar sua ficha\n'
+        + 'pro responsável te ligar?" e registre a resposta em confirmouInteresse. Depois disso\n'
+        + 'não faça mais nenhuma pergunta de ficha.'
+      : 'A FICHA ESTÁ COMPLETA. Não faça mais nenhuma pergunta de ficha. Responda só o que\n'
+        + 'a pessoa perguntar; se ela só agradecer ou se despedir, responda curto e encerre.')
 
-  if (seDer.length && tem(e.nome)) {
+  // Com a ficha completa não se puxa mais assunto: o bloco abaixo convidava a
+  // perguntar mais coisas logo depois de mandar parar de perguntar.
+  if (seDer.length && tem(e.nome) && falta.length) {
     partes.push(`SE A CONVERSA DER (sem alongar, ligado ao que ela contou):\n${seDer.map(x => `- ${x}`).join('\n')}`)
   }
 
@@ -260,9 +362,20 @@ function estadoDeRoteiro(estado) {
     temExperiencia: estado.temExperiencia ?? null,
     temRegistro: estado.temRegistro ?? null,
     nome: estado.nome ?? null,
+    // Sem isto o roteiro não sabia se a vaga pede experiência: depois da
+    // cidade ele ia direto para o nome, e a ficha chegava ao RH sem o
+    // registro em carteira — o dado que decide a faixa salarial.
+    vagaProfissional: perguntaExperiencia(estado.vaga),
+    // Levado junto para o roteiro não repetir a frase de escalada a cada
+    // falha do modelo: o estado era montado do zero e esta marca se perdia.
+    avisouPosFicha: Boolean(estado.avisouPosFicha),
   }
   if (!base.vaga) return { ...base, etapa: 'vaga' }
   if (!base.cidade) return { ...base, etapa: 'cidade' }
+  // Experiência e registro ANTES do nome, quando a vaga tem faixa: é o que
+  // decide entre o salário inicial e o teto, e é o que o RH precisa ter.
+  if (base.vagaProfissional && base.temExperiencia === null) return { ...base, etapa: 'experiencia' }
+  if (base.vagaProfissional && base.temRegistro === null) return { ...base, etapa: 'registro' }
   if (!base.nome) return { ...base, etapa: 'nome' }
   if (base.temExperiencia === null) return { ...base, etapa: 'experiencia' }
   if (base.temRegistro === null) return { ...base, etapa: 'registro' }
@@ -272,6 +385,74 @@ function estadoDeRoteiro(estado) {
   // que é a forma mais rápida de a pessoa achar que ninguém está prestando
   // atenção.
   return { ...base, etapa: 'fim' }
+}
+
+/**
+ * Quanto tempo a conversa fica no roteiro depois de três falhas seguidas.
+ *
+ * A queda quase sempre é a cota do Gemini, que devolve null na hora por dez
+ * minutos. Sem prazo de volta, três mensagens dentro desses dez minutos
+ * prendiam a conversa no roteiro pelo resto do TTL — três dias — mesmo com a
+ * Maria Vitória de volta minutos depois.
+ */
+const VOLTAR_IA_MS = 10 * 60 * 1000
+
+/**
+ * A pergunta fixa de cada item da ficha, para quando o modelo está fora.
+ *
+ * [ trecho do item em `falta`, como a pergunta já feita se parece, a pergunta ]
+ *
+ * O segundo campo existe porque `falta` é calculado com o estado de ANTES da
+ * mensagem: o primeiro item costuma ser exatamente o que a pessoa acabou de
+ * responder, e perguntar de novo é o jeito mais rápido de ela achar que
+ * ninguém leu.
+ *
+ * "uma ou duas perguntas do que sabe fazer" não está aqui de propósito: quem
+ * deixa de fazer essa é o robô, não a pessoa.
+ */
+const PERGUNTAS_DA_QUEDA = [
+  ['em qual cidade mora', /mora/i, 'em qual cidade vc mora?'],
+  ['qual vaga interessa', /fun[çc][ãa]o|vaga/i, 'qual função vc procura?'],
+  ['em qual cidade quer trabalhar', /cidade/i, 'em qual das nossas cidades vc quer trabalhar?'],
+  ['o nome completo', /nome/i, 'qual seu nome completo?'],
+  ['se tem experiência na função', /experi[êe]ncia/i, 'vc tem experiência na função? quanto tempo?'],
+  ['registro em carteira', /registro|carteira/i, 'vc já teve registro em carteira nessa função?'],
+  ['data de nascimento', /nascimento|nasceu/i, 'qual sua data de nascimento?'],
+  ['quando pode começar', /come[çc]ar/i, 'quando vc pode começar?'],
+  ['obra de outra cidade', /outra cidade/i, 'vc aceita trabalhar em obra de outra cidade?'],
+  ['contato de recado', /recado/i, 'me passa um contato de recado? nome e telefone de alguém'],
+  ['curso, semestre', /curso|faculdade/i, 'qual curso vc faz, que semestre e qual horário?'],
+  ['ficar no alojamento', /alojamento/i, 'vc tem disponibilidade de ficar no alojamento durante a semana?'],
+  ['se manter em', /se manter/i, 'vc consegue chegar e se manter nessa cidade por conta própria?'],
+]
+
+/**
+ * O que responder quando o modelo caiu e o roteiro não tem mais o que perguntar.
+ *
+ * Sem isto, o `default` do roteiro respondia "sua ficha já está com o rh. vou
+ * pedir pra alguém te responder por aqui" — com escalarHumano — para quem só
+ * estava respondendo a ficha. O candidato ficava esperando uma pessoa que
+ * ninguém chamou, e o `escalouEm` gravado no store desligava para sempre o
+ * lembrete de cadastro daquela conversa.
+ *
+ * Aqui não se escala e não se promete ninguém: a mensagem dela já fica no
+ * histórico, e a Maria Vitória a lê no turno seguinte.
+ */
+function respostaDeQueda(estado, mensagem) {
+  const faq = responderFAQ(mensagem, estado)
+  if (faq) return { estado, resposta: faq.texto, escalarHumano: Boolean(faq.escalar) }
+
+  const ultimaDaMaria = [...(estado.historico ?? [])].reverse()
+    .find(m => m?.de === 'maria')?.texto ?? ''
+
+  for (const item of oQueJaSabe(estado).falta) {
+    const achado = PERGUNTAS_DA_QUEDA.find(([trecho]) => item.includes(trecho))
+    if (!achado) continue
+    const [, jaPerguntada, pergunta] = achado
+    if (jaPerguntada.test(ultimaDaMaria)) continue
+    return { estado, resposta: `anotado. ${pergunta}` }
+  }
+  return { estado, resposta: 'anotado' }
 }
 
 export function iniciarAtendimento(whatsapp) {
@@ -291,8 +472,20 @@ export function iniciarAtendimento(whatsapp) {
  *   { estado, resposta, escalarHumano?, acao? }
  */
 export async function atender(estado, mensagem, { paradoHa = null } = {}) {
-  // Conversa que começou no roteiro continua nele: trocar de atendente no
-  // meio faria a Maria Vitória aparecer sem saber o que já foi conversado.
+  /*
+    Conversa rebaixada por queda da IA volta para a Maria Vitória.
+
+    A queda de três falhas é quase sempre a cota do Gemini, que volta em
+    minutos; a conversa é que não voltava, e seguia no roteiro pelos três dias
+    de TTL. Quem começou no roteiro puro não tem `voltarIAEm` e continua nele:
+    trocar de atendente no meio faria a Maria Vitória aparecer sem saber o que
+    já foi conversado.
+  */
+  if (estado?.modo === 'roteiro' && estado.voltarIAEm
+    && Date.now() >= estado.voltarIAEm && iaDisponivel()) {
+    estado = { ...estado, modo: 'ia', falhasIA: 0, voltarIAEm: null }
+  }
+
   if (!iaDisponivel() || estado?.modo !== 'ia') {
     return responderRoteiro(estado, mensagem)
   }
@@ -331,7 +524,15 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
     // exatamente o que se estava tentando substituir. Só depois de três
     // falhas seguidas é que se assume que ela está fora do ar.
     const falhas = (estado.falhasIA ?? 0) + 1
-    const r = responderRoteiro(estadoDeRoteiro(estado), mensagem)
+    const doRoteiro = estadoDeRoteiro(estado)
+    /*
+      Com o essencial já coletado o roteiro não tem o que perguntar, e o
+      `default` dele chama gente e diz "sua ficha já está com o rh" — para
+      quem só estava respondendo a ficha. Ver respostaDeQueda().
+    */
+    const r = doRoteiro.etapa === 'fim'
+      ? respostaDeQueda(estado, mensagem)
+      : responderRoteiro(doRoteiro, mensagem)
 
     // O que a pessoa disse ENTRA no histórico mesmo com a falha.
     //
@@ -348,25 +549,72 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
     return {
       ...r,
       estado: falhas >= 3
-        ? { ...r.estado, modo: 'roteiro' }
+        ? {
+            /*
+              Rebaixar não pode APAGAR a ficha.
+
+              Era `{ ...r.estado, modo: 'roteiro' }`, e o estado do roteiro tem
+              sete campos: sumiam historico, cidadeMora, dataNascimento,
+              sinais, recusouDocumentos, avaliacaoTecnica e alojamentoFirme. Com
+              a cota do Gemini estourada (66 vezes em 12/09/2026), três
+              mensagens dentro dos dez minutos de espera bastavam.
+            */
+            ...estado, ...r.estado, modo: 'roteiro',
+            historico: historicoComQueda,
+            voltarIAEm: Date.now() + VOLTAR_IA_MS,
+          }
         : { ...estado, ...r.estado, modo: 'ia', falhasIA: falhas, historico: historicoComQueda },
     }
   }
 
   // ── Confere tudo que ela diz ter entendido ────────────────────────────
 
-  // A pessoa citou uma função que não está aberta, e nenhuma vaga aberta por
-  // inteiro: a vaga que o modelo "entendeu" neste turno não vale. Ele tende a
-  // escolher a mais parecida da lista — mestre de obras não é pedreiro.
+  /*
+    A função fechada dita fica MARCADA na conversa, e não só no turno.
+
+    A trava olhava apenas a mensagem da vez. Testado com o modelo simulado:
+    turno 1 "sou mestre de obras, 20 anos" com o modelo devolvendo "Pedreiro"
+    → a vaga fica null, a trava funciona. Turno 2 "moro em bastos", o modelo
+    repete "Pedreiro" (o ESQUEMA manda repetir o que já sabe) → a vaga vira
+    Pedreiro, e no turno 3 sai criar_candidatura de Pedreiro. É exatamente o
+    caso de 12/09/2026 que o dono pediu para não acontecer, e o alerta
+    "Função não aberta" do RH não pega, porque a ficha chega já como Pedreiro.
+
+    A marca só sai quando a pessoa disser uma vaga ABERTA por inteiro.
+  */
+  const abertaNestaMensagem = vagaCitadaExata(mensagem)
+  const funcaoFechada = abertaNestaMensagem
+    ? null
+    : funcaoFechadaCitada(mensagem) ?? estado.funcaoFechada ?? null
+
+  // Enquanto a marca estiver de pé, a vaga que o modelo devolve não vale: ele
+  // tende a escolher a mais parecida da lista — mestre de obras não é pedreiro.
   const vagaDoModelo = conferir(saida.vaga, vagas.map(v => v.nome))
-  const trocouAFuncao = Boolean(funcaoFechadaCitada(mensagem)) && !vagaCitadaExata(mensagem)
-    && vagaDoModelo && vagaDoModelo !== estado.vaga
+  const vagaConferida = funcaoFechada && vagaDoModelo !== estado.vaga ? null : vagaDoModelo
+
+  /*
+    ── A barreira de saída da conversa ────────────────────────────────────
+
+    Até aqui nada conferia o que a Maria Vitória escreve — e é o texto que
+    fica no celular da pessoa. As regras do dono (nunca dizer quando o
+    registro é feito, nada de PIS/conta/PIX por chat, nada de link, nunca
+    prometer adiantar passagem) existiam só como instrução no prompt.
+    Ver proibidoNaConversa().
+  */
+  const proibido = proibidoNaConversa(saida.resposta)
+  if (proibido.length) {
+    console.warn(`[atendimento] resposta barrada (${proibido.join(', ')}) — chamando gente.`)
+  }
+  // O histórico guarda o que FOI ENVIADO: guardando a frase descartada, o
+  // modelo a leria no turno seguinte e a repetiria.
+  const resposta = proibido.length ? FRASE_SEGURA : saida.resposta
 
   const novo = {
     ...estado,
     falhasIA: 0,
-    historico: [...historico, { de: 'maria', texto: saida.resposta }].slice(-LIMITE_HISTORICO),
-    vaga:   (trocouAFuncao ? null : vagaDoModelo) ?? estado.vaga ?? null,
+    funcaoFechada,
+    historico: [...historico, { de: 'maria', texto: resposta }].slice(-LIMITE_HISTORICO),
+    vaga:   vagaConferida ?? estado.vaga ?? null,
     cidade: conferir(saida.cidade, cidades.map(c => c.nome)) ?? estado.cidade ?? null,
     temExperiencia: simNaoOuNulo(saida.temExperiencia) ?? estado.temExperiencia ?? null,
     temRegistro:    simNaoOuNulo(saida.temRegistro) ?? estado.temRegistro ?? null,
@@ -408,9 +656,10 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
 
   const resultado = {
     estado: novo,
-    resposta: saida.resposta,
-    escalarHumano: Boolean(saida.precisaHumano) || perguntouSeEhIA,
-    motivoEscalada: perguntouSeEhIA ? 'perguntou_se_e_ia' : 'pediu_atendimento',
+    resposta,
+    escalarHumano: Boolean(saida.precisaHumano) || perguntouSeEhIA || proibido.length > 0,
+    motivoEscalada: proibido.length ? `resposta barrada: ${proibido.join(', ')}`
+      : perguntouSeEhIA ? 'perguntou_se_e_ia' : 'pediu_atendimento',
     ultimaMensagem: mensagem,
   }
 
@@ -430,7 +679,9 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
   // pessoa já respondeu.
   const temEssencial = novo.nome && novo.vaga && novo.cidade
   if (temEssencial) {
-    resultado.estado = { ...novo, registrado: true }
+    // `registrado` é marcado pelo SERVIDOR, depois de o RH confirmar. Marcar
+    // aqui dizia que a ficha estava salva antes de saber se estava: com o RH
+    // fora do ar, a conversa terminava com registrado=true e nada no RH.
     resultado.acao = {
       tipo: 'criar_candidatura',
       primeiraVez: !estado.registrado,
@@ -455,6 +706,10 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
         contatoRecadoTelefone: novo.contatoRecadoTelefone ?? null,
         cpf: novo.cpf ?? null,
         rg: novo.rg ?? null,
+        // A recusa de documento precisa sobreviver à conversa: sem ela no RH,
+        // quem volta depois de 7 dias (quando a conversa já saiu do store)
+        // ouve o pedido de CPF outra vez, contra a regra de pedir uma vez só.
+        recusouDocumentos: novo.recusouDocumentos ? true : null,
         confirmouInteresse: novo.confirmouInteresse === 'sim' ? 'Sim'
           : novo.confirmouInteresse === 'nao' ? 'Não' : null,
         alojamentoFirme: { sim: 'Sim', nao: 'Não', duvida: 'Em dúvida' }[novo.alojamentoFirme] ?? null,
@@ -471,18 +726,27 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
         cursoEstagio: novo.cursoEstagio ?? null,
         referenciaNome: novo.referenciaNome ?? null,
         referenciaTelefone: novo.referenciaTelefone ?? null,
+        // A frase de registro é a que o RH sabe ler, e é a MESMA do roteiro
+        // (ver ficha-rh.js): é ela que vira a nota do critério Registro lá.
         resumoExperiencia: [
-          'Conversa por WhatsApp (Maria Vitória).',
+          PREFIXO_RESUMO,
           novo.resumo,
-          novo.temRegistro === true ? 'Já teve registro em carteira na função.'
-            : novo.temRegistro === false ? 'Nunca teve registro na função.' : null,
+          fraseDeRegistro(novo.temRegistro),
         ].filter(Boolean).join(' '),
         dadosBrutos: { origem: 'whatsapp-bot', historico: novo.historico },
       },
     }
+    /*
+      Sem prometer que alguém já foi avisado.
+
+      Dizia "Já avisei a equipe" e ninguém era avisado: o servidor só escrevia
+      um console.warn. Agora o texto diz o que é verdade — ficou anotado aqui,
+      e o servidor tenta de novo até dar certo (ver a fila de reenvio no
+      server.js).
+    */
     resultado.respostaFalha =
-      `${saida.resposta}\n\n(Tive um probleminha para salvar aqui no sistema. ` +
-      'Já avisei a equipe, pode deixar que a gente registra.)'
+      `${resposta}\n\n(Tive um probleminha para salvar aqui no sistema, ` +
+      'mas já anotei tudo aqui e a equipe vai ver seu cadastro.)'
   }
 
   return resultado

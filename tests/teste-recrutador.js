@@ -31,13 +31,16 @@ function ok(nome, condicao) {
 // ── Filtra quem vai mesmo para o alojamento ────────────────────────────
 {
   const deFora = oQueJaSabe({ vaga: 'Pedreiro', nome: 'João Silva', cidadeMora: 'Marília', cidade: 'Bastos' })
-  ok('pedreiro de fora: confirma disponibilidade REAL de alojamento', deFora.falta.some(x => /disponibilidade REAL de ficar no alojamento/.test(x)))
+  // Onde a obra TEM alojamento, pergunta do alojamento; onde não tem, pergunta
+  // se ele consegue vir e se manter — a resposta vai no mesmo campo.
+  ok('pedreiro de fora: confirma que consegue mesmo ficar longe de casa',
+    deFora.falta.some(x => /disponibilidade REAL de ficar no alojamento|se manter em/.test(x)))
   const daqui = oQueJaSabe({ vaga: 'Pedreiro', nome: 'João Silva', cidadeMora: 'Bastos', cidade: 'Bastos' })
   ok('pedreiro da cidade: não pergunta alojamento', !daqui.falta.some(x => /alojamento/.test(x)))
   const ajudante = oQueJaSabe({ vaga: 'Servente', nome: 'Ana Souza', cidadeMora: 'Marília', cidade: 'Bastos' })
   ok('ajudante nunca é empurrado para alojamento', !ajudante.falta.some(x => /alojamento/.test(x)))
   const firme = oQueJaSabe({ vaga: 'Pedreiro', nome: 'João Silva', cidadeMora: 'Marília', cidade: 'Bastos', alojamentoFirme: 'sim' })
-  ok('já confirmado, não pergunta de novo', firme.sabido.some(x => /disponibilidade real de alojamento: sim/.test(x)))
+  ok('já confirmado, não pergunta de novo', firme.sabido.some(x => /disponibilidade real de ficar longe de casa: sim/.test(x)))
 }
 
 // ── O que ele percebeu vai junto ───────────────────────────────────────
