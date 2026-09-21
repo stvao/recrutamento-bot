@@ -80,7 +80,23 @@ ok('texto comum fica igual', semDocumento('sou pedreiro há 8 anos, salário 350
   const at = readFileSync(join(aqui, '..', 'src', 'atendimento.js'), 'utf8')
   ok('arquivo não recebe mais "consigo ler só texto"', !/'Recebi seu arquivo/.test(sv))
   ok('arquivo do candidato é anexado', /return receberDocumento\(msg\)/.test(sv))
-  ok('funcionário mandando documento: calado', /ficha\?\.tipo === 'funcionario'\) return null/.test(sv))
+  // Funcionário mandando documento. Este teste exigia a linha literal
+  // `return null` — e com ela travava o defeito: o robô é calado com
+  // funcionário (decisão do dono, 12/09/2026), mas o `return null` também
+  // JOGAVA A FOTO FORA, sem arquivar nem avisar ninguém. A pessoa mandava o
+  // RG e a empresa nunca sabia.
+  //
+  // O que se protege agora é a intenção, e não o mecanismo: calado com o
+  // funcionário enquanto a cobrança estiver desligada, e o documento
+  // arquivado e avisado sempre.
+  ok('funcionário mandando documento: vai para o caminho próprio',
+    /ficha\?\.tipo === 'funcionario'\) return receberDocumentoDeFuncionario\(msg, \{ calado \}\)/.test(sv))
+  ok('funcionário mandando documento: calado com a cobrança desligada',
+    /!cobranca\.cobrancaLigada\(\)\) return null/.test(sv))
+  ok('funcionário mandando documento: arquivado, e não jogado fora',
+    /arquivarDocumentoFuncionario\(\{/.test(sv))
+  ok('funcionário mandando documento: o RH fica sabendo',
+    /async function receberDocumentoDeFuncionario[\s\S]*?avisarRH\(/.test(sv))
   ok('documento guardado vai depois da ficha', /mandarDocumentosGuardados\(from\)/.test(sv))
   ok('o arquivo do privado é baixado com o recrutamento ligado', /gastos\.autorizado\(de, false\) \|\| recrutamentoLigado\(\)/.test(bl))
   ok('a IA pede CPF uma vez, como opcional', /peça UMA vez o CPF e o RG/.test(ia) && /não é obrigatório/.test(ia))

@@ -287,3 +287,71 @@ export function _limparCacheQuem() {
 export function _corpoDaCandidatura(dados) {
   return JSON.parse(montarCorpo(dados))
 }
+
+// ── Documento de funcionário ────────────────────────────────────────────────
+
+/**
+ * Arquiva no dossiê um documento que um FUNCIONÁRIO mandou.
+ *
+ * Antes isto não existia: a foto que um funcionário mandava era descartada no
+ * robô sem aviso a ninguém. O RH decide de quem é pelo número — e recusa
+ * (409) quando o número é de mais de uma pessoa, em vez de adivinhar.
+ */
+export async function arquivarDocumentoFuncionario({ whatsapp, tipo, nome, arquivo }) {
+  if (!RH_API_URL || !RH_API_TOKEN) return { ok: false, motivo: 'nao-configurado' }
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/funcionario/documento`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RH_API_TOKEN}` },
+      body: JSON.stringify({ whatsapp, tipo, nome, base64: Buffer.from(arquivo).toString('base64') }),
+      signal: AbortSignal.timeout(20000),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (r.ok) return { ok: true, ...j }
+    return { ok: false, status: r.status, motivo: j.error ?? `HTTP ${r.status}` }
+  } catch (e) {
+    return { ok: false, motivo: e.message }
+  }
+}
+
+/** Quem cobrar esta semana. O RH já tira quem foi cobrado há menos de 7 dias. */
+export async function funcionariosParaCobrar() {
+  if (!RH_API_URL || !RH_API_TOKEN) return []
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/funcionario/pendencias`, {
+      headers: { Authorization: `Bearer ${RH_API_TOKEN}` },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!r.ok) {
+      if (r.status !== 404) console.warn(`[rh-client] pendências de funcionário: HTTP ${r.status}`)
+      return []
+    }
+    const j = await r.json().catch(() => ({}))
+    return Array.isArray(j?.pessoas) ? j.pessoas : []
+  } catch (e) {
+    console.warn('[rh-client] pendências de funcionário indisponíveis:', e.message)
+    return []
+  }
+}
+
+/**
+ * Registra no RH que esta pessoa foi cobrada hoje.
+ *
+ * Chamado ANTES de mandar. Sem a marca, não manda: uma cobrança a menos numa
+ * semana é melhor que a mesma pessoa receber duas — e é a marca no RH, e não
+ * a memória do robô, que sobrevive a um reinício.
+ */
+export async function marcarCobrado(whatsapp) {
+  if (!RH_API_URL || !RH_API_TOKEN) return false
+  try {
+    const r = await fetch(`${RH_API_URL}/api/integracao/funcionario/pendencias`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RH_API_TOKEN}` },
+      body: JSON.stringify({ whatsapp }),
+      signal: AbortSignal.timeout(10000),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}

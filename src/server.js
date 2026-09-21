@@ -26,9 +26,11 @@ import { enviarMensagem, parseWebhook, baixarMidiaCloud } from './connectors.js'
 import {
   enviarCandidatura, enviarDocumento, avisarRH, quemE,
   pendenciasDe, salvarPix, quemLembrarDocumentos, marcarLembreteDocumentos, fichaDoCandidato,
+  arquivarDocumentoFuncionario, funcionariosParaCobrar, marcarCobrado,
 } from './rh-client.js'
 import * as guardados from './documentos-guardados.js'
 import * as lembrete from './lembrete-cadastro.js'
+import * as cobranca from './cobranca-documentos.js'
 import { estadoDaFicha, paradoHaDaFicha } from './ficha-rh.js'
 import { chavePixNoTexto, respostaDaPendencia } from './contratacao.js'
 import * as resumoRecrutamento from './resumo-recrutamento.js'
@@ -455,7 +457,7 @@ async function receberDocumento(msg, { calado = false } = {}) {
   }
   // Funcionário mandando documento é assunto do RH, não do recrutamento.
   const ficha = await quemE({ whatsapp: msg.de }).catch(() => null)
-  if (ficha?.tipo === 'funcionario') return null
+  if (ficha?.tipo === 'funcionario') return receberDocumentoDeFuncionario(msg, { calado })
 
   const lido = await lerDocumentoCandidato({ arquivo: msg.arquivo, tipo: msg.tipo })
   const tipo = lido?.tipo ?? 'outro'
@@ -488,6 +490,42 @@ async function receberDocumento(msg, { calado = false } = {}) {
   const oQue = { curriculo: 'seu currículo', ctps: 'a foto da carteira', rg: 'o documento', cpf: 'o documento', cnh: 'o documento' }[tipo]
   const recebi = oQue ? `recebi ${oQue}, obrigada` : 'recebi aqui, obrigada'
   return estado?.vaga ? recebi : `${recebi}. qual vaga vc tá procurando?`
+}
+
+/**
+ * Documento que um FUNCIONÁRIO mandou.
+ *
+ * Aqui antes havia um `return null`, e a foto sumia: o robô foi desligado
+ * para funcionário (12/09/2026), o caminho de TEXTO avisava o RH e o de
+ * ARQUIVO não fazia nada. A pessoa mandava o RG, ninguém respondia, e
+ * ninguém na empresa ficava sabendo que tinha chegado.
+ *
+ * Agora ele é lido, arquivado no dossiê e o RH é avisado — sempre. Responder
+ * à pessoa é outra conversa: só com a cobrança ligada, porque é ela que torna
+ * a resposta esperada ("mande a foto por aqui"). Desligada, o robô segue
+ * calado com funcionário, como o dono decidiu.
+ */
+async function receberDocumentoDeFuncionario(msg, { calado = false } = {}) {
+  const lido = await lerDocumentoCandidato({ arquivo: msg.arquivo, tipo: msg.tipo }).catch(() => null)
+  const tipo = lido?.tipo ?? 'outro'
+
+  const r = await arquivarDocumentoFuncionario({
+    whatsapp: msg.de, tipo, nome: msg.nomeArquivo, arquivo: msg.arquivo,
+  })
+  console.log(`[documento] funcionário ${discreto(msg.de)}: ${tipo} — ${r.ok ? 'arquivado no dossiê' : `NÃO arquivado (${r.status ?? r.motivo})`}`)
+
+  // O aviso é o conserto do sumiço: mesmo arquivado, alguém precisa saber
+  // que a pessoa tentou falar com a empresa. Sem arquivar, mais ainda.
+  avisarRH({
+    whatsapp: msg.de,
+    motivo: r.ok
+      ? `Funcionário mandou ${r.recebido ?? 'um documento'} pelo WhatsApp — arquivado no dossiê`
+      : `Funcionário mandou um documento pelo WhatsApp e ele NÃO foi arquivado (${r.status === 409 ? 'número de mais de uma pessoa' : r.motivo}) — conferir`,
+    trecho: '',
+  }).catch(() => {})
+
+  if (calado || !r.ok || !cobranca.cobrancaLigada()) return null
+  return cobranca.textoDoRecebido(r.recebido, r.faltam)
 }
 
 /**
@@ -888,6 +926,42 @@ relogioResumo.unref?.()
 
 const relogioLembretes = setInterval(() => rodarLembretes().catch(e => console.error('[lembrete]', e.message)), 15 * 60 * 1000)
 relogioLembretes.unref?.()
+
+/*
+  Cobrança de documento de FUNCIONÁRIO.
+
+  DESLIGADA por padrão (COBRAR_DOCUMENTOS=on liga). O robô foi desligado para
+  funcionário por decisão do dono em 12/09/2026; isto é uma exceção estreita,
+  com texto fixo e uma vez por semana, e ligar é decisão dele.
+
+  Conta-gotas: no máximo COBRANCA_MAX_POR_RODADA por rodada, com pausa de
+  25 a 45 segundos entre uma e outra. O conector é o Baileys, não-oficial, e
+  rajada de mensagens é o que o WhatsApp pune banindo o número — o mesmo por
+  onde entram os candidatos.
+*/
+let cobrandoAgora = false
+async function rodarCobranca() {
+  const d = cobranca.deveRodar()
+  if (!d.rodar || cobrandoAgora) return
+  cobrandoAgora = true
+  try {
+    const pessoas = (await funcionariosParaCobrar()).slice(0, cobranca.MAX_POR_RODADA)
+    for (const [i, p] of pessoas.entries()) {
+      if (i > 0) await new Promise(ok => setTimeout(ok, cobranca.pausa()))
+      // Sem a marca no RH, não manda: é ela que impede a segunda cobrança
+      // na mesma semana, inclusive depois de um reinício.
+      if (!(await marcarCobrado(p.whatsapp))) continue
+      const numero = String(p.whatsapp).replace(/\D/g, '')
+      const r = await enviarMensagem(numero.length <= 11 ? `55${numero}` : numero, cobranca.textoDaCobranca(p.primeiroNome, p.itens))
+      console.log(`[cobranca] documentos ${discreto(numero)}: ${r?.ok ? 'cobrado' : 'falhou'} (${p.itens.length} item/itens)`)
+    }
+  } finally {
+    cobrandoAgora = false
+  }
+}
+const relogioCobranca = setInterval(() => rodarCobranca().catch(e => console.error('[cobranca]', e.message)), 15 * 60 * 1000)
+relogioCobranca.unref?.()
+console.log(`[cobranca] documentos de funcionário: ${cobranca.cobrancaLigada() ? `LIGADA (${cobranca.diaDaCobranca()})` : 'desligada'}`)
 
 if (gastos.gastosAtivo()) {
   const s = gastos.situacao()
