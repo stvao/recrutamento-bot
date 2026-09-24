@@ -706,6 +706,9 @@ export async function atender(estado, mensagem, { paradoHa = null } = {}) {
         contatoRecadoTelefone: novo.contatoRecadoTelefone ?? null,
         cpf: novo.cpf ?? null,
         rg: novo.rg ?? null,
+        // Quem recusou não deve ouvir o pedido de novo, nem depois de 7 dias:
+        // é o RH que guarda essa memória.
+        recusouDocumentos: novo.recusouDocumentos ? 'Sim' : null,
         // A recusa de documento precisa sobreviver à conversa: sem ela no RH,
         // quem volta depois de 7 dias (quando a conversa já saiu do store)
         // ouve o pedido de CPF outra vez, contra a regra de pedir uma vez só.

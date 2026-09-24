@@ -32,6 +32,9 @@ const CAMPOS_DA_FICHA = [
   'alojamentoFirme', 'avaliacaoTecnica', 'respostasTecnicas', 'sinais', 'indicadoPor',
   // O que ajuda quem contrata (dono, 14/09/2026).
   'especialidade', 'ultimaObra', 'anosRegistro', 'nrs', 'ferramentaPropria', 'conducao', 'cursoEstagio', 'referenciaNome', 'referenciaTelefone',
+  // Quem recusou CPF/RG não ouve o pedido de novo, nem depois de 7 dias: essa
+  // memória tem de ficar no RH, que é o que sobrevive à conversa.
+  'recusouDocumentos',
 ]
 
 /**
@@ -43,6 +46,22 @@ const CAMPOS_DA_FICHA = [
  * diferente — o roteiro manda `transcricao`, a IA manda `dadosBrutos` — e
  * aceitar os dois aqui é mais barato que uniformizar os dois lados.
  */
+/**
+ * Telefone de verdade, ou identificador do WhatsApp?
+ *
+ * Quando o robô não descobre o número por trás de um @lid, ele usa o próprio
+ * identificador como chave da conversa. Mandado ao RH como "whatsapp", ele
+ * virava um wa.me que não existe, um pedido de documentos que não chega e uma
+ * SEGUNDA ficha no dia em que o telefone aparecia. Vai em campo separado.
+ */
+export function enderecoParaRH(valor) {
+  const d = String(valor ?? '').replace(/\D/g, '')
+  const semDdi = d.startsWith('55') && d.length > 11 ? d.slice(2) : d
+  const ehTelefone = (semDdi.length === 11 && semDdi[2] === '9')
+    || (semDdi.length === 10 && /[2-5]/.test(semDdi[2]))
+  return ehTelefone ? { whatsapp: d, lid: null } : { whatsapp: null, lid: d || null }
+}
+
 function montarCorpo(dados) {
   const ficha = {}
   for (const campo of CAMPOS_DA_FICHA) {
@@ -50,8 +69,10 @@ function montarCorpo(dados) {
   }
 
   const bruto = dados.dadosBrutos ?? dados.transcricao ?? {}
+  const endereco = enderecoParaRH(dados.whatsapp)
   return JSON.stringify({
     ...ficha,
+    ...endereco,
     dadosBrutos: JSON.stringify({ origem: 'whatsapp-bot', ...bruto }),
   })
 }
