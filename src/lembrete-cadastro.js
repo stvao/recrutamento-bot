@@ -48,7 +48,29 @@ export function decidir(sessao, { agora = Date.now(), atendidaPorGente = false, 
   if (parado >= LIMITE_MS) return { lembrar: false, motivo: 'parado há tempo demais' }
   if (!comercial) return { lembrar: false, motivo: 'fora do horário comercial' }
 
-  if (oQueJaSabe(e).falta.length === 0) return { lembrar: false, motivo: 'ficha completa' }
+  /*
+    Conversa fechada não recebe "não terminamos seu cadastro".
+
+    Quem respondeu "pode sim" à pergunta de passar a ficha ouviu "o
+    responsável te liga" — e 25h depois recebia um lembrete dizendo o
+    contrário. Quem disse que não quis também: a regra é não insistir. E a
+    conversa que terminou no ROTEIRO ("sua candidatura foi registrada") não
+    tem as perguntas que só a IA faz, então a ficha nunca conta como completa.
+  */
+  if (e.confirmouInteresse === 'sim' || e.confirmouInteresse === 'nao') {
+    return { lembrar: false, motivo: 'conversa fechada' }
+  }
+  if (e.modo === 'roteiro' && e.etapa === 'fim') return { lembrar: false, motivo: 'roteiro concluiu' }
+
+  /*
+    Só conta como falta o que a PESSOA ainda deve responder. O que depende do
+    robô — conferir o que ela sabe fazer, pedir a confirmação da ligação — não
+    é motivo para dizer que ela não terminou o cadastro.
+  */
+  const doRobo = /sabe fazer|passar sua ficha/i
+  if (oQueJaSabe(e).falta.filter(x => !doRobo.test(x)).length === 0) {
+    return { lembrar: false, motivo: 'ficha completa' }
+  }
 
   const historico = e.historico ?? []
   const ultima = historico[historico.length - 1]

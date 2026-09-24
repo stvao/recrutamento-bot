@@ -33,9 +33,9 @@ const COBRANCA = [
   'nao recebi', 'nao recebemos', 'nao me pagaram', 'nao pagaram', 'nao caiu',
   'nao foi pago', 'nao vou receber', 'vou receber algo', 'vou receber nada',
   'meu pagamento', 'meu dinheiro', 'meu salario', 'meu vale', 'meu acerto',
-  'meu deposito', 'meu pix', 'minha diaria', 'minhas diarias', 'meus dias',
-  'meu dia de trabalho', 'me pagar', 'me paguem', 'estao devendo', 'ta devendo',
-  'esta devendo', 'devendo meu', 'trabalhei', 'trabalhamos', 'fui demitido',
+  'meu deposito', 'meu pix', 'minha diaria', 'minhas diarias',
+  'meu dia de trabalho', 'me paguem', 'estao devendo', 'ta devendo',
+  'esta devendo', 'devendo meu', 'fui demitido',
   'fui demitida', 'fui mandado embora', 'me mandaram embora', 'rescisao',
   'verbas rescisorias', 'meu acerto', 'meu ultimo dia',
   // Do caso real: "so o dinheiro do Renato vai cair hj?" e "fui o unico que
@@ -43,6 +43,28 @@ const COBRANCA = [
   // trabalhou — nenhum candidato escreve assim.
   'dinheiro do', 'vai cair hj', 'vai cair hoje', 'vai cair ainda', 'cair algo',
   'recebeu nada', 'recebi nada', 'unico que nao',
+]
+
+/*
+  Palavras que o CANDIDATO também usa, e que por isso não bastam sozinhas.
+
+  "trabalhei 5 anos de pedreiro com carteira" e "quanto vocês vão me pagar por
+  dia?" eram lidas como cobrança: o robô ficava mudo no meio do cadastro,
+  marcava a conversa como escalada (o lembrete de 24h nunca saía) e mandava ao
+  RH um alerta de cobrança sobre um candidato comum. E é o próprio robô que
+  pergunta pela última obra e pela experiência.
+
+  "trabalhei"/"trabalhamos"/"meus dias" só contam como cobrança quando a
+  mensagem TAMBÉM fala de dinheiro; "me pagar" só nas frases de cobrança.
+*/
+const SO_COM_DINHEIRO = ['trabalhei', 'trabalhamos', 'meus dias']
+// Com fronteira de palavra: sem ela, "carteira assiNADA" casava com "nada", e
+// "trabalhei 5 anos de pedreiro com carteira assinada" virava cobrança.
+const FALA_DE_DINHEIRO = /\bnao receb|\bnao pag|\bnao caiu|\bnada\b|\bdinheiro\b|\bacerto\b|\bpagament|\bpix\b|\bdevendo\b|\bdeposit|\bsalario\b|\bdiaria|semana passada|mes passado/
+const FRASES_DE_COBRANCA = [
+  'quando vao me pagar', 'quando voces vao me pagar', 'quando vai me pagar',
+  'nao vao me pagar', 'nao vai me pagar', 'vao me pagar ou', 'falta me pagar',
+  'tem que me pagar', 'preciso que me pague',
 ]
 
 /**
@@ -55,7 +77,10 @@ const COBRANCA = [
 export function ehCobranca(texto) {
   const t = norm(texto ?? '')
   if (!t) return false
-  return COBRANCA.some(termo => t.includes(termo))
+  if (COBRANCA.some(termo => t.includes(termo))) return true
+  // "trabalhei" só é cobrança junto de dinheiro.
+  if (SO_COM_DINHEIRO.some(termo => t.includes(termo)) && FALA_DE_DINHEIRO.test(t)) return true
+  return FRASES_DE_COBRANCA.some(termo => t.includes(termo))
 }
 
 /**

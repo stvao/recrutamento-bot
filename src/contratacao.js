@@ -42,6 +42,38 @@ export function chavePixNoTexto(texto) {
   return null
 }
 
+/**
+ * A mensagem é a CHAVE, e não uma frase que por acaso tem número?
+ *
+ * chavePixNoTexto pega o primeiro telefone, CPF ou e-mail que encontra. Sem
+ * esta pergunta, "se não me achar liga no 14 99812-3456 que é da minha
+ * esposa" virava chave PIX, e "meu cpf é ..." (quando o RH pediu o CPF como
+ * documento) virava chave também — por cima de uma chave que o RH já tinha
+ * conferido.
+ *
+ * Vale quando a pessoa fala "pix", ou quando o que sobra da mensagem, tirando
+ * as palavras de recheio, é só a chave.
+ */
+const RECHEIO = /\b(meu|minha|meus|minhas|o|a|e|eh|[ée]|chave|pix|numero|n[úu]mero|do|da|de|banco|conta|nubank|caixa|itau|ita[úu]|bradesco|santander|inter|pode|anota|anotar|ai|a[íi]|t[áa]|tudo|bem|obrigado|obrigada|por|favor|sim|ok)\b/gi
+
+export function mensagemEhChavePix(texto) {
+  const t = String(texto ?? '')
+  if (!t.trim()) return false
+  if (/\bpix\b/i.test(t)) return true
+  /*
+    Falando de DOCUMENTO, não é chave.
+
+    O RH pede o CPF como documento na mesma conversa, e "meu cpf é ..." virava
+    chave de pagamento — por cima da chave que o RH já tinha conferido.
+  */
+  if (/\b(cpf|rg|documento|documentos|carteira|pis|titulo|t[íi]tulo|reservista|certidao|certid[ãa]o)\b/i.test(t)) return false
+  const chave = chavePixNoTexto(t)
+  if (!chave) return false
+  const sobra = t.replace(RECHEIO, ' ').replace(/[^\w@.+-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  // Sobrou só a chave (ou quase): no máximo duas "palavras" além dela.
+  return sobra.split(' ').filter(Boolean).length <= 2
+}
+
 /** O que dizer depois de receber um documento ou o PIX, com o que ainda falta. */
 export function respostaDaPendencia({ faltam = [], pixFalta = false } = {}, recebido = 'recebi') {
   const itens = [...faltam.map(t => ROTULO[t] ?? t), ...(pixFalta ? ['sua chave pix'] : [])]

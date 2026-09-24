@@ -101,7 +101,10 @@ ok('frase sem função fechada', brain.funcaoFechadaCitada('sou pedreiro') === n
   // Entre aspas simples: como TEXTO DE RESPOSTA. O comentário que explica por
   // que a frase saiu a cita entre aspas duplas, e deve continuar lá.
   ok('a frase "consigo ler só mensagem de texto" saiu', !/'consigo ler só mensagem de texto/.test(baileys))
-  ok('só áudio que falhou recebe resposta', /recrutamentoLigado\(\) && audio\)/.test(baileys))
+  // O áudio ilegível agora passa pelo ROTEADOR (marcado audioIlegivel), para
+  // respeitar as mesmas regras das outras mensagens — quem está com uma pessoa
+  // da empresa, quem trabalha na empresa e quem cobra pagamento não recebe.
+  ok('só áudio que falhou recebe resposta', /if \(audio\) \{/.test(baileys) && /audioIlegivel: true/.test(baileys))
   ok('mensagem temporária é aberta', /ephemeralMessage\?\.message/.test(baileys))
   ok('visualização única é aberta', /viewOnceMessageV2\?\.message/.test(baileys))
   // \r?\n: o arquivo é gravado com quebra de linha do Windows.

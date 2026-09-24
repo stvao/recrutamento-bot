@@ -61,7 +61,9 @@ ok('o download depende disso', /vaiServir \? await baixar\(/.test(fonte))
 // Quem manda foto sem legenda no privado tem que receber resposta. Sem esta
 // ordem, a foto do desconhecido deixaria de ser baixada E de ser respondida.
 const posVaiServir = fonte.indexOf('const vaiServir =')
-const posResposta = fonte.indexOf('não consegui ouvir seu áudio')
+// A resposta do áudio ilegível saiu do baileys e virou uma mensagem marcada
+// para o roteador; o que se prova aqui é a ORDEM: decidir se baixa vem antes.
+const posResposta = fonte.indexOf('audioIlegivel: true')
 ok('a decisão vem antes da resposta padrão',
   posVaiServir > 0 && posResposta > 0 && posVaiServir < posResposta)
 

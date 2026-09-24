@@ -136,10 +136,18 @@ limpeza.unref?.()
 const timer = setInterval(salvar, 5000)
 timer.unref?.()
 
-// Reinício planejado (deploy) grava antes de sair.
-for (const sinal of ['SIGINT', 'SIGTERM', 'beforeExit']) {
-  process.on(sinal, () => { salvar(); if (sinal !== 'beforeExit') process.exit(0) })
-}
+/*
+  Reinício planejado (deploy) grava antes de sair — e SÓ isso.
+
+  Este arquivo é importado antes de o server.js registrar o desligamento
+  organizado dele, e o ouvinte de SIGINT daqui chamava process.exit(0) na
+  hora: o handler do server nunca rodava. A cada pm2 restart morriam as
+  mensagens em andamento — texto esperando na rajada, chamada ao Gemini,
+  resposta na pausa de digitação —, e o WhatsApp já as tinha confirmado, então
+  não voltavam. Quem decide quando sair é o server.js; aqui só se grava, no
+  'exit', que é síncrono.
+*/
+process.on('exit', salvar)
 
 export function getEstado(telefone) {
   const s = sessoes.get(telefone)
@@ -207,6 +215,46 @@ export function marcarLembrado(telefone, texto) {
     historico: [...(s.estado.historico ?? []), { de: 'maria', texto }].slice(-40),
   }
   sujo = true
+}
+
+/**
+ * Desfaz a marca do lembrete quando o envio falhou.
+ *
+ * A marca é posta ANTES de enviar, para ninguém receber duas vezes. Se o
+ * envio falha, sem isto a pessoa fica marcada como lembrada sem nunca ter
+ * recebido nada — e o lembrete é único por regra.
+ */
+export function desmarcarLembrado(telefone, texto) {
+  const s = sessoes.get(telefone)
+  if (!s?.estado) return
+  const historico = (s.estado.historico ?? []).filter(m => !(m.de === 'maria' && m.texto === texto))
+  s.estado = { ...s.estado, lembradoEm: null, historico }
+  sujo = true
+}
+
+/**
+ * O endereço de verdade desta conversa no WhatsApp.
+ *
+ * Conversa @lid sem telefone conhecido tem como chave os dígitos do próprio
+ * LID — um "telefone" que não existe. Guardando o jid original, o lembrete de
+ * 24h e o pedido de documentos (que saem fora da conversa, horas depois e
+ * sobrevivendo a reinício) chegam a quem devem.
+ */
+export function anotarJid(telefone, jid) {
+  if (!telefone || !jid || telefone === jid) return
+  const s = sessoes.get(telefone)
+  if (s) {
+    if (s.jid === jid) return
+    s.jid = jid
+  } else {
+    sessoes.set(telefone, { jid, atualizadoEm: Date.now(), iniciadoEm: Date.now() })
+  }
+  sujo = true
+}
+
+/** O jid guardado desta conversa, se houver. */
+export function jidDe(telefone) {
+  return sessoes.get(telefone)?.jid ?? null
 }
 
 export function limpar(telefone) {

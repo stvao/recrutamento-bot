@@ -20,19 +20,21 @@ import { iaDisponivel } from './ia.js'
 import {
   getEstado, setEstado, limpar, getAbandonada,
   marcarConcluida, marcarEscalada, metricas, sessoesParaLembrete, marcarLembrado,
+  desmarcarLembrado, anotarJid, jidDe,
 } from './store.js'
 import { getVagas, origemDaLista, intervaloDeAtualizacao } from './catalogo.js'
-import { enviarMensagem, parseWebhook, baixarMidiaCloud } from './connectors.js'
+import { enviarMensagem, parseWebhook, baixarMidiaCloud, conectado } from './connectors.js'
 import {
   enviarCandidatura, enviarDocumento, avisarRH, quemE,
   pendenciasDe, salvarPix, quemLembrarDocumentos, marcarLembreteDocumentos, fichaDoCandidato,
   arquivarDocumentoFuncionario, funcionariosParaCobrar, marcarCobrado,
 } from './rh-client.js'
 import * as guardados from './documentos-guardados.js'
+import * as fichasPendentes from './candidaturas-pendentes.js'
 import * as lembrete from './lembrete-cadastro.js'
 import * as cobranca from './cobranca-documentos.js'
 import { estadoDaFicha, paradoHaDaFicha } from './ficha-rh.js'
-import { chavePixNoTexto, respostaDaPendencia } from './contratacao.js'
+import { chavePixNoTexto, mensagemEhChavePix, respostaDaPendencia } from './contratacao.js'
 import * as resumoRecrutamento from './resumo-recrutamento.js'
 import { lerDocumentoCandidato, MAX_DOCUMENTO_BYTES } from './ia-documento.js'
 import * as funcionario from './funcionario.js'
@@ -307,6 +309,69 @@ async function rotear(msg) {
 
   if (msg.ehGrupo) return null
 
+  /*
+    UMA mensagem por vez, por número.
+
+    O WhatsApp entrega as mensagens em paralelo e ninguém esperava a anterior
+    terminar. Quem mandava "meu nome é João da Silva" e, enquanto o Gemini
+    respondia (2 a 8 s), "sou pedreiro, moro em Bastos", tinha as duas
+    atendidas ao mesmo tempo: as duas liam o estado antigo, as duas
+    respondiam, e a gravação de uma apagava a da outra — o nome se perdia.
+
+    A fila fica DEPOIS do módulo de gastos de propósito: lá uma foto sem
+    legenda espera a mensagem seguinte (até 60 s), e enfileirar a legenda
+    atrás da foto travaria justamente o par que precisa se encontrar.
+  */
+  return naFila(msg.de, () => atenderRecrutamento(msg))
+}
+
+/** As conversas em andamento, uma fila por número. */
+const filas = new Map()
+
+function naFila(de, tarefa) {
+  const anterior = filas.get(de) ?? Promise.resolve()
+  const atual = anterior.then(tarefa, tarefa)
+  // A fila guarda a versão que nunca rejeita: uma falha não pode travar as
+  // mensagens seguintes desta pessoa.
+  const naFilaAgora = atual.catch(() => null)
+  filas.set(de, naFilaAgora)
+  naFilaAgora.then(() => {
+    if (filas.get(de) === naFilaAgora) filas.delete(de)
+  })
+  return atual
+}
+
+/** Quanto tempo o robô fica calado depois de uma cobrança de pagamento. */
+const CALADO_MS = 7 * 24 * 3600_000
+/** E de quanto em quanto tempo, no máximo, avisa o RH sobre a mesma conversa. */
+const AVISO_MS = 12 * 3600_000
+
+/**
+ * Cala esta conversa e avisa o RH — no máximo uma vez a cada 12 horas.
+ *
+ * O silêncio não ficava gravado: quem cobrava pagamento recebia silêncio na
+ * primeira mensagem e resposta normal na segunda ("??", "alguém responde?"),
+ * e cada mensagem gerava um alerta novo — foram 64 numa madrugada.
+ */
+function calar(msg, motivo) {
+  const anterior = getEstado(msg.de)
+  const jaAvisou = anterior?.modo === 'calado' && Date.now() - (anterior.avisadoEm ?? 0) < AVISO_MS
+  marcarEscalada(msg.de)
+  setEstado(msg.de, {
+    ...(anterior ?? {}),
+    modo: 'calado',
+    whatsapp: msg.de,
+    motivoCalado: motivo,
+    caladoDesde: anterior?.caladoDesde ?? Date.now(),
+    avisadoEm: jaAvisou ? anterior.avisadoEm : Date.now(),
+  })
+  if (!jaAvisou) {
+    avisarRH({ whatsapp: msg.de, motivo, trecho: (msg.texto ?? '').slice(0, 300) }).catch(() => {})
+  }
+  return null
+}
+
+async function atenderRecrutamento(msg) {
   // Recrutamento desligado: fica calado em vez de atender e perder a ficha.
   //
   // Calado, e não "estamos fora do ar": o número pode estar em anúncio, e
@@ -335,6 +400,26 @@ async function rotear(msg) {
     Quem lança gasto já saiu acima, e de propósito: vinte comprovantes
     seguidos no grupo é o uso normal do outro módulo.
   */
+  /*
+    Guarda o endereço de verdade desta conversa antes de qualquer resposta.
+    Em @lid sem telefone conhecido é a única forma de o lembrete e o pedido
+    de documentos, que saem horas depois, chegarem a esta pessoa.
+  */
+  if (msg.jidOriginal && msg.jidOriginal !== msg.de) anotarJid(msg.de, msg.jidOriginal)
+
+  /*
+    Conversa calada por cobrança de pagamento: segue calada.
+
+    Vem antes do caminho de documento porque o print do comprovante também
+    chegava sem legenda e recebia "recebi aqui, obrigada. qual vaga vc tá
+    procurando?".
+  */
+  const jaCalado = getEstado(msg.de)
+  if (jaCalado?.modo === 'calado' && Date.now() - (jaCalado.caladoDesde ?? 0) < CALADO_MS) {
+    console.log(`[atendimento] ${discreto(msg.de)}: conversa com o RH (${jaCalado.motivoCalado}) — robô calado.`)
+    return calar(msg, jaCalado.motivoCalado)
+  }
+
   const vez = limite.registrar(msg.de)
   if (!vez.permitido) {
     // Um aviso por janela. Repetir a cada mensagem faria do robô exatamente
@@ -355,10 +440,40 @@ async function rotear(msg) {
     segue a conversa normal e o arquivo é anexado em silêncio; onde uma
     pessoa da empresa já está atendendo, também em silêncio.
   */
+  /*
+    Áudio que não deu para ouvir.
+
+    A resposta sai daqui, e não do baileys, para respeitar as mesmas regras
+    de todas as outras: quem está com uma pessoa da empresa, quem trabalha na
+    empresa e quem está cobrando pagamento não recebe nada.
+  */
+  if (msg.audioIlegivel) {
+    if (maoHumana.atendidaPorGente(msg.de).atendida) return null
+    const quem = await quemE({ whatsapp: msg.de }).catch(() => null)
+    if (quem?.tipo === 'funcionario') return null
+    return 'não consegui ouvir seu áudio, pode escrever pra mim?'
+  }
+
   if (msg.arquivo) {
-    const calado = Boolean(msg.texto) || maoHumana.atendidaPorGente(msg.de).atendida
-    if (calado) receberDocumento(msg, { calado: true }).catch(e => console.error('[documento]', e.message))
-    else return receberDocumento(msg)
+    /*
+      Com uma pessoa da empresa atendendo, anexa calado. Com legenda, o
+      documento é anexado ANTES de a legenda seguir para a conversa: quem
+      manda a foto do RG escrevendo "frente" precisa ouvir o que ainda falta,
+      e não uma resposta que ignora a foto.
+    */
+    if (maoHumana.atendidaPorGente(msg.de).atendida) {
+      receberDocumento(msg, { calado: true }).catch(e => console.error('[documento]', e.message))
+    } else if (!msg.texto) {
+      return receberDocumento(msg)
+    } else {
+      const recebido = await receberDocumento(msg, { calado: true, responderPendencia: true }).catch(e => {
+        console.error('[documento]', e.message)
+        return null
+      })
+      // Na fase de documentos, a resposta do documento é a que importa: ela
+      // diz o que falta. A legenda não acrescenta nada ao cadastro.
+      if (recebido) return recebido
+    }
   }
   if (!msg.texto) return null
 
@@ -389,13 +504,7 @@ async function rotear(msg) {
   */
   if (ehCobranca(msg.texto)) {
     console.warn(`[atendimento] ${discreto(msg.de)}: cobrança de pagamento — calado, avisando o RH.`)
-    marcarEscalada(msg.de)
-    avisarRH({
-      whatsapp: msg.de,
-      motivo: 'Cobrança de pagamento no WhatsApp do recrutamento',
-      trecho: msg.texto.slice(0, 300),
-    }).catch(() => {})
-    return null
+    return calar(msg, 'Cobrança de pagamento no WhatsApp do recrutamento')
   }
 
   /*
@@ -420,13 +529,7 @@ async function rotear(msg) {
   const decisao = quemAtender({ texto: msg.texto, ficha })
   if (!decisao.atender) {
     console.log(`[atendimento] ${discreto(msg.de)}: ${decisao.motivo} — calado, avisando o RH.`)
-    marcarEscalada(msg.de)
-    avisarRH({
-      whatsapp: msg.de,
-      motivo: `Mensagem de quem ${decisao.motivo} — ninguém do robô respondeu`,
-      trecho: msg.texto.slice(0, 300),
-    }).catch(() => {})
-    return null
+    return calar(msg, `Mensagem de quem ${decisao.motivo} — ninguém do robô respondeu`)
   }
 
   if (ficha?.tipo === 'funcionario') return atenderFuncionario(msg, ficha)
@@ -451,7 +554,7 @@ async function mandarDocumentosGuardados(de) {
   for (const doc of guardados.retirar(de)) await enviarDocumento(doc)
 }
 
-async function receberDocumento(msg, { calado = false } = {}) {
+async function receberDocumento(msg, { calado = false, responderPendencia = !calado } = {}) {
   if (msg.arquivo.length > MAX_DOCUMENTO_BYTES) {
     return calado ? null : 'esse arquivo ficou grande pra mim, consegue mandar uma foto?'
   }
@@ -478,13 +581,19 @@ async function receberDocumento(msg, { calado = false } = {}) {
   const guardado = !env.ok && env.status === 404 && guardados.guardar(msg.de, doc)
   console.log(`[documento] ${discreto(msg.de)}: ${tipo} — ${env.ok ? 'anexado à candidatura' : guardado ? 'guardado até a ficha' : 'não enviado'}`)
 
-  if (calado) return null
+  /*
+    Aprovado com pedido de documentos: diz o que ainda falta.
 
-  // Aprovado com pedido de documentos: diz o que ainda falta.
-  if (env.ok) {
+    Vale mesmo quando a foto veio com legenda (`calado`), porque é esta a
+    informação que a pessoa espera — antes ela recebia uma resposta que
+    ignorava a foto que acabara de mandar.
+  */
+  if (env.ok && responderPendencia) {
     const pend = await pendenciasDe(msg.de)
     if (pend) return respostaDaPendencia(pend)
   }
+
+  if (calado) return null
   if (!lido) console.warn(`[documento] ${discreto(msg.de)}: a leitura automática falhou — o RH vai ver o aviso na ficha`)
 
   const oQue = { curriculo: 'seu currículo', ctps: 'a foto da carteira', rg: 'o documento', cpf: 'o documento', cnh: 'o documento' }[tipo]
@@ -541,7 +650,31 @@ async function atenderAprovado(msg, ficha) {
   const pend = await pendenciasDe(msg.de)
   if (!pend) return undefined
 
-  const chave = chavePixNoTexto(msg.texto)
+  /*
+    Chave PIX só quando a pessoa está MANDANDO uma chave.
+
+    Antes toda mensagem do aprovado passava pelo detector: o telefone da
+    esposa e o CPF pedido como documento viravam chave de pagamento, e o RH
+    tinha de conferir de novo o que já estava conferido.
+  */
+  const chave = mensagemEhChavePix(msg.texto) ? chavePixNoTexto(msg.texto) : null
+  const anterior = getEstado(msg.de)
+
+  if (chave && pend.pixRecebido) {
+    /*
+      Já existe chave guardada: TROCAR é decisão de gente.
+
+      Trocar a chave de pagamento de alguém por uma mensagem é exatamente o
+      golpe que a confirmação do RH existe para evitar.
+    */
+    console.warn(`[contratacao] ${discreto(msg.de)}: quer trocar a chave PIX — chamando o RH.`)
+    marcarEscalada(msg.de)
+    avisarRH({ whatsapp: msg.de, motivo: 'aprovado quer trocar a chave PIX', trecho: msg.texto })
+    if (anterior?.modo === 'aprovado' && Date.now() - (anterior.avisadoEm ?? 0) < 12 * 3600_000) return null
+    setEstado(msg.de, { ...(anterior ?? {}), modo: 'aprovado', whatsapp: msg.de, avisadoEm: Date.now() })
+    return 'vou pedir pra alguém do rh conferir essa troca de chave com vc'
+  }
+
   if (chave) {
     const r = await salvarPix(msg.de, chave)
     if (r.ok) {
@@ -550,11 +683,22 @@ async function atenderAprovado(msg, ficha) {
     }
   }
 
-  const anterior = getEstado(msg.de)
-  marcarEscalada(msg.de)
-  avisarRH({ whatsapp: msg.de, motivo: `aprovado ${ficha.primeiroNome} escreveu (fase de documentos)`, trecho: msg.texto })
-  if (anterior?.modo === 'aprovado' && Date.now() - (anterior.avisadoEm ?? 0) < 12 * 3600_000) return null
-  setEstado(msg.de, { modo: 'aprovado', whatsapp: msg.de, avisadoEm: Date.now() })
+  /*
+    Qualquer outra coisa: diz o que ainda falta e chama gente UMA vez.
+
+    Antes ele só respondia "vou pedir pra alguém do rh te responder", sem
+    dizer o que faltava, e o sino do RH tocava a cada mensagem.
+  */
+  const jaAvisou = anterior?.modo === 'aprovado' && Date.now() - (anterior.avisadoEm ?? 0) < 12 * 3600_000
+  if (!jaAvisou) {
+    marcarEscalada(msg.de)
+    avisarRH({ whatsapp: msg.de, motivo: `aprovado ${ficha.primeiroNome} escreveu (fase de documentos)`, trecho: msg.texto })
+    setEstado(msg.de, { ...(anterior ?? {}), modo: 'aprovado', whatsapp: msg.de, avisadoEm: Date.now() })
+  }
+  if (pend.faltam.length || pend.pixFalta) {
+    return respostaDaPendencia(pend, jaAvisou ? 'sobre isso o rh te responde' : 'vou pedir pra alguém do rh te responder')
+  }
+  if (jaAvisou) return null
   return `oi ${ficha.primeiroNome}, vou pedir pra alguém do rh te responder`
 }
 
@@ -709,7 +853,9 @@ async function primeiroContato(msg) {
 
   if (r.escalarHumano) {
     marcarEscalada(msg.de)
-    console.log(`[TRIAGEM → RH] ${discreto(msg.de)}: ${r.motivoEscalada} — "${msg.texto}"`)
+    // Só o motivo e o número mascarado: o texto vai ao RH pelo avisarRH, e o
+    // log do servidor é lido por mais gente e guardado por mais tempo.
+    console.log(`[TRIAGEM → RH] ${discreto(msg.de)}: ${r.motivoEscalada}`)
     avisarRH({ whatsapp: msg.de, motivo: r.motivoEscalada, trecho: msg.texto })
   }
 
@@ -741,7 +887,7 @@ async function atenderFuncionario(msg, ficha) {
 
   if (r.escalarHumano) {
     marcarEscalada(msg.de)
-    console.log(`[FUNCIONÁRIO → RH] ${ficha.primeiroNome} (${discreto(msg.de)}): ${r.motivoEscalada} — "${msg.texto}"`)
+    console.log(`[FUNCIONÁRIO → RH] ${discreto(msg.de)}: ${r.motivoEscalada}`)
     // Sem await: a pessoa não espera o RH ser avisado para receber a resposta.
     avisarRH({
       whatsapp: msg.de,
@@ -807,8 +953,16 @@ async function aplicarResultado(from, r, text) {
       mandarDocumentosGuardados(from).catch(e => console.error('[documento]', e.message))
       return r.resposta
     }
-    console.warn('[processar] candidatura não registrada:', env)
-    // mantém o estado p/ permitir nova tentativa; resposta honesta de falha
+    /*
+      O RH não recebeu: guarda e tenta de novo depois.
+
+      Sem isto, a ficha de quem terminou a conversa com o RH fora do ar não
+      existia em lugar nenhum — o robô dizia "já avisei a equipe" e não havia
+      equipe avisada (o aviso vai para o MESMO servidor), nem nova tentativa.
+      O relógio dos lembretes reenvia até dar certo.
+    */
+    const guardou = fichasPendentes.guardar(from, r.acao.dados, { primeiraVez: r.acao.primeiraVez })
+    console.warn(`[processar] candidatura não registrada (${env.status ?? env.motivo}) — ${guardou ? 'guardada para reenviar' : 'NÃO guardada'}`)
     return r.respostaFalha || r.resposta
   }
   return r.resposta
@@ -892,6 +1046,17 @@ agendarResumo()
 async function rodarLembretes() {
   if (!recrutamentoLigado() || process.env.LEMBRETE_CADASTRO === 'off') return
   if (!lembrete.horarioComercial()) return
+  /*
+    Canal caído: nem tenta.
+
+    Com a sessão do WhatsApp fora (esperando o QR), todo envio falha e todo
+    mundo daquela rodada ficava marcado como lembrado — o lembrete é único por
+    regra, e o RH não devolve o mesmo número duas vezes.
+  */
+  if (!(await conectado())) {
+    console.warn('[lembrete] WhatsApp desconectado — nenhum lembrete nesta rodada.')
+    return
+  }
   for (const [telefone, sessao] of sessoesParaLembrete()) {
     const d = lembrete.decidir(sessao, { atendidaPorGente: maoHumana.atendidaPorGente(telefone).atendida })
     if (!d.lembrar) continue
@@ -899,32 +1064,75 @@ async function rodarLembretes() {
     // Marca ANTES de enviar: se o envio travar e o laço rodar de novo, a
     // pessoa não recebe duas vezes. Uma a menos é melhor que uma a mais.
     marcarLembrado(telefone, texto)
-    const r = await enviarMensagem(telefone, texto)
-    console.log(`[lembrete] cadastro parado ${discreto(telefone)}: ${r?.ok ? 'lembrado' : 'falhou'}`)
+    // Conversa @lid: o destino é o jid guardado, não os dígitos do LID.
+    const r = await enviarMensagem(sessao.jid ?? telefone, texto)
+    if (!r?.ok) desmarcarLembrado(telefone, texto)
+    console.log(`[lembrete] cadastro parado ${discreto(telefone)}: ${r?.ok ? 'lembrado' : 'falhou, tenta de novo'}`)
   }
   for (const { whatsapp, texto } of await quemLembrarDocumentos()) {
     const numero = String(whatsapp).replace(/\D/g, '')
-    await marcarLembreteDocumentos(whatsapp)
-    const r = await enviarMensagem(numero.length <= 11 ? `55${numero}` : numero, texto)
-    console.log(`[lembrete] documentos ${discreto(numero)}: ${r?.ok ? 'lembrado' : 'falhou'}`)
+    /*
+      Quem está sendo atendido por gente não recebe automático por cima: o RH
+      pode ter falado com o aprovado hoje, pelo mesmo número do robô.
+    */
+    if (maoHumana.atendidaPorGente(numero).atendida) {
+      console.log(`[lembrete] documentos ${discreto(numero)}: pessoa da empresa atendendo — não mandei.`)
+      continue
+    }
+    const destino = jidDe(numero) ?? (numero.length <= 11 ? `55${numero}` : numero)
+    const r = await enviarMensagem(destino, texto)
+    // Marca só depois do ok: marcado antes, o RH nunca devolvia este número
+    // de novo e o aprovado ficava sem o lembrete.
+    if (r?.ok) await marcarLembreteDocumentos(whatsapp)
+    console.log(`[lembrete] documentos ${discreto(numero)}: ${r?.ok ? 'lembrado' : 'falhou, tenta de novo'}`)
   }
 }
 /*
   Resumo do recrutamento às 8h no WhatsApp do gestor. Só com
   RESUMO_RECRUTAMENTO_PARA no .env; sem número, não manda nada.
 */
+/**
+ * Reenvia ao RH as candidaturas que ficaram pelo caminho.
+ *
+ * Roda no mesmo relógio dos lembretes (15 min). Só sai da fila com o ok do
+ * RH; a conclusão nas métricas é marcada aqui, na hora em que a ficha
+ * realmente passou a existir.
+ */
+async function reenviarCandidaturasPendentes() {
+  const fila = fichasPendentes.pendentes()
+  if (!fila.length) return
+  for (const p of fila) {
+    const env = await enviarCandidatura(p.dados)
+    if (!env.ok) {
+      console.warn(`[candidatura-pendente] ${discreto(p.whatsapp)}: RH ainda não recebeu (${env.status ?? env.motivo})`)
+      continue
+    }
+    fichasPendentes.remover(p.whatsapp)
+    if (p.primeiraVez) marcarConcluida(p.whatsapp)
+    const estado = getEstado(p.whatsapp)
+    if (estado) setEstado(p.whatsapp, { ...estado, registrado: true })
+    console.log(`[candidatura-pendente] ${discreto(p.whatsapp)}: ficha finalmente registrada no RH`)
+  }
+}
+
 async function rodarResumoRecrutamento() {
   if (!resumoRecrutamento.deveEnviar()) return
+  if (!(await conectado())) return
   const texto = await resumoRecrutamento.buscarTexto()
   if (!texto) return
-  resumoRecrutamento.marcarEnviado()
   const r = await enviarMensagem(resumoRecrutamento.destino(), texto)
-  console.log(`[resumo-recrutamento] ${r?.ok ? 'enviado' : 'falhou'}`)
+  // Marca o dia só depois do ok: marcado antes, o resumo do dia se perdia
+  // sempre que o WhatsApp estava fora no horário.
+  if (r?.ok) resumoRecrutamento.marcarEnviado()
+  console.log(`[resumo-recrutamento] ${r?.ok ? 'enviado' : 'falhou, tenta na próxima rodada'}`)
 }
 const relogioResumo = setInterval(() => rodarResumoRecrutamento().catch(e => console.error('[resumo-recrutamento]', e.message)), 10 * 60 * 1000)
 relogioResumo.unref?.()
 
-const relogioLembretes = setInterval(() => rodarLembretes().catch(e => console.error('[lembrete]', e.message)), 15 * 60 * 1000)
+const relogioLembretes = setInterval(() => {
+  rodarLembretes().catch(e => console.error('[lembrete]', e.message))
+  reenviarCandidaturasPendentes().catch(e => console.error('[candidatura-pendente]', e.message))
+}, 15 * 60 * 1000)
 relogioLembretes.unref?.()
 
 /*

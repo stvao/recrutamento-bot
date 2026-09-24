@@ -346,6 +346,15 @@ export async function conectar(aoReceber) {
       // descarta. São justamente elas que ensinam como responder.
       await observar(msg, type)
 
+      /*
+        Gente da empresa respondeu: daqui em diante o robô cala nesta conversa.
+        Fora da observação de propósito — a regra vale com OBSERVAR desligado.
+      */
+      if (ehMaoDaEmpresa(msg, type)) {
+        const { numero } = await telefoneDe(msg, { lidMapping: sock?.signalRepository?.lidMapping })
+        maoHumana.gentesRespondeu(numero, msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now())
+      }
+
       const pessoal = ehConversaPessoal(msg)
       const grupo = !pessoal && ehGrupoAtendido(msg)
 
@@ -431,8 +440,24 @@ export async function conectar(aoReceber) {
           Foto, vídeo, documento, figurinha e contato ficam sem resposta
           automática: a conversa segue na próxima mensagem de texto.
         */
-        if (recrutamentoLigado() && audio) {
-          await responder(jid, 'não consegui ouvir seu áudio, pode escrever pra mim?')
+        /*
+          O áudio que não deu para ouvir vai para o ROTEADOR, marcado.
+
+          Respondendo aqui, a frase saía por fora de todas as regras: ia para
+          funcionário, para quem está cobrando pagamento e para conversa em
+          que uma pessoa da empresa já assumiu.
+        */
+        if (audio) {
+          const resposta = await aoReceber({
+            canal: 'whatsapp', de, chat: de, ehGrupo: false, texto: null,
+            jidOriginal: jid, audioIlegivel: true,
+            idMensagem: msg.key.id,
+            enviadoEm: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
+          }).catch(e => {
+            console.error('[whatsapp] erro ao atender áudio ilegível:', e.message)
+            return null
+          })
+          if (resposta) await responder(jid, resposta)
         }
         continue
       }
@@ -461,6 +486,10 @@ export async function conectar(aoReceber) {
           canal: 'whatsapp',
           de,
           chat: grupo ? jid : de,
+          // O endereço ORIGINAL desta conversa. Em @lid sem telefone conhecido,
+          // `de` são os dígitos do LID — um número que não existe. É por este
+          // jid que o lembrete de 24h e o pedido de documentos chegam.
+          jidOriginal: pessoal ? jid : null,
           chatNome: grupo ? (nomeDoGrupo.get(jid) ?? null) : null,
           ehGrupo: grupo,
           texto: textoAtendido,
@@ -552,6 +581,25 @@ async function baixar(msg, tamanhoDeclarado = 0) {
 const ehPrivado = (jid) => typeof jid === 'string' && (jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid'))
 
 /**
+ * É gente da empresa respondendo pelo celular?
+ *
+ * A marca de "mão humana" vivia DENTRO de observar(), que sai fora quando
+ * OBSERVAR=off — e a observação é da fase de aprendizado, feita para ser
+ * desligada. Desligada, o dono respondia o candidato e o robô continuava
+ * falando por cima: foi o incidente de 12/09/2026.
+ *
+ * Aqui não se exige tipo de mensagem: figurinha, foto e áudio do dono também
+ * significam que uma pessoa assumiu a conversa. O eco do que o robô mandou
+ * chega como 'append' e é descartado.
+ */
+export function ehMaoDaEmpresa(msg, type = 'notify') {
+  if (!msg?.key?.fromMe) return false
+  if (type === 'append') return false
+  if (!ehPrivado(msg.key.remoteJid)) return false
+  return !observacao.foiORobo(msg.key.id)
+}
+
+/**
  * Anota a mensagem privada, dos dois lados, para o robô aprender.
  *
  * Nunca lança: observar é secundário, e um erro aqui não pode impedir a
@@ -579,10 +627,6 @@ async function observar(msg, type = 'notify') {
       lidMapping: sock?.signalRepository?.lidMapping,
     })
     const em = msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()
-
-    // Mensagem escrita por GENTE da empresa, no celular: a partir daqui o
-    // robô não fala por cima dela nesta conversa.
-    if (autor === 'empresa') maoHumana.gentesRespondeu(numero, em)
 
     observacao.anotar({
       chave: jid,

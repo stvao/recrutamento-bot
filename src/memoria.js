@@ -77,7 +77,8 @@ carregar()
 // muitas escritas seguidas, e o que importa é sobreviver ao reinício.
 const timer = setInterval(salvar, 5000)
 timer.unref?.()
-for (const sinal of ['SIGINT', 'SIGTERM', 'beforeExit']) process.on(sinal, salvar)
+// 'exit' cobre a saída provocada pelo server.js, que é quem chama process.exit.
+for (const sinal of ['SIGINT', 'SIGTERM', 'beforeExit', 'exit']) process.on(sinal, salvar)
 
 // ─── 1. O que já foi lançado ───────────────────────────────────────────────
 

@@ -26,6 +26,24 @@ export async function enviarMensagem(para, texto) {
 }
 
 /**
+ * O canal está pronto para enviar?
+ *
+ * Os lembretes e o resumo das 8h marcavam "enviado" ANTES de mandar, e com a
+ * sessão do WhatsApp caída (esperando alguém ler o QR) o envio falhava em
+ * silêncio: o lembrete de cadastro é único por regra, e o RH nunca devolvia
+ * aquele número de novo. Ninguém recebia nada, e ninguém ficava sabendo.
+ */
+export async function conectado() {
+  if (CONNECTOR !== 'baileys') return true
+  try {
+    const { estaConectado } = await import('./baileys.js')
+    return estaConectado()
+  } catch {
+    return false
+  }
+}
+
+/**
  * Normaliza o payload do webhook para o formato que o roteador entende —
  * o MESMO que o Baileys e o Telegram entregam:
  *
