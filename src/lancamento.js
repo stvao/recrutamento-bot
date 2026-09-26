@@ -79,8 +79,13 @@ export function acharValor(texto) {
   if (!texto) return { valor: null, resto: texto ?? '' }
 
   // R$ 2.500,00 · 2500,00 · 2.500 · 2500.00 · 2500
-  const padrao = /(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{1,2}|\d+(?:\.\d{2})?)\b/gi
-  const achados = [...texto.matchAll(padrao)]
+  //
+  // Sem dígito, letra, barra ou dois-pontos colados antes, e sem barra ou
+  // dois-pontos seguidos de dígito depois: data (25/09/2026), hora (14:30) e
+  // placa (ABC1D23) deixam de virar valor. Antes "combustivel 250 pago dia
+  // 25/09/2026" lançava R$ 2.026 e "cimento 350 as 14:30", R$ 30.
+  const padrao = /(?:r\$\s*)?(?<![\w/:.,-])(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+,\d{1,2}|\d+(?:\.\d{2})?)\b(?![/:]\d)/gi
+  const achados = [...texto.matchAll(padrao)].filter(a => !naoEhValor(texto, a))
   if (!achados.length) return { valor: null, resto: texto }
 
   // Dois valores com CARA DE DINHEIRO: não se chuta.
@@ -105,6 +110,11 @@ export function acharValor(texto) {
       ambiguo: comCaraDeDinheiro.map(a => a[1]),
     }
   }
+
+  // Nenhum com cara de dinheiro e mais de um número: fica o último, que é
+  // a regra de sempre ("20 sacos de cimento, 2500") — mas marcado INCERTO,
+  // com os candidatos, para quem junta com a leitura da imagem conferir.
+  const incerto = comCaraDeDinheiro.length === 0 && achados.length > 1
 
   // UM número com cara de dinheiro: é ele, esteja onde estiver. A regra do
   // último número lançava "diaria pedreiro 150,00, 2 dias" como R$ 2,00 e
@@ -133,7 +143,31 @@ export function acharValor(texto) {
     .replace(/[,\s]+$/, '')
     .trim()
 
-  return { valor: Math.round(valor * 100) / 100, resto }
+  const saida = { valor: Math.round(valor * 100) / 100, resto }
+  if (incerto) {
+    saida.incerto = true
+    saida.candidatos = achados.map(a => Number(a[1].replace(/\./g, '').replace(',', '.'))).filter(n => n > 0)
+  }
+  return saida
+}
+
+/**
+ * Número que aparece na legenda mas não é o valor do gasto.
+ *
+ * Nota fiscal, placa, quilometragem, dia, hora — e quantidade com unidade
+ * ("2 dias", "20 sacos"). Só para número SEM cara de dinheiro: "R$ 25,00 x 4"
+ * continua sendo 25.
+ */
+function naoEhValor(texto, achado) {
+  const bruto = achado[1]
+  if (/r\$/i.test(achado[0]) || /,\d{1,2}$/.test(bruto)) return false
+  const antes = texto.slice(Math.max(0, achado.index - 24), achado.index)
+  const depois = texto.slice(achado.index + achado[0].length, achado.index + achado[0].length + 16)
+  if (/(?:\bnf|\bnota(?:\s+fiscal)?|\bcupom|\bdoc(?:umento)?|\bplaca|\bkm|\bdia|\bdias|\bas|\bàs|\bx|n[º°o]\.?)\s*[:#.nº°]*\s*$/i.test(antes)) return true
+  // Unidade seguida de OUTRO número é rótulo desse outro ("180 dia 25/09",
+  // "200 km 45230"), e não a unidade deste.
+  if (/^\s*(?:h|hs|hrs?|horas?|km|dias?|sacos?|un|und|unidades?|p[çc]s?|pe[çc]as?|kg|l|litros?|m|m2|m3|metros?|x)\b(?!\s*\d)/i.test(depois)) return true
+  return false
 }
 
 /**
@@ -542,7 +576,7 @@ export function interpretar(texto, obras = [], pagadores = []) {
   const comPagador = acharPagador(texto, pagadores)
   const pagoPor = comPagador.achado
 
-  const { valor, resto, ambiguo: valorAmbiguo } = acharValor(comPagador.resto)
+  const { valor, resto, ambiguo: valorAmbiguo, incerto: valorIncerto, candidatos: candidatosValor } = acharValor(comPagador.resto)
 
   // A linha foi escrita no formato com separador, ou é texto corrido?
   //
@@ -601,6 +635,9 @@ export function interpretar(texto, obras = [], pagadores = []) {
   return {
     obra, rateio: rateio.length ? rateio : null,
     descricao, tipo, valor, pagoPor, candidatos, textoOriginal: texto,
+    // Mais de um número sem cara de dinheiro: o valor é um palpite (o último).
+    valorIncerto: valorIncerto ?? false,
+    candidatosValor: candidatosValor ?? null,
     // Os valores que apareceram quando havia mais de um com cara de dinheiro.
     // Serve para a pergunta dizer QUAIS eram — perguntar "qual o valor?" logo
     // depois de a pessoa ter escrito dois faz ela achar que o robô não leu.
@@ -618,6 +655,18 @@ export function interpretar(texto, obras = [], pagadores = []) {
  * escrito 1.800, é o tipo de erro que ninguém percebe até fechar o mês.
  */
 export function combinar(escrito, lido) {
+  /*
+    Valor INCERTO (vários números, nenhum com cara de dinheiro): a IA
+    desempata. Se o que ela leu no comprovante é um dos números escritos, é
+    ele — continua sendo o que a pessoa escreveu. Se não é nenhum, o palpite
+    vai marcado para conferência, e não como digitado.
+  */
+  if (escrito?.valorIncerto && escrito.valor != null) {
+    const daImagem = lido?.valor
+    const bate = daImagem != null && (escrito.candidatosValor ?? []).some(n => Math.abs(n - daImagem) < 0.005)
+    if (bate) escrito = { ...escrito, valor: daImagem, valorIncerto: false }
+  }
+  const incerto = !!escrito?.valorIncerto
   return {
     obra: escrito?.obra ?? null,
     // Outras obras citadas na mesma linha: o gasto é dividido entre elas.
@@ -631,15 +680,19 @@ export function combinar(escrito, lido) {
     descricao: escrito?.descricao ?? lido?.estabelecimento ?? null,
     tipo: escrito?.tipo ?? lido?.categoria ?? null,
     valor: escrito?.valor ?? lido?.valor ?? null,
+    // Os dois valores da legenda, quando havia dois. Sem repassar, a pergunta
+    // "vi dois valores aí (X e Y)" nunca saía — só um "qual o valor?" que
+    // fazia a pessoa achar que o robô não tinha lido.
+    valorAmbiguo: escrito?.valorAmbiguo ?? null,
     // De onde veio cada coisa, para a caixa de aprovação poder mostrar o que
     // foi digitado e o que foi chutado por máquina.
-    valorDigitado: escrito?.valor != null,
+    valorDigitado: escrito?.valor != null && !incerto,
     // A data do comprovante, quando a IA conseguiu ler, vai junto — mas quem
     // manda no lançamento é a data do envio, que é o que foi combinado.
     dataComprovante: lido?.data ?? null,
     estabelecimento: lido?.estabelecimento ?? null,
     documento: lido?.documento ?? null,
     formaPagamento: lido?.formaPagamento ?? null,
-    confianca: escrito?.valor != null ? 'digitado' : (lido?.confianca ?? 'baixa'),
+    confianca: escrito?.valor != null && !incerto ? 'digitado' : (lido?.confianca ?? 'baixa'),
   }
 }

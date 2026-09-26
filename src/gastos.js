@@ -33,7 +33,7 @@ import {
   enviarComprovante, lancarGasto, obrasDoSistema, obrasConfigurado, pagadoresConhecidos,
 } from './obras-client.js'
 import { enviarMensagem } from './connectors.js'
-import { interpretar, combinar, nomesDe, ehVocabularioConhecido, pagadoresQueServem } from './lancamento.js'
+import { interpretar, combinar, nomesDe, ehVocabularioConhecido, pagadoresQueServem, acharValor } from './lancamento.js'
 import { norm, discreto } from './texto.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
@@ -980,6 +980,25 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
     .filter(Boolean).join(', ')
 
   const escrito = interpretar(escritoTudo, obras, pagadoresConhecidos())
+
+  /*
+    Resposta a "Vi dois valores aí... qual é o do comprovante?".
+
+    Tudo é lido junto (legenda + respostas), então a resposta se SOMAVA aos
+    dois valores da legenda e o texto continuava ambíguo — a pergunta voltava
+    para sempre. A resposta mais recente com um valor só decide.
+  */
+  if (escrito.valorAmbiguo?.length && pendente.respostas?.length) {
+    for (const r of [...pendente.respostas].reverse()) {
+      const v = acharValor(r)
+      if (v.valor != null && !v.ambiguo) {
+        escrito.valor = v.valor
+        escrito.valorAmbiguo = null
+        escrito.valorIncerto = false
+        break
+      }
+    }
+  }
 
   // A imagem é lida UMA vez e guardada: numa segunda passada, depois da
   // resposta, reler custaria mais 20 segundos e daria o mesmo resultado.

@@ -478,6 +478,21 @@ const enviados = () => lancados() + naCaixa()
   ok('e dentro de 24 horas', daqui <= 24 * 60 * 60 * 1000)
 }
 
+// ── Dois valores na legenda: a resposta resolve ──────────────────────────
+// A resposta era somada à legenda e tudo relido junto: os dois valores
+// continuavam lá, e a pergunta voltava para sempre.
+{
+  const p = pessoa('5511900000090')
+  await p.foto('haia material 2500,00 e frete 300,00')
+  await espera(20)
+  ok('dois valores: pergunta qual', p.ditos.some(t => /dois valores/i.test(t)))
+  ok('e não lança no palpite', lancados() === 0)
+  await p.diz('2500,00')
+  await espera(20)
+  ok('a resposta resolve e lança', lancados() === 1)
+  ok('com o valor escolhido', p.ditos.some(t => t.includes('R$ 2.500,00') && /aguardando/i.test(t)))
+}
+
 // ── O timer da legenda não atropela a pergunta ───────────────────────────
 // Foto sem legenda, e a legenda chega logo depois — faltando a obra. O robô
 // pergunta. O timer de espera da legenda disparava depois mesmo assim,

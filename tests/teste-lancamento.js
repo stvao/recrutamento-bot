@@ -48,6 +48,37 @@ ok('"350,00 nota 4521" é 350, não 4521', acharValor('haia cimento 350,00 nota 
 ok('"25,00 x 4" é 25, não 4', acharValor('haia marmita 25,00 x 4').valor === 25)
 ok('o número que sobra fica na descrição', acharValor('haia cimento 350,00 nota 4521').resto.includes('4521'))
 
+// Data, hora, placa, nota, km e quantidade com unidade não são valor.
+// Antes o último número vencia: R$ 2.026 pelo ano, R$ 30 pela hora, R$ 23
+// pela placa, R$ 45.230 pela quilometragem.
+ok('data completa não é valor', acharValor('haia combustivel 250 pago dia 25/09/2026').valor === 250)
+ok('data curta não é valor', acharValor('haia almoco 180 dia 25/09').valor === 180)
+ok('só a data, e nenhum valor: não inventa', acharValor('haia almoco dia 25/09').valor === null)
+ok('hora não é valor', acharValor('haia cimento 350 as 14:30').valor === 350)
+ok('número da nota não é valor', acharValor('haia, frete, 350, nf 4521').valor === 350)
+ok('só a nota, e nenhum valor: não inventa', acharValor('haia, material, nf 4521').valor === null)
+ok('placa não é valor', acharValor('haia gasolina 200 placa ABC1D23').valor === 200)
+ok('quilometragem não é valor', acharValor('haia gasolina 200 km 45230').valor === 200)
+ok('quantidade de dias não é valor', acharValor('haia diaria pedreiro 150 2 dias').valor === 150)
+ok('"20 sacos ... 2500" continua 2500', acharValor('20 sacos de cimento, 2500').valor === 2500)
+
+// Dois números sem cara de dinheiro: palpite (o último), marcado INCERTO.
+{
+  const v = acharValor('haia 3 cimento 250')
+  ok('dois números soltos: fica o último', v.valor === 250)
+  ok('mas marcado incerto, com os candidatos', v.incerto === true && v.candidatos.includes(3) && v.candidatos.includes(250))
+}
+// ...e a leitura da imagem desempata, ou o valor vai para conferência.
+{
+  const escrito = interpretar('haia 3 cimento 250', OBRAS, [])
+  const bate = combinar(escrito, { valor: 250 })
+  ok('a imagem confirma um dos números: é ele, e conta como digitado', bate.valor === 250 && bate.valorDigitado === true)
+  const naoBate = combinar(escrito, { valor: 180 })
+  ok('a imagem não confirma: vai marcado para conferência', naoBate.valorDigitado === false)
+  const semImagem = combinar(escrito, null)
+  ok('sem imagem: também vai para conferência', semImagem.valorDigitado === false && semImagem.valor === 250)
+}
+
 // ── O tipo, com a tolerância a erro de escrita ────────────────────────────
 ok('"material" → MATERIAL', acharTipo('material') === 'MATERIAL')
 ok('"materal" (errado) → MATERIAL', acharTipo('materal') === 'MATERIAL')
