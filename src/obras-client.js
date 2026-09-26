@@ -244,7 +244,7 @@ export async function obrasDoSistema() {
  * O 422 é resposta esperada, não falha: quer dizer que o sistema não
  * reconheceu a obra, e vem com a lista para o robô PERGUNTAR qual é.
  */
-export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, rateio, pagoPor, idMensagem }) {
+export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, rateio, pagoPor, idMensagem, confirmadoOutro }) {
   if (!OBRAS_API_TOKEN) return { ok: false, motivo: 'nao-configurado' }
   if (!arquivo?.byteLength) return { ok: false, motivo: 'arquivo-vazio' }
   if (!obra || valor == null) return { ok: false, motivo: 'faltam-dados' }
@@ -262,6 +262,7 @@ export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, des
   // aqui só daria mais chance de erro.
   if (rateio?.length) form.append('rateio', rateio.join(','))
   if (pagoPor) form.append('pagoPor', pagoPor)
+  if (confirmadoOutro) form.append('confirmadoOutro', 'true')
 
   try {
     const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancar`, {

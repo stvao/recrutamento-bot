@@ -354,6 +354,13 @@ const enviados = () => lancados() + naCaixa()
   await espera(20)
   ok('"outro" faz lançar', p.ditos.some(t => /aguardando sua aprovação/i.test(t)))
   ok('agora são dois', lancados() === 2)
+  // O sistema de obras tem a própria trava de reenvio (mesma obra, valor e
+  // descrição em 5 minutos). Sem avisar que a pessoa confirmou, ela engolia
+  // justamente este segundo gasto.
+  const lancs = chamadas.filter(c => c.url.includes('lancar'))
+  ok('o primeiro vai sem a confirmação', !/name="confirmadoOutro"/.test(lancs[0].corpo))
+  ok('o segundo avisa que a pessoa confirmou que é outro',
+    /name="confirmadoOutro"\r?\n\r?\ntrue/.test(lancs[1].corpo))
 }
 
 // "Mesmo" descarta — e é a única coisa que o robô faz sem deixar rastro, por

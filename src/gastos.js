@@ -1229,7 +1229,17 @@ async function lancar(pendente, dados) {
     rateio: dados.rateio,
     pagoPor: dados.pagoPor,
     idMensagem: pendente.idMensagem,
+    // A pessoa disse "é outro". Sem avisar o sistema, a trava de reenvio de
+    // lá engolia este segundo gasto como se fosse o primeiro de novo.
+    confirmadoOutro: !!pendente.duplicataConfirmada,
   })
+
+  if (r.ok && r.reenvio) {
+    // O sistema reconheceu como o MESMO gasto já lançado: não entrou nada
+    // novo. Anotar de novo somava o valor duas vezes no resumo do dia.
+    console.log(`[gastos] ${pendente.de} → reenvio, o sistema devolveu o gasto já lançado`)
+    return { perguntando: false, texto: `ℹ️ ${r.mensagem || 'Esse comprovante já tinha sido lançado.'}` }
+  }
 
   if (r.ok) {
     console.log(`[gastos] ${pendente.de} → LANÇADO em ${r.obra} (${moeda(dados.valor)})`)
