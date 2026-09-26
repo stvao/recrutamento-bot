@@ -497,6 +497,21 @@ const enviados = () => lancados() + naCaixa()
   ok('e dentro de 24 horas', daqui <= 24 * 60 * 60 * 1000)
 }
 
+// ── Respondendo o VALOR com um número pequeno ─────────────────────────────
+// A lista de obras ficava guardada mesmo quando só faltava o valor: "3"
+// virava "a obra 3" e trocava a obra que já estava certa.
+{
+  const p = pessoa('5511900000089')
+  await p.foto('haia cafe')
+  await espera(20)
+  ok('pergunta só o valor', p.ditos.some(t => /valor/i.test(t)))
+  await p.diz('3')
+  await espera(20)
+  const lanc = chamadas.filter(c => c.url.includes('lancar')).at(-1)?.corpo ?? ''
+  ok('"3" é o valor', /name="valor"\r?\n\r?\n3\b/.test(lanc))
+  ok('e a obra continua a que foi escrita', /AGUIA DE HAIA/.test(lanc))
+}
+
 // ── Dois valores na legenda: a resposta resolve ──────────────────────────
 // A resposta era somada à legenda e tudo relido junto: os dois valores
 // continuavam lá, e a pergunta voltava para sempre.

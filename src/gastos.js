@@ -1231,7 +1231,13 @@ function perguntar(pendente, falta, obras) {
 
   // Guarda as opções numeradas: responder "1" é o jeito mais rápido, e é o
   // que a pessoa vai fazer se o robô acabou de listar 1) e 2).
-  pendente.opcoes = candidatos?.length ? candidatos : (nomes.length <= 12 ? nomes : null)
+  //
+  // SÓ quando a pergunta é sobre a obra. Guardadas também ao perguntar o
+  // valor, a resposta "3" (um café de R$ 3) virava "a obra 3" e trocava a
+  // obra que já estava certa.
+  const perguntaObra = candidatos?.length || falta.includes('obra')
+  pendente.opcoes = !perguntaObra ? null
+    : candidatos?.length ? candidatos : (nomes.length <= 12 ? nomes : null)
 
   return linhas.join('\n')
 }
