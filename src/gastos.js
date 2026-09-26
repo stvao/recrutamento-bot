@@ -566,7 +566,33 @@ function responderTexto(de, texto, respondendoA, enviar) {
   // 2) Não citou. Se só um está esperando resposta, é ele — não há dúvida.
   if (!alvo) {
     const perguntados = meus.filter(p => p.perguntadoEm)
-    if (perguntados.length === 1) alvo = perguntados[0]
+
+    /*
+      "Manda o número dele": o robô pedia, mas o número nunca funcionava —
+      a lista voltava, porque a escolha só era lida DEPOIS de já haver um
+      comprovante-alvo. E, escolhido, a resposta seguinte sem citação caía
+      de novo na lista. Agora o número escolhe aqui, e o escolhido fica em
+      foco por alguns minutos para as respostas seguintes.
+    */
+    const so = texto.trim().replace(/[).\s]+$/, '')
+    const comLista = perguntados.find(p => p.opcoesPendentes?.length)
+    if (/^\d{1,2}$/.test(so) && comLista) {
+      const escolhido = pendentes.porId(comLista.opcoesPendentes[Number(so) - 1])
+      for (const id of comLista.opcoesPendentes) {
+        const outro = pendentes.porId(id)
+        if (outro) { delete outro.opcoesPendentes; pendentes.atualizar(outro) }
+      }
+      if (escolhido) {
+        escolhido.focoAte = Date.now() + 15 * 60 * 1000
+        pendentes.atualizar(escolhido)
+        return `Certo, é o "${apelidoDoItem(escolhido)}". Agora me responde: ` +
+          `${escolhido.ultimaPergunta ?? 'o que falta nele?'}`
+      }
+    }
+    const emFoco = perguntados.find(p => p.focoAte > Date.now())
+
+    if (emFoco) alvo = emFoco
+    else if (perguntados.length === 1) alvo = perguntados[0]
     else if (perguntados.length > 1) {
       // Vários esperando e nenhuma citação: adivinhar aqui é o que faz
       // resposta cair no comprovante errado, que é pior que perguntar.

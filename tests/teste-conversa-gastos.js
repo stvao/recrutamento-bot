@@ -497,6 +497,20 @@ const enviados = () => lancados() + naCaixa()
   ok('e dentro de 24 horas', daqui <= 24 * 60 * 60 * 1000)
 }
 
+// ── "Manda o número dele" funciona ────────────────────────────────────────
+// O robô pedia o número do comprovante, mas a lista voltava sempre.
+{
+  const p = pessoa('5511900000088')
+  await p.foto('nota P', 'fp'); await espera(15)
+  await p.foto('nota Q', 'fq'); await espera(15)
+  const lista = await p.diz('haia cimento 50')
+  ok('sem citação, lista os comprovantes', /qual/i.test(lista ?? ''))
+  const r = await p.diz('2')
+  ok('o número escolhe o comprovante', /Certo, é o/i.test(r ?? ''))
+  await p.diz('haia cimento 50'); await espera(20)
+  ok('e a resposta seguinte vai para ele, sem voltar a lista', lancados() === 1)
+}
+
 // ── Respondendo o VALOR com um número pequeno ─────────────────────────────
 // A lista de obras ficava guardada mesmo quando só faltava o valor: "3"
 // virava "a obra 3" e trocava a obra que já estava certa.
