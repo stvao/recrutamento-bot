@@ -37,6 +37,17 @@ ok('zero não vira valor', acharValor('0').valor === null)
 // Quantidade no meio não é confundida com o valor: pega-se o ÚLTIMO número.
 ok('quantidade no meio não vira valor', acharValor('20 sacos de cimento, 1.240,50').valor === 1240.5)
 
+// Milhar sem centavos, como se escreve no Brasil. Virava R$ 1,40.
+ok('"1.400" vira 1400', acharValor('haia, material, 1.400').valor === 1400)
+ok('"12.000" vira 12000', acharValor('cimento 12.000').valor === 12000)
+ok('"1.40" (ponto decimal) continua 1,40', acharValor('bala 1.40').valor === 1.4)
+
+// Um único valor com cara de dinheiro vence o número que vem depois dele.
+ok('"150,00, 2 dias" é 150, não 2', acharValor('haia, diaria pedreiro 150,00, 2 dias').valor === 150)
+ok('"350,00 nota 4521" é 350, não 4521', acharValor('haia cimento 350,00 nota 4521').valor === 350)
+ok('"25,00 x 4" é 25, não 4', acharValor('haia marmita 25,00 x 4').valor === 25)
+ok('o número que sobra fica na descrição', acharValor('haia cimento 350,00 nota 4521').resto.includes('4521'))
+
 // ── O tipo, com a tolerância a erro de escrita ────────────────────────────
 ok('"material" → MATERIAL', acharTipo('material') === 'MATERIAL')
 ok('"materal" (errado) → MATERIAL', acharTipo('materal') === 'MATERIAL')

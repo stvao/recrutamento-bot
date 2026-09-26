@@ -274,6 +274,15 @@ ok('"oi" continua sem resposta', (await tratar({ ...noGrupo, texto: 'oi' })) ===
 ok('conversa normal continua sem resposta', (await tratar({ ...noGrupo, texto: 'bom dia pessoal' })) === null)
 ok('não autorizado não recebe nem o ping', (await tratar({ ...noGrupo, de: '5511900000000', texto: 'ping' })) === null)
 
+// ── A data do gasto é o dia de Brasília ─────────────────────────────────
+// Era UTC: o recibo mandado depois das 21h entrava no dia seguinte — e, no
+// último dia do mês, no mês seguinte.
+{
+  const { diaDoEnvio } = await import('../src/gastos.js')
+  ok('22h de 30/09 em Brasília é 30/09', diaDoEnvio('2026-10-01T01:00:00.000Z') === '2026-09-30')
+  ok('10h de 01/10 em Brasília é 01/10', diaDoEnvio('2026-10-01T13:00:00.000Z') === '2026-10-01')
+}
+
 _limparPendentes()
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)

@@ -106,13 +106,21 @@ export function acharValor(texto) {
     }
   }
 
-  const ultimo = achados[achados.length - 1]
+  // UM número com cara de dinheiro: é ele, esteja onde estiver. A regra do
+  // último número lançava "diaria pedreiro 150,00, 2 dias" como R$ 2,00 e
+  // "cimento 350,00 nota 4521" como R$ 4.521,00. Sem nenhum com cara de
+  // dinheiro ("20 sacos de cimento, 2500"), vale o último, como antes.
+  const ultimo = comCaraDeDinheiro.length === 1 ? comCaraDeDinheiro[0] : achados[achados.length - 1]
   const bruto = ultimo[1]
 
-  // "2.500,00" → 2500.00   |   "2500,00" → 2500.00   |   "2500.00" → 2500.00
+  // "2.500,00" → 2500.00 | "2500,00" → 2500.00 | "2500.00" → 2500.00
+  // "1.400" → 1400: milhar sem centavos, como se escreve no Brasil. Antes
+  // só a vírgula disparava a troca, e "1.400" virava R$ 1,40.
   let normalizado = bruto
   if (bruto.includes(',')) {
     normalizado = bruto.replace(/\./g, '').replace(',', '.')
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(bruto)) {
+    normalizado = bruto.replace(/\./g, '')
   }
 
   const valor = Number(normalizado)

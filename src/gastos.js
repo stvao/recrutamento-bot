@@ -472,15 +472,34 @@ export async function tratar(msg) {
     return new Promise((resolve) => {
       p.responder = resolve
       p.esperandoLegendaAte = Date.now() + ESPERA_LEGENDA_MS
-      setTimeout(() => {
-        if (!pendentes.porId(p.id)) return       // já resolvido pela legenda
-        p.esperandoLegendaAte = 0
-        resolveDireto(p).then(t => entregar(p, t))
-      }, ESPERA_LEGENDA_MS).unref?.()
+      const t = setTimeout(() => {
+        timersLegenda.delete(p.id)
+        const atual = pendentes.porId(p.id)
+        // Já resolvido, ou a legenda chegou e o comprovante seguiu por lá
+        // (talvez com uma pergunta no ar). Processar de novo mandava para a
+        // caixa o comprovante que esperava a resposta da pessoa.
+        if (!atual || !atual.esperandoLegendaAte || atual.perguntadoEm) return
+        atual.esperandoLegendaAte = 0
+        processarUmaVez(atual).then(t => entregar(atual, t))
+      }, ESPERA_LEGENDA_MS)
+      t.unref?.()
+      timersLegenda.set(p.id, t)
     })
   }
 
-  return resolveDireto(p)
+  return processarUmaVez(p)
+}
+
+/** Timers da espera pela legenda, por comprovante. Fora da ficha: não vão para o disco. */
+const timersLegenda = new Map()
+/** Comprovantes sendo processados agora (a leitura da foto leva até ~100 s). */
+const emAndamento = new Set()
+
+/** O mesmo comprovante nunca é processado por dois caminhos ao mesmo tempo. */
+function processarUmaVez(p) {
+  if (emAndamento.has(p.id)) return Promise.resolve(null)
+  emAndamento.add(p.id)
+  return resolveDireto(p).finally(() => emAndamento.delete(p.id))
 }
 
 /**
@@ -493,7 +512,10 @@ async function resolveDireto(p) {
   const r = await processar(p)
 
   if (!r.perguntando) {
-    pendentes.remover(p.id)
+    // A caixa recusou: o comprovante CONTINUA esperando, e a ronda tenta de
+    // novo. Apagar aqui era perdê-lo sem rastro.
+    if (r.caixaRecusou) pendentes.atualizar(p)
+    else pendentes.remover(p.id)
     return r.texto
   }
 
@@ -565,9 +587,11 @@ function responderTexto(de, texto, respondendoA, enviar) {
     if (!alvo) return null
     alvo.descricao = texto.trim()
     alvo.esperandoLegendaAte = 0
+    clearTimeout(timersLegenda.get(alvo.id))
+    timersLegenda.delete(alvo.id)
     pendentes.atualizar(alvo)
     if (enviar) alvo.enviar = enviar
-    return resolveDireto(alvo).then(t => entregar(alvo, t))
+    return processarUmaVez(alvo).then(t => entregar(alvo, t))
   }
 
   if (enviar) alvo.enviar = enviar
@@ -577,7 +601,11 @@ function responderTexto(de, texto, respondendoA, enviar) {
 /** Aplica o que a pessoa respondeu ao comprovante certo. */
 function aplicarResposta(p, texto) {
   if (DESISTENCIA.test(texto)) {
-    return paraCaixa(p).then((r) => { pendentes.remover(p.id); return r })
+    return paraCaixa(p).then(({ ok, texto }) => {
+      if (ok) pendentes.remover(p.id)
+      else pendentes.atualizar(p)
+      return texto
+    })
   }
 
   /*
@@ -599,7 +627,7 @@ function aplicarResposta(p, texto) {
       p.jaPerguntou = false
       p.perguntadoEm = null
       pendentes.atualizar(p)
-      return resolveDireto(p)
+      return processarUmaVez(p)
     }
     // Respondeu outra coisa: trata como informação nova (pode estar
     // corrigindo o valor, que é o que faria os dois deixarem de ser iguais).
@@ -664,7 +692,7 @@ function aplicarResposta(p, texto) {
     p.jaPerguntou = false
     p.perguntadoEm = null
     pendentes.atualizar(p)
-    return resolveDireto(p)
+    return processarUmaVez(p)
   }
 
   if (/^\d{1,2}$/.test(so) && p.opcoes?.length) {
@@ -721,7 +749,7 @@ function aplicarResposta(p, texto) {
   p.jaPerguntou = false
   p.perguntadoEm = null
   pendentes.atualizar(p)
-  return resolveDireto(p)
+  return processarUmaVez(p)
 }
 
 /** O que ainda está esperando. */
@@ -747,11 +775,19 @@ async function descartarTudo(de) {
   const meus = pendentes.doRemetente(de)
   if (!meus.length) return '✅ Não tinha nada seu esperando.'
 
-  await Promise.allSettled(meus.map(async (p) => {
-    await paraCaixa(p)
-    pendentes.remover(p.id)
-  }))
-  return `📥 Mandei os ${meus.length} para a caixa de comprovantes.\nAbre /m/gasto no sistema para lançar cada um.`
+  // Um por vez: a caixa aceita 30 por minuto, e 40 de uma vez faziam os
+  // últimos voltarem recusados — e eram apagados mesmo assim, com a
+  // resposta dizendo que todos tinham ido.
+  let foram = 0
+  for (const p of meus) {
+    const { ok } = await paraCaixa(p)
+    if (ok) { pendentes.remover(p.id); foram++ }
+    else pendentes.atualizar(p)
+  }
+  const ficaram = meus.length - foram
+  if (!ficaram) return `📥 Mandei os ${foram} para a caixa de comprovantes.\nAbre /m/gasto no sistema para lançar cada um.`
+  return `📥 Mandei ${foram} de ${meus.length} para a caixa.\n`
+    + `⚠️ ${ficaram} não foram aceitos agora e continuam guardados comigo — escreve *cancelar tudo* de novo daqui a alguns minutos.`
 }
 
 /**
@@ -771,6 +807,23 @@ async function ronda() {
   // passariam a impedir comprovante novo da mesma pessoa.
   const vencidos = pendentes.limparAntigos(agora)
   if (vencidos) console.log(`[gastos] ${vencidos} comprovante(s) antigos sem resposta — descartados`)
+
+  /*
+    Órfãos: voltaram do disco sem pergunta feita e sem timer (o robô
+    reiniciou enquanto esperava a legenda ou lia a foto). Ninguém os
+    processava: ficavam mudos até serem apagados em 7 dias, sem nunca chegar
+    ao Obras. Aqui recebem o que o timer teria feito. Recusado pela caixa há
+    pouco, espera a próxima tentativa sem repetir o aviso.
+  */
+  for (const p of pendentes.todos()) {
+    if (p.perguntadoEm || emAndamento.has(p.id) || timersLegenda.has(p.id)) continue
+    if (p.esperandoLegendaAte && p.esperandoLegendaAte > agora) continue
+    if (p.caixaRecusouEm && agora - p.caixaRecusouEm < 30 * 60 * 1000) continue
+    p.esperandoLegendaAte = 0
+    const jaRecusadoAntes = !!p.caixaRecusouEm
+    const texto = await processarUmaVez(p)
+    if (texto && !(jaRecusadoAntes && p.caixaRecusouEm)) await avisar(p, texto)
+  }
 
   for (const p of pendentes.todos()) {
     if (!p.perguntadoEm) continue
@@ -794,14 +847,20 @@ async function ronda() {
         p.esperandoPagador = false
         p.pagadorPerguntado = true
         pendentes.atualizar(p)
-        const texto = await resolveDireto(p)
+        const texto = await processarUmaVez(p)
         if (texto) await avisar(p, `⏰ Ninguém disse quem pagou, então lancei sem essa informação.\n${texto}`)
         continue
       }
 
-      const r = await paraCaixa(p)
+      const { ok, texto } = await paraCaixa(p)
+      if (!ok) {
+        // Fica guardado e a próxima ronda tenta de novo — sem avisar a cada
+        // 5 minutos que o sistema de obras está fora.
+        pendentes.atualizar(p)
+        continue
+      }
       pendentes.remover(p.id)
-      await avisar(p, `⏰ Faz ${faz(parado)} que perguntei sobre este e não tive resposta.\n${r}`)
+      await avisar(p, `⏰ Faz ${faz(parado)} que perguntei sobre este e não tive resposta.\n${texto}`)
       continue
     }
 
@@ -949,7 +1008,10 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
   if (falta.length && !acabouOTempo && !pendente.jaPerguntou) {
     return { perguntando: true, texto: perguntar(pendente, falta, obras) }
   }
-  if (falta.length) return { perguntando: false, texto: await paraCaixa(pendente) }
+  if (falta.length) {
+    const cx = await paraCaixa(pendente)
+    return { perguntando: false, texto: cx.texto, caixaRecusou: !cx.ok }
+  }
 
   /*
     Obra e valor resolvidos. Falta saber quem bancou — e aí sim se pergunta.
@@ -1137,9 +1199,21 @@ function perguntar(pendente, falta, obras) {
   return linhas.join('\n')
 }
 
+/**
+ * O dia em que o comprovante foi mandado, em Brasília.
+ *
+ * Era toISOString(), que é UTC: o recibo da janta, do hotel ou do
+ * combustível mandado depois das 21h entrava com a data do dia seguinte — e
+ * no último dia do mês, no mês seguinte.
+ */
+export function diaDoEnvio(enviadoEm) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' })
+    .format(new Date(enviadoEm ?? Date.now()))
+}
+
 /** Lança como gasto da equipe, pendente de aprovação. */
 async function lancar(pendente, dados) {
-  const data = new Date(pendente.enviadoEm ?? Date.now()).toISOString().slice(0, 10)
+  const data = diaDoEnvio(pendente.enviadoEm)
 
   const r = await lancarGasto({
     arquivo: pendentes.arquivoDe(pendente),
@@ -1212,11 +1286,24 @@ async function lancar(pendente, dados) {
   if (r.semRota) console.warn('[gastos] servidor ainda sem /lancar — mandando para a caixa.')
   else console.warn('[gastos] lançamento falhou:', r.motivo ?? r.status)
 
-  return { perguntando: false, texto: await paraCaixa(pendente) }
+  const cx = await paraCaixa(pendente)
+  return { perguntando: false, texto: cx.texto, caixaRecusou: !cx.ok }
 }
 
-/** Manda para a caixa — o caminho de quando não dá para lançar. */
+/**
+ * Manda para a caixa — o caminho de quando não dá para lançar.
+ *
+ * Devolve { ok, texto }. Quem chama só tira o comprovante da espera com
+ * ok: antes ele era apagado mesmo quando a caixa recusava (Obras fora do ar,
+ * token revogado, limite de envios) — e não ficava em lugar nenhum.
+ */
 async function paraCaixa(pendente) {
+  const texto = await textoDaCaixa(pendente)
+  const ok = !pendente.caixaRecusouEm
+  return { ok, texto }
+}
+
+async function textoDaCaixa(pendente) {
   const dados = pendente.dados ?? {}
   const envio = await enviarComprovante({
     arquivo: pendentes.arquivoDe(pendente),
@@ -1229,7 +1316,7 @@ async function paraCaixa(pendente) {
       descricao: dados.descricao,
       categoria: dados.tipo,
       valor: dados.valor,
-      data: new Date(pendente.enviadoEm ?? Date.now()).toISOString().slice(0, 10),
+      data: diaDoEnvio(pendente.enviadoEm),
       dataComprovante: dados.dataComprovante,
       estabelecimento: dados.estabelecimento,
       documento: dados.documento,
@@ -1239,6 +1326,8 @@ async function paraCaixa(pendente) {
   })
 
   console.log(`[gastos] ${pendente.de} → caixa: ${envio.ok ? 'ok' : envio.motivo}`)
+  if (envio.ok) delete pendente.caixaRecusouEm
+  else pendente.caixaRecusouEm = Date.now()
   if (envio.ok) {
     memoria.anotarLancamento({
       obra: dados.obra, valor: dados.valor, descricao: dados.descricao,

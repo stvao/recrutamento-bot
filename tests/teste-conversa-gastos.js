@@ -45,6 +45,8 @@ const OBRAS = [
 ]
 
 const chamadas = []
+/** Liga para a caixa responder 503, como quando o Obras está fora do ar. */
+let caixaRecusa = false
 const srv = createServer((req, res) => {
   let corpo = ''
   req.on('data', c => { corpo += c })
@@ -85,6 +87,11 @@ const srv = createServer((req, res) => {
     }
 
     // /receber — a caixa
+    if (caixaRecusa) {
+      chamadas[chamadas.length - 1].recusada = true
+      res.writeHead(503, { 'Content-Type': 'application/json' })
+      return res.end(JSON.stringify({ message: 'fora do ar' }))
+    }
     res.writeHead(201, { 'Content-Type': 'application/json' })
     res.end(JSON.stringify({ ok: true, id: 'c1', mensagem: 'Comprovante recebido.', pendentes: 1 }))
   })
@@ -143,7 +150,7 @@ function pessoa(de) {
 }
 
 const lancados = () => chamadas.filter(c => c.url.includes('lancar')).length
-const naCaixa = () => chamadas.filter(c => c.url.includes('receber')).length
+const naCaixa = () => chamadas.filter(c => c.url.includes('receber') && !c.recusada).length
 const enviados = () => lancados() + naCaixa()
 
 // ── 1. Legenda completa: lança direto ─────────────────────────────────────
@@ -462,6 +469,60 @@ const enviados = () => lancados() + naCaixa()
   const daqui = resumo.proximoEm(new Date())
   ok('o próximo fechamento está no futuro', daqui > 0)
   ok('e dentro de 24 horas', daqui <= 24 * 60 * 60 * 1000)
+}
+
+// ── O timer da legenda não atropela a pergunta ───────────────────────────
+// Foto sem legenda, e a legenda chega logo depois — faltando a obra. O robô
+// pergunta. O timer de espera da legenda disparava depois mesmo assim,
+// reprocessava e mandava para a caixa o comprovante que esperava a resposta.
+{
+  const p = pessoa('5511900000091')
+  // A foto fica esperando a legenda (sem await): é assim no WhatsApp — a
+  // legenda chega numa mensagem separada, dentro do prazo.
+  const aFoto = p.foto('')
+  await espera(5)
+  await p.diz('cimento 350,00')
+  await espera(20)
+  ok('legenda sem obra: pergunta a obra', p.ditos.some(t => /obra/i.test(t)))
+  await espera(90)                     // passa do prazo da legenda (50 ms)
+  ok('o timer não manda para a caixa o que está perguntado', naCaixa() === 0)
+  await Promise.race([aFoto, espera(10)])
+  await p.diz('haia')
+  await espera(20)
+  ok('e a resposta ainda lança', lancados() === 1)
+}
+
+// ── "cancelar tudo" com a caixa fora do ar ────────────────────────────────
+// Apagava todos e dizia que tinha mandado — os recusados sumiam.
+{
+  const p = pessoa('5511900000092')
+  await p.foto('nota 1', 'c1'); await espera(15)
+  await p.foto('nota 2', 'c2'); await espera(15)
+  caixaRecusa = true
+  const r = await p.diz('cancelar tudo')
+  ok('diz que não foram aceitos', /não foram aceitos/i.test(r ?? ''))
+  ok('e não diz que mandou todos', !/Mandei os 2/.test(r ?? ''))
+  ok('nada foi dado como entregue', naCaixa() === 0)
+  caixaRecusa = false
+  const r2 = await p.diz('cancelar tudo')
+  ok('com a caixa de volta, os dois vão', /Mandei os 2/.test(r2 ?? '') && naCaixa() === 2)
+}
+
+// ── Órfão de reinício segue sozinho ───────────────────────────────────────
+// Comprovante que voltou do disco sem pergunta feita e sem timer ficava
+// mudo até ser apagado em 7 dias. A ronda agora faz o que o timer faria.
+{
+  pessoa('5511900000093')
+  const pendentes = await import('../src/pendentes.js')
+  pendentes.guardar({
+    chat: base.chat, de: '5511900000093', arquivo: foto, nomeArquivo: 'c.jpg', tipo: 'image/jpeg',
+    descricao: 'haia cimento 90,00', respostas: [], idMensagem: 'orfao-1',
+    enviadoEm: Date.now() - 60_000, criadoEm: Date.now() - 60_000,
+    esperandoLegendaAte: Date.now() - 1_000,
+  })
+  await espera(150)                    // algumas voltas da ronda (40 ms)
+  ok('o órfão foi lançado pela ronda', lancados() === 1)
+  ok('e saiu da espera', pendentes.doRemetente('5511900000093').length === 0)
 }
 
 srv.close()
