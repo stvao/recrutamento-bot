@@ -722,7 +722,12 @@ function aplicarResposta(p, texto) {
           primeira: nome de obra vem no comeco do jeito que as pessoas
           escrevem, e o que sobra atras e a compra.
         */
-        const sobra = (p.dados?.descricao ?? p.descricao ?? '').trim()
+        //
+        // Se a obra veio escrita no lugar dela ("ze do posto, pedreiro joao,
+        // 150") e o sistema a recusou, o nome é ESSE texto. Aprender da
+        // descrição ali guardava "pedreiro joao" como apelido de obra, e toda
+        // diária dele passava a cair (ou ser rateada) numa obra errada.
+        const sobra = (p.obraEscrita ?? p.dados?.descricao ?? p.descricao ?? '').trim()
         const palavras = sobra.split(/\s+/).filter(Boolean)
 
         for (const quantas of [3, 2, 1]) {
@@ -1323,6 +1328,10 @@ async function lancar(pendente, dados) {
   if (r.obraNaoAchada && !pendente.jaPerguntouObra) {
     pendente.jaPerguntouObra = true
     pendente.jaPerguntou = false
+    // O que a pessoa escreveu COMO obra e o sistema não reconheceu. É daqui
+    // que se aprende o apelido quando ela apontar a obra — e não da descrição
+    // da compra, que é o que sobrava depois de zerar a obra.
+    if (dados.obra) pendente.obraEscrita = String(dados.obra)
     pendente.dados = { ...dados, obra: null }
     return { perguntando: true, texto: perguntar(pendente, ['obra'], r.obras ?? []) }
   }

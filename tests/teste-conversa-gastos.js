@@ -427,6 +427,25 @@ const enviados = () => lancados() + naCaixa()
   ok('sem perguntar de novo', !p.ditos.some(t => /de qual \*?obra/i.test(t)))
 }
 
+// No formato com vírgula, a obra que o sistema recusa é o nome a aprender —
+// não a descrição. Antes guardava "pedreiro joao" como apelido de obra, e
+// toda diária dele caía (ou era rateada) numa obra onde ele não trabalhou.
+{
+  memoria._limpar()
+  const p = pessoa('5511900000046')
+  await p.foto('ze do posto, pedreiro joao, 150,00')
+  await espera(20)
+  const pergunta = p.ditos.find(t => /obra/i.test(t)) ?? ''
+  const linha = pergunta.split('\n').find(l => /^\d\)/.test(l)) ?? ''
+  await p.diz(linha.slice(0, 1) || '1')
+  await espera(20)
+  const aprendidos = Object.keys(memoria.apelidosAprendidos())
+  // "ze do posto" inteiro tem "posto" (vocabulário de combustível); o
+  // começo do nome, "ze do", é o que fica — e basta para reconhecer depois.
+  ok('aprende o nome escrito como obra', aprendidos.some(k => k.startsWith('ze do')))
+  ok('e não a descrição da compra', !aprendidos.some(k => k.includes('pedreiro')))
+}
+
 // Não aprende de palpite: só quando a pessoa APONTA qual era.
 {
   memoria._limpar()
