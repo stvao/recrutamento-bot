@@ -174,8 +174,8 @@ const pagadorEnviado = () => {
 
 // ── 4. "pular": lança SEM sócio ───────────────────────────────────────────
 //
-// Comprovante de material comprado pela empresa não foi bancado por sócio
-// nenhum. Sem esta saída, a pessoa ficaria sem resposta possível.
+// Quem não sabe quem pagou precisa de uma saída. Sem ela, a pessoa ficaria
+// sem resposta possível.
 {
   const p = pessoa('5511900000104')
   await p.foto('haia bomba de concreto 1400')
@@ -184,6 +184,23 @@ const pagadorEnviado = () => {
   await espera(30)
   ok('pular lança assim mesmo', p.ditos.some(t => /aguardando sua aprova/i.test(t)))
   ok('e sem pagador', !pagadorEnviado())
+  ok('pular não diz que a empresa pagou', !/name="empresaPagou"/.test(lancados().at(-1)?.corpo ?? ''))
+}
+
+// ── 4b. "empresa": a empresa pagou direto ─────────────────────────────────
+//
+// Era tratado como "pular", e o sistema de obras grava gasto sem pagador
+// como reembolso devido ao dono do token: uma dívida com quem não gastou.
+{
+  const p = pessoa('5511900000114')
+  await p.foto('haia bomba de concreto 1400')
+  await espera(20)
+  ok('a pergunta oferece "empresa"', p.ditos.some(t => /\*empresa\*/i.test(t)))
+  await p.diz('a empresa')
+  await espera(30)
+  ok('"empresa" lança', p.ditos.some(t => /aguardando sua aprova/i.test(t)))
+  ok('sem sócio como pagador', !pagadorEnviado())
+  ok('e avisando que a empresa pagou', /name="empresaPagou"\r?\n\r?\ntrue/.test(lancados().at(-1)?.corpo ?? ''))
 }
 
 // ── 5. Escreveu na legenda: NÃO pergunta ──────────────────────────────────

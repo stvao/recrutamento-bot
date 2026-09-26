@@ -668,7 +668,9 @@ function aplicarResposta(p, texto) {
     const escolhido = lerRespostaDePagador(texto, p.opcoesPagador ?? [])
     delete p.opcoesPagador
 
-    if (escolhido.nome) {
+    if (escolhido.empresa) {
+      p.empresaPagou = true
+    } else if (escolhido.nome) {
       p.pagadorEscolhido = escolhido.nome
     } else if (escolhido.ambiguo?.length) {
       // Dois sócios servem para o que foi escrito. Perguntar de novo entre
@@ -1113,14 +1115,24 @@ function perguntarPagador(pendente, dados, socios) {
   linhas.push(pergunta)
 
   socios.forEach((nome, i) => linhas.push(`${i + 1}) ${nome}`))
-  linhas.push('_(responde o número, o nome, ou *pular* se não foi nenhum deles)_')
+  linhas.push('_(responde o número, o nome, *empresa* se a empresa pagou direto, ou *pular* se não sabe)_')
 
   pendente.opcoesPagador = socios
   return linhas.join('\n')
 }
 
 /** "não foi sócio nenhum" — as formas de dizer isso. */
-const PULAR_PAGADOR = /^\s*(pular|pula|nenhum|ningu[eé]m|n[aã]o sei|nao sei|sei l[aá]|empresa|a empresa|-)\s*[?!.]*\s*$/i
+const PULAR_PAGADOR = /^\s*(pular|pula|nenhum|ningu[eé]m|n[aã]o sei|nao sei|sei l[aá]|-)\s*[?!.]*\s*$/i
+
+/**
+ * "A empresa pagou" é uma resposta, não um "pular".
+ *
+ * Tratada como pular, o gasto ia sem pagador — e o sistema de obras grava
+ * gasto sem pagador como reembolso devido a quem o lançou, que no robô é o
+ * dono do token. Uma dívida com quem não gastou nada, e o custo arriscando
+ * sair duas vezes: para o fornecedor e como "reembolso".
+ */
+const EMPRESA_PAGOU = /^\s*(a\s+)?(empresa|firma)(\s+pagou)?\s*[?!.]*\s*$|^\s*(foi\s+a\s+empresa|pela\s+empresa|pago\s+pela\s+empresa)\s*[?!.]*\s*$/i
 
 /**
  * Lê a resposta de "quem pagou?": número, nome, ou uma saída.
@@ -1133,6 +1145,7 @@ function lerRespostaDePagador(texto, opcoes) {
   const bruto = (texto ?? '').trim()
   if (!bruto) return { nome: null, pulou: false }
 
+  if (EMPRESA_PAGOU.test(bruto)) return { nome: null, pulou: true, empresa: true }
   if (PULAR_PAGADOR.test(bruto)) return { nome: null, pulou: true }
 
   const so = bruto.replace(/[^\d]/g, '')
@@ -1251,6 +1264,8 @@ async function lancar(pendente, dados) {
     // A pessoa disse "é outro". Sem avisar o sistema, a trava de reenvio de
     // lá engolia este segundo gasto como se fosse o primeiro de novo.
     confirmadoOutro: !!pendente.duplicataConfirmada,
+    // Pago direto pela empresa: não há reembolso a ninguém.
+    empresaPagou: !!pendente.empresaPagou,
   })
 
   if (r.ok && r.reenvio) {
