@@ -551,7 +551,21 @@ async function atenderRecrutamento(msg) {
  * perder um currículo num reinício é melhor que derrubar os dois.
  */
 async function mandarDocumentosGuardados(de) {
-  for (const doc of guardados.retirar(de)) await enviarDocumento(doc)
+  for (const doc of guardados.retirar(de)) {
+    const env = await enviarDocumento(doc)
+    if (env.ok) continue
+    /*
+      Reenviado e ainda 404: volta para a guarda, até 3 vezes. Antes era
+      retirado e, se a ficha não achasse o documento (conversa @lid, telefone
+      com máscara), ele sumia sem log — e a pessoa já tinha ouvido "recebi".
+    */
+    const tentativas = (doc.tentativas ?? 0) + 1
+    if (env.status === 404 && tentativas < 3 && guardados.guardar(de, { ...doc, tentativas })) {
+      console.warn(`[documento] ${discreto(de)}: ${doc.tipo} — a ficha ainda não achou; guardado de novo (tentativa ${tentativas}).`)
+    } else {
+      console.error(`[documento] ${discreto(de)}: ${doc.tipo} — PERDIDO depois de ${tentativas} tentativa(s) (${env.status ?? env.motivo ?? 'erro'}). Peça de novo à pessoa.`)
+    }
+  }
 }
 
 async function receberDocumento(msg, { calado = false, responderPendencia = !calado } = {}) {
@@ -1069,8 +1083,18 @@ async function rodarLembretes() {
     if (!r?.ok) desmarcarLembrado(telefone, texto)
     console.log(`[lembrete] cadastro parado ${discreto(telefone)}: ${r?.ok ? 'lembrado' : 'falhou, tenta de novo'}`)
   }
+  const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
   for (const { whatsapp, texto } of await quemLembrarDocumentos()) {
     const numero = String(whatsapp).replace(/\D/g, '')
+    /*
+      Uma vez por dia, no máximo, venha o RH como vier.
+
+      A marca de "lembrado" é do RH. Quando ela falhava (telefone gravado com
+      máscara, que o RH não achava), o número voltava na rodada seguinte e a
+      pessoa recebia o mesmo lembrete a cada 15 minutos — umas 36 por dia, e
+      o número do robô, que não é oficial, arriscando bloqueio.
+    */
+    if (documentosLembradosEm.get(numero) === hoje) continue
     /*
       Quem está sendo atendido por gente não recebe automático por cima: o RH
       pode ter falado com o aprovado hoje, pelo mesmo número do robô.
@@ -1083,10 +1107,16 @@ async function rodarLembretes() {
     const r = await enviarMensagem(destino, texto)
     // Marca só depois do ok: marcado antes, o RH nunca devolvia este número
     // de novo e o aprovado ficava sem o lembrete.
-    if (r?.ok) await marcarLembreteDocumentos(whatsapp)
+    if (r?.ok) {
+      documentosLembradosEm.set(numero, hoje)
+      await marcarLembreteDocumentos(whatsapp)
+    }
     console.log(`[lembrete] documentos ${discreto(numero)}: ${r?.ok ? 'lembrado' : 'falhou, tenta de novo'}`)
   }
 }
+
+/** Quem já recebeu o lembrete de documentos hoje (número → dia). */
+const documentosLembradosEm = new Map()
 /*
   Resumo do recrutamento às 8h no WhatsApp do gestor. Só com
   RESUMO_RECRUTAMENTO_PARA no .env; sem número, não manda nada.
