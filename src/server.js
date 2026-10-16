@@ -46,6 +46,9 @@ import * as maoHumana from './mao-humana.js'
 import { discreto } from './texto.js'
 
 const app = express()
+// A central de atendimento manda arquivo (até 16 MB, em base64 ≈ 22 MB) só
+// nesta rota; o resto continua com o limite pequeno.
+app.use('/atendimento/enviar', express.json({ limit: '24mb' }))
 app.use(express.json({ limit: '1mb' }))
 
 /**
@@ -286,14 +289,26 @@ app.post('/enviar-pedido', async (req, res) => {
  */
 app.post('/atendimento/enviar', async (req, res) => {
   if (!simuladorAutorizado(req)) return res.sendStatus(404)
-  const { chave, texto, atendente } = req.body || {}
-  if (typeof chave !== 'string' || !chave || typeof texto !== 'string' || !texto.trim() || texto.length > 4000) {
-    return res.status(422).json({ ok: false, error: 'chave e texto são obrigatórios' })
+  const { chave, texto, atendente, arquivo } = req.body || {}
+  const temArquivo = Boolean(arquivo && typeof arquivo.base64 === 'string' && arquivo.base64.length > 0)
+  if (typeof chave !== 'string' || !chave || typeof texto !== 'string' || (!texto.trim() && !temArquivo) || texto.length > 4000) {
+    return res.status(422).json({ ok: false, error: 'chave e texto (ou arquivo) são obrigatórios' })
   }
   if (process.env.CONNECTOR !== 'baileys') return res.status(503).json({ ok: false, error: 'WhatsApp (baileys) não está ligado neste robô.' })
   const { enviarDoAtendimento } = await import('./baileys.js')
-  const r = await enviarDoAtendimento(chave, texto.trim(), typeof atendente === 'string' ? atendente.slice(0, 60) : '')
+  const r = await enviarDoAtendimento(chave, texto.trim(), typeof atendente === 'string' ? atendente.slice(0, 60) : '', temArquivo ? arquivo : null)
   res.status(r.ok ? 200 : 502).json({ ok: r.ok, id: r.id ?? null, error: r.ok ? undefined : (r.erro ?? 'não enviou') })
+})
+
+/** Mensagens anteriores de uma conversa: o robô pede ao WhatsApp, e o lote sobe ao RH. */
+app.post('/atendimento/historico', async (req, res) => {
+  if (!simuladorAutorizado(req)) return res.sendStatus(404)
+  const { chave, maisAntiga } = req.body || {}
+  if (typeof chave !== 'string' || !chave) return res.status(422).json({ ok: false })
+  if (process.env.CONNECTOR !== 'baileys') return res.status(503).json({ ok: false })
+  const { buscarHistorico } = await import('./baileys.js')
+  const r = await buscarHistorico(chave, maisAntiga)
+  res.status(r.ok ? 200 : 502).json({ ok: r.ok, error: r.erro })
 })
 
 /** "Devolver para o robô": ele volta a responder a conversa. */

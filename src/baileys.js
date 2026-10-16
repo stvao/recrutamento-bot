@@ -273,6 +273,17 @@ export async function conectar(aoReceber) {
     // receber notificação das mensagens — e ela reclama que "não chega nada".
     markOnlineOnConnect: false,
     browser: ['Nova Gestão RH', 'Chrome', '1.0.0'],
+    // Histórico das conversas para a central de atendimento. O padrão do
+    // Baileys descarta o histórico COMPLETO (só o recente vem); com
+    // ATENDIMENTO_HISTORICO=on, ao conectar o número de novo, vem tudo.
+    shouldSyncHistoryMessage: ({ syncType }) =>
+      process.env.ATENDIMENTO_HISTORICO === 'on' || syncType !== 2 /* FULL */,
+  })
+
+  // Lotes de histórico: na conexão, e quando a central pede "mensagens
+  // anteriores" de uma conversa (ON_DEMAND).
+  sock.ev.on('messaging-history.set', ({ messages, syncType }) => {
+    void repassarHistorico(messages ?? [], syncType)
   })
 
   sock.ev.on('creds.update', saveCreds)
@@ -729,7 +740,7 @@ async function repassarAoRh(msg, type) {
       autor = 'celular'
     }
     const { numero, telefoneConhecido } = await telefoneDe(msg, { lidMapping: sock?.signalRepository?.lidMapping })
-    atendimentoRh.repassar({
+    const evento = {
       chave: jid,
       numero: telefoneConhecido ? numero : null,
       lid: jid.endsWith('@lid') ? jid : null,
@@ -739,9 +750,97 @@ async function repassarAoRh(msg, type) {
       texto: textoDaMensagem(msg),
       em: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
       waId: id ?? null,
-    })
+    }
+    const midia = await midiaDaMensagem(msg)
+    if (midia) atendimentoRh.repassarComMidia(evento, midia)
+    else atendimentoRh.repassar(evento)
   } catch (e) {
     console.error('[atendimento] não repassei a mensagem:', e.message)
+  }
+}
+
+/** Os tipos de arquivo que a central mostra. */
+const CAMPO_MIDIA = {
+  imageMessage: 'imagem', audioMessage: 'audio', videoMessage: 'video',
+  documentMessage: 'documento', stickerMessage: 'figurinha',
+}
+
+/**
+ * Baixa o arquivo da mensagem para a central (foto, áudio, vídeo, PDF).
+ * null quando não tem arquivo, é grande demais ou o download falhou — aí a
+ * mensagem vai sem o conteúdo e aparece como "📷 Foto".
+ */
+async function midiaDaMensagem(msg) {
+  const m = desembrulhar(msg.message)
+  if (!m) return null
+  const campo = Object.keys(CAMPO_MIDIA).find(k => m[k])
+  if (!campo) return null
+  const info = m[campo]
+  const tamanho = Number(info.fileLength ?? 0)
+  if (tamanho > atendimentoRh.MAX_MIDIA_BYTES) return null
+  const buffer = await baixar(msg, tamanho)
+  if (!buffer || buffer.length > atendimentoRh.MAX_MIDIA_BYTES) return null
+  return {
+    base64: buffer.toString('base64'),
+    mime: info.mimetype ?? 'application/octet-stream',
+    nome: info.fileName ?? null,
+    ptt: Boolean(info.ptt),
+  }
+}
+
+/**
+ * Mensagens antigas para a central. Sem baixar arquivo (seriam centenas): a
+ * foto antiga aparece como "📷 Foto" e se vê no celular. Do lado da empresa
+ * não dá para saber se foi o robô ou alguém pelo celular — vai como "celular".
+ */
+async function repassarHistorico(mensagens, syncType) {
+  try {
+    if (!atendimentoRh.ligado() || !mensagens.length) return
+    const eventos = []
+    for (const msg of mensagens) {
+      const jid = msg.key?.remoteJid
+      if (!ehPrivado(jid)) continue
+      const tipo = observacao.tipoDe(msg.message)
+      if (!tipo) continue
+      const { numero, telefoneConhecido } = await telefoneDe(msg, { lidMapping: sock?.signalRepository?.lidMapping })
+      eventos.push({
+        chave: jid,
+        numero: telefoneConhecido ? numero : null,
+        lid: jid.endsWith('@lid') ? jid : null,
+        nome: !msg.key?.fromMe ? (msg.pushName ?? null) : null,
+        autor: msg.key?.fromMe ? (observacao.foiORobo(msg.key.id) ? 'robo' : 'celular') : 'pessoa',
+        tipo,
+        texto: textoDaMensagem(msg),
+        em: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
+        waId: msg.key?.id ?? null,
+        historico: true,
+      })
+    }
+    if (!eventos.length) return
+    const n = await atendimentoRh.repassarLote(eventos)
+    console.log(`[atendimento] histórico (tipo ${syncType}): ${n} de ${eventos.length} mensagem(ns) enviadas ao RH`)
+  } catch (e) {
+    console.error('[atendimento] histórico não repassado:', e.message)
+  }
+}
+
+/**
+ * Pede ao WhatsApp as mensagens ANTERIORES a uma (a mais antiga que o RH tem).
+ * A resposta não vem aqui: chega em lote pelo 'messaging-history.set'.
+ */
+export async function buscarHistorico(chave, maisAntiga, quantas = 50) {
+  if (!sock || !conectado) return { ok: false, erro: 'WhatsApp desconectado' }
+  const jid = chave.includes('@') ? chave : `${chave.replace(/\D/g, '')}@s.whatsapp.net`
+  if (!maisAntiga?.waId || !maisAntiga?.em) return { ok: false, erro: 'sem mensagem de referência' }
+  try {
+    await sock.fetchMessageHistory(
+      Math.min(50, quantas),
+      { remoteJid: jid, id: maisAntiga.waId, fromMe: Boolean(maisAntiga.fromMe) },
+      Math.floor(Number(maisAntiga.em) / 1000),
+    )
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, erro: e.message }
   }
 }
 
@@ -758,25 +857,53 @@ async function numeroDaConversa(jid) {
  * digitou foi gente), e o robô se cala nesta conversa como se a resposta
  * tivesse saído do celular.
  */
-export async function enviarDoAtendimento(chave, texto, atendente) {
+export async function enviarDoAtendimento(chave, texto, atendente, arquivo = null) {
   if (!sock || !conectado) return { ok: false, erro: 'WhatsApp desconectado' }
   const jid = chave.includes('@') ? chave : `${chave.replace(/\D/g, '')}@s.whatsapp.net`
   if (!ehPrivado(jid)) return { ok: false, erro: 'conversa inválida' }
   const nome = String(atendente ?? '').trim()
-  const final = nome ? `*${nome}:*\n${texto}` : texto
+  const assinatura = nome ? `*${nome}:*` : ''
+  const final = assinatura && texto ? `${assinatura}\n${texto}` : (texto || assinatura)
   try {
-    const enviada = await sock.sendMessage(jid, { text: final })
+    let conteudo = { text: final }
+    let buffer = null
+    if (arquivo?.base64) {
+      buffer = Buffer.from(arquivo.base64, 'base64')
+      const mime = String(arquivo.mime ?? 'application/octet-stream')
+      if (mime.startsWith('image/')) conteudo = { image: buffer, caption: final }
+      else if (mime.startsWith('video/')) conteudo = { video: buffer, caption: final }
+      // Áudio não tem legenda no WhatsApp: o nome vai numa mensagem antes.
+      else if (mime.startsWith('audio/')) conteudo = { audio: buffer, mimetype: mime, ptt: Boolean(arquivo.ptt) }
+      else conteudo = { document: buffer, mimetype: mime, fileName: arquivo.nome || 'arquivo', caption: final }
+      if (mime.startsWith('audio/') && assinatura) {
+        const antes = await sock.sendMessage(jid, { text: assinatura })
+        if (antes?.key?.id) doAtendimento.add(antes.key.id)
+      }
+    }
+    const enviada = await sock.sendMessage(jid, conteudo)
     if (enviada?.key?.id) {
       doAtendimento.add(enviada.key.id)
       if (doAtendimento.size > 5000) doAtendimento.delete(doAtendimento.values().next().value)
     }
     maoHumana.gentesRespondeu(await numeroDaConversa(jid))
-    atendimentoRh.repassar({ chave: jid, autor: 'atendente', atendente: nome || null, tipo: 'texto', texto, waId: enviada?.key?.id ?? null })
+    const evento = {
+      chave: jid, autor: 'atendente', atendente: nome || null,
+      tipo: arquivo?.mime ? tipoPeloMime(String(arquivo.mime)) : 'texto', texto: texto || null, waId: enviada?.key?.id ?? null,
+    }
+    if (buffer) atendimentoRh.repassarComMidia(evento, { base64: arquivo.base64, mime: arquivo.mime, nome: arquivo.nome ?? null, ptt: Boolean(arquivo.ptt) })
+    else atendimentoRh.repassar(evento)
     return { ok: true, id: enviada?.key?.id ?? null }
   } catch (e) {
     console.error('[atendimento] não consegui enviar:', e.message)
     return { ok: false, erro: e.message }
   }
+}
+
+function tipoPeloMime(mime) {
+  if (mime.startsWith('image/')) return 'imagem'
+  if (mime.startsWith('audio/')) return 'audio'
+  if (mime.startsWith('video/')) return 'video'
+  return 'documento'
 }
 
 /** "Devolver para o robô": ele volta a responder esta conversa. */
