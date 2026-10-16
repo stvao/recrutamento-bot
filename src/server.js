@@ -281,6 +281,32 @@ app.post('/enviar-pedido', async (req, res) => {
 })
 
 /**
+ * Central de atendimento do RH: a resposta digitada no sistema sai por aqui,
+ * com o nome de quem respondeu. Mesma porta do pedido de documentos.
+ */
+app.post('/atendimento/enviar', async (req, res) => {
+  if (!simuladorAutorizado(req)) return res.sendStatus(404)
+  const { chave, texto, atendente } = req.body || {}
+  if (typeof chave !== 'string' || !chave || typeof texto !== 'string' || !texto.trim() || texto.length > 4000) {
+    return res.status(422).json({ ok: false, error: 'chave e texto são obrigatórios' })
+  }
+  if (process.env.CONNECTOR !== 'baileys') return res.status(503).json({ ok: false, error: 'WhatsApp (baileys) não está ligado neste robô.' })
+  const { enviarDoAtendimento } = await import('./baileys.js')
+  const r = await enviarDoAtendimento(chave, texto.trim(), typeof atendente === 'string' ? atendente.slice(0, 60) : '')
+  res.status(r.ok ? 200 : 502).json({ ok: r.ok, id: r.id ?? null, error: r.ok ? undefined : (r.erro ?? 'não enviou') })
+})
+
+/** "Devolver para o robô": ele volta a responder a conversa. */
+app.post('/atendimento/robo', async (req, res) => {
+  if (!simuladorAutorizado(req)) return res.sendStatus(404)
+  const { chave } = req.body || {}
+  if (typeof chave !== 'string' || !chave) return res.status(422).json({ ok: false })
+  if (process.env.CONNECTOR !== 'baileys') return res.status(503).json({ ok: false })
+  const { devolverAoRobo } = await import('./baileys.js')
+  res.json(await devolverAoRobo(chave))
+})
+
+/**
  * Quem atende esta mensagem.
  *
  * O robô tem dois módulos, e a regra de qual atende é de SEGURANÇA, não de

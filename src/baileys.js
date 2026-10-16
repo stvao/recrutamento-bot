@@ -30,6 +30,7 @@ import { recrutamentoLigado } from './config.js'
 import * as observacao from './observacao.js'
 import { criarFiltro } from './recebimento.js'
 import * as maoHumana from './mao-humana.js'
+import * as atendimentoRh from './atendimento-rh.js'
 import { criarAgrupador } from './rajada.js'
 import { transcrever, audioDisponivel } from './ia-audio.js'
 
@@ -345,6 +346,9 @@ export async function conectar(aoReceber) {
       // celular, chegam como mensagens "minhas", e o filtro abaixo as
       // descarta. São justamente elas que ensinam como responder.
       await observar(msg, type)
+      // A central de atendimento do RH vê a conversa inteira, de qualquer
+      // aparelho. Independe da observação (que pode estar desligada).
+      await repassarAoRh(msg, type)
 
       /*
         Gente da empresa respondeu: daqui em diante o robô cala nesta conversa.
@@ -686,13 +690,100 @@ async function responder(jid, texto, { citar = null, rapido = false } = {}) {
     // Anota o que o robô disse no privado, e marca o id: a mesma mensagem
     // pode voltar como "minha", e não pode ser confundida com o dono.
     observacao.marcarDoRobo(enviada?.key?.id)
-    if (ehPrivado(jid)) observacao.anotar({ chave: jid, autor: 'robo', tipo: 'texto', texto })
+    if (ehPrivado(jid)) {
+      observacao.anotar({ chave: jid, autor: 'robo', tipo: 'texto', texto })
+      atendimentoRh.repassar({ chave: jid, autor: 'robo', tipo: 'texto', texto, waId: enviada?.key?.id ?? null })
+    }
 
     return { ok: true, id: enviada?.key?.id ?? null }
   } catch (e) {
     console.error('[whatsapp] não consegui enviar:', e.message)
     return { ok: false, erro: e.message }
   }
+}
+
+// ── Central de atendimento do RH ───────────────────────────────────────────
+
+/** Ids do que saiu PELO SISTEMA (atendente): o eco não pode virar "pelo celular". */
+const doAtendimento = new Set()
+
+/**
+ * Repassa ao RH uma mensagem de conversa privada.
+ *
+ * O que o robô e o atendente mandam já foi repassado na hora do envio (com o
+ * nome de quem mandou); aqui entram o candidato e a empresa pelo celular ou
+ * WhatsApp Web — que o WhatsApp não diz quem digitou.
+ */
+async function repassarAoRh(msg, type) {
+  try {
+    if (!atendimentoRh.ligado()) return
+    const jid = msg.key?.remoteJid
+    if (!ehPrivado(jid)) return
+    if (msg.key?.fromMe && type === 'append') return
+    const tipo = observacao.tipoDe(msg.message)
+    if (!tipo) return
+    const id = msg.key?.id
+    let autor = 'pessoa'
+    if (msg.key?.fromMe) {
+      if (observacao.foiORobo(id) || doAtendimento.has(id)) return
+      autor = 'celular'
+    }
+    const { numero, telefoneConhecido } = await telefoneDe(msg, { lidMapping: sock?.signalRepository?.lidMapping })
+    atendimentoRh.repassar({
+      chave: jid,
+      numero: telefoneConhecido ? numero : null,
+      lid: jid.endsWith('@lid') ? jid : null,
+      nome: !msg.key?.fromMe ? (msg.pushName ?? null) : null,
+      autor,
+      tipo,
+      texto: textoDaMensagem(msg),
+      em: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now(),
+      waId: id ?? null,
+    })
+  } catch (e) {
+    console.error('[atendimento] não repassei a mensagem:', e.message)
+  }
+}
+
+/** A chave da "mão humana" desta conversa (o mesmo número que o atendimento usa). */
+async function numeroDaConversa(jid) {
+  const { numero } = await telefoneDe({ key: { remoteJid: jid } }, { lidMapping: sock?.signalRepository?.lidMapping })
+  return numero
+}
+
+/**
+ * Uma pessoa da empresa respondeu PELO SISTEMA.
+ *
+ * Sai com o nome dela em cima ("*Kelly:*"), sem a pausa de "digitando" (quem
+ * digitou foi gente), e o robô se cala nesta conversa como se a resposta
+ * tivesse saído do celular.
+ */
+export async function enviarDoAtendimento(chave, texto, atendente) {
+  if (!sock || !conectado) return { ok: false, erro: 'WhatsApp desconectado' }
+  const jid = chave.includes('@') ? chave : `${chave.replace(/\D/g, '')}@s.whatsapp.net`
+  if (!ehPrivado(jid)) return { ok: false, erro: 'conversa inválida' }
+  const nome = String(atendente ?? '').trim()
+  const final = nome ? `*${nome}:*\n${texto}` : texto
+  try {
+    const enviada = await sock.sendMessage(jid, { text: final })
+    if (enviada?.key?.id) {
+      doAtendimento.add(enviada.key.id)
+      if (doAtendimento.size > 5000) doAtendimento.delete(doAtendimento.values().next().value)
+    }
+    maoHumana.gentesRespondeu(await numeroDaConversa(jid))
+    atendimentoRh.repassar({ chave: jid, autor: 'atendente', atendente: nome || null, tipo: 'texto', texto, waId: enviada?.key?.id ?? null })
+    return { ok: true, id: enviada?.key?.id ?? null }
+  } catch (e) {
+    console.error('[atendimento] não consegui enviar:', e.message)
+    return { ok: false, erro: e.message }
+  }
+}
+
+/** "Devolver para o robô": ele volta a responder esta conversa. */
+export async function devolverAoRobo(chave) {
+  const jid = chave.includes('@') ? chave : `${chave.replace(/\D/g, '')}@s.whatsapp.net`
+  maoHumana.liberar(await numeroDaConversa(jid))
+  return { ok: true }
 }
 
 /** Envio avulso, para o resto do serviço usar. */

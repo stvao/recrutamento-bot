@@ -52,6 +52,11 @@ export function atendidaPorGente(numero, agora = Date.now()) {
   return { atendida: faz < JANELA_MS, faz: Math.round(faz / 60000) }
 }
 
+/** "Devolver para o robô": a conversa volta a ser dele agora. */
+export function liberar(numero) {
+  ultimaDeGente.delete(String(numero ?? ''))
+}
+
 /** Para teste. */
 export function _limpar() {
   ultimaDeGente.clear()
