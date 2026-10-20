@@ -96,5 +96,13 @@ export function decidir({ texto, ficha }) {
   if (ficha?.tipo === 'funcionario' && !atendeFuncionario()) {
     return { atender: false, motivo: 'é funcionário da empresa' }
   }
+  // Fornecedor (ou contato que o RH marcou como "outro"): nunca ouve
+  // "para qual vaga você procura?". O RH classifica na central de atendimento.
+  if (ficha?.tipo === 'fornecedor') {
+    return { atender: false, motivo: `é fornecedor${ficha.empresa ? ` (${ficha.empresa})` : ''}` }
+  }
+  if (ficha?.tipo === 'outro') {
+    return { atender: false, motivo: 'é um contato que o RH marcou como "não é candidato"' }
+  }
   return { atender: true, motivo: null }
 }

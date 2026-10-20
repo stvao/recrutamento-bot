@@ -81,5 +81,11 @@ ok('por padrão o robô NÃO atende funcionário', !atendeFuncionario())
   process.env.ATENDER_FUNCIONARIO = 'off'
 }
 
+// Fornecedor e contato marcado como "outro": nunca ouvem triagem de vaga.
+ok('fornecedor: robô calado', !decidir({ texto: 'bom dia, o orçamento do cimento', ficha: { tipo: 'fornecedor', empresa: 'Casa do Construtor' } }).atender)
+ok('fornecedor: o motivo diz a empresa', decidir({ texto: 'oi', ficha: { tipo: 'fornecedor', empresa: 'Casa do Construtor' } }).motivo.includes('Casa do Construtor'))
+ok('outro: robô calado', !decidir({ texto: 'oi', ficha: { tipo: 'outro' } }).atender)
+ok('candidato continua sendo atendido', decidir({ texto: 'tem vaga?', ficha: { tipo: 'candidato' } }).atender)
+
 console.log(falhas ? `\n${falhas} falharam.` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)
