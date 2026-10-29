@@ -20,9 +20,10 @@
  *  - Espera alguns segundos e mostra "digitando…" antes de responder. Robô
  *    que responde em 200ms é reconhecível por qualquer sistema antifraude.
  */
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import qrcode from 'qrcode-terminal'
+import { whatsappCaiu, whatsappConectou } from './alerta-queda.js'
 import pino from 'pino'
 import * as gastos from './gastos.js'
 import { ehConversaPessoal, tipoIgnorado, telefoneDe, numeroDoJid } from './endereco.js'
@@ -314,6 +315,7 @@ export async function conectar(aoReceber) {
       conectado = true
       const meu = numeroDoJid(sock.user?.id)
       console.log(`\n WhatsApp conectado no número ${meu}. A Maria Vitória está atendendo.\n`)
+      whatsappConectou(meu)
       carregarGrupos()
     }
 
@@ -321,16 +323,27 @@ export async function conectar(aoReceber) {
       conectado = false
       const motivo = lastDisconnect?.error?.output?.statusCode
 
-      // Sessão encerrada de propósito (desconectado no celular) — reconectar
-      // em laço só geraria erro infinito. Precisa ler o QR de novo.
+      // Sessão encerrada no celular (ou aparelho removido — 401
+      // "device_removed"). Reconectar com a mesma sessão só daria erro de
+      // novo. Antes o robô parava aqui e esperava alguém apagar a pasta à
+      // mão: em 28/10/2026 ficou mais de um dia fora. Agora a sessão morta
+      // vai para o lado (não se apaga nada) e um QR novo sai na hora — falta
+      // só alguém ler.
       if (motivo === DisconnectReason.loggedOut) {
-        console.error(
-          '\n A sessão foi encerrada no celular.\n'
-          + `   Apague a pasta ${PASTA_SESSAO} e rode de novo para ler outro QR code.\n`,
-        )
+        const guardada = `${PASTA_SESSAO}-removida-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`
+        console.error(`\n A sessão foi encerrada no celular. Guardei a antiga em ${guardada} e vou gerar um QR novo.\n`)
+        whatsappCaiu({ motivo, precisaQr: true })
+        try {
+          renameSync(PASTA_SESSAO, guardada)
+        } catch (e) {
+          console.error('[whatsapp] não consegui mover a sessão antiga:', e.message)
+          return
+        }
+        setTimeout(() => conectar(aoReceber), 5000)
         return
       }
 
+      whatsappCaiu({ motivo })
       console.warn(`[whatsapp] conexão caiu (${motivo ?? 'motivo desconhecido'}) — reconectando em 5s…`)
       setTimeout(() => conectar(aoReceber), 5000)
     }
