@@ -155,5 +155,14 @@ ok('Praia Grande: servente sem alojamento, aponta Bastos', /o alojamento é em B
   ok('fatos: estágio nas cidades', /Buritama: contrata .*estagiário/.test(f))
 }
 
+// ── Celular antigo sem o nono dígito é telefone, não @lid (04/11/2026) ──
+{
+  const { enderecoParaRH } = await import('../src/rh-client.js')
+  ok('Gleison: 55 48 9636-0367 é telefone', enderecoParaRH('554896360367').whatsapp === '554896360367')
+  ok('Jhoni: 55 47 9278-3061 é telefone', enderecoParaRH('554792783061').lid === null)
+  ok('celular com nono dígito continua telefone', enderecoParaRH('5511912345678').whatsapp === '5511912345678')
+  ok('@lid de verdade continua @lid', enderecoParaRH('133960650739852').lid === '133960650739852')
+}
+
 console.log(falhas ? `\n${falhas} falha(s).` : '\nTodos passaram.')
 process.exit(falhas ? 1 : 0)

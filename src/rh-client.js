@@ -58,7 +58,10 @@ export function enderecoParaRH(valor) {
   const d = String(valor ?? '').replace(/\D/g, '')
   const semDdi = d.startsWith('55') && d.length > 11 ? d.slice(2) : d
   const ehTelefone = (semDdi.length === 11 && semDdi[2] === '9')
-    || (semDdi.length === 10 && /[2-5]/.test(semDdi[2]))
+    // 10 dígitos de 6 a 9: celular antigo sem o nono dígito, como o WhatsApp
+    // identifica muitos fora de SP (55 48 9636-0367). Ia para o campo de
+    // identificador e a ficha chegava ao RH sem telefone (04/11/2026).
+    || (semDdi.length === 10 && /[2-9]/.test(semDdi[2]))
   return ehTelefone ? { whatsapp: d, lid: null } : { whatsapp: null, lid: d || null }
 }
 
