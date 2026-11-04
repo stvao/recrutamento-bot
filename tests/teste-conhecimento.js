@@ -83,12 +83,12 @@ ok('Bastos tem alojamento', /^Sim/.test(texto('tem alojamento em bastos?')))
 // O ajudante de outra cidade que descobre isso só na entrevista viajou à toa.
 {
   const r = texto('tem alojamento?', { vaga: 'Servente' })
-  ok('ajudante: alojamento é só para pedreiro', /só para pedreiro/.test(r))
+  ok('ajudante: não tem alojamento', /não temos alojamento/.test(r))
   ok('ajudante: tem que morar na cidade da obra', /mora na cidade da obra/.test(r))
   ok('ajudante: não recebe a lista de cidades com alojamento', !/Bastos/.test(r))
 }
 ok('pedreiro continua recebendo as cidades', /Bastos/.test(texto('tem alojamento?', { vaga: 'Pedreiro' })))
-ok('quem cita a função na pergunta também', /só para pedreiro/.test(texto('sou ajudante, tem alojamento?')))
+ok('quem cita a função na pergunta também', /não temos alojamento/.test(texto('sou ajudante, tem alojamento?')))
 ok('Pereiras tem alojamento', /^Sim/.test(texto('tem alojamento em pereiras?')))
 {
   const buritama = texto('tem alojamento em buritama?')
@@ -138,7 +138,7 @@ ok('sem vaga escolhida: explica as duas funções',
   ok('  a cidade a pessoa escolhe', /você escolhe/.test(r))
   ok('  sem prometer a vaga', !/garant|contratad|vaga (é|e) sua/i.test(r))
 }
-ok('cidade: pode escolher trabalhar lá', /pode escolher/.test(texto('tem vaga em buritama?')))
+ok('cidade: diz que está contratando lá', /em Buritama estamos contratando/.test(texto('tem vaga em buritama?')))
 
 // ── Estágio ────────────────────────────────────────────────────────────
 {
@@ -205,11 +205,11 @@ ok('jornada continua', /segunda a quinta/i.test(texto('qual o horario?')) && JOR
   const f = montarFatos({ vagas: catalogo.vagasAtuais(), cidades: catalogo.cidadesAtuais(), jornada: JORNADA })
   // Com ponto de milhar e espaço fino, como o resto do robô escreve dinheiro.
   ok('fatos: salários do RH', /Servente: R\$\s?2\.303,00/.test(f) && /Pedreiro: a partir de R\$\s?2\.803,00/.test(f))
-  ok('fatos: alojamento só para pedreiro', /S[ÓO] PARA PEDREIRO/.test(f) && /MORA na cidade da obra/.test(f))
+  ok('fatos: alojamento só para pedreiro', /Bastos: .*alojamento SÓ para pedreiro/.test(f) && /MORA na cidade da obra/.test(f))
   ok('fatos: o teto exige carteira', /COMPROVADA EM CARTEIRA/.test(f))
   ok('fatos: teto só na linha do pedreiro',
     /Pedreiro:.*até R\$\s?3\.500,00/.test(f) && !/Servente:.*3500/.test(f) && !/Estagi.rio:.*3500/.test(f))
-  ok('fatos: alojamento como está no RH', /Bastos: tem alojamento/.test(f) && /Buritama: NÃO tem alojamento/.test(f))
+  ok('fatos: alojamento como está no RH', /Bastos: contrata .*; alojamento/.test(f) && /Buritama: contrata .*; NÃO tem alojamento/.test(f))
   ok('fatos: formas de contratação', /CLT/.test(f) && /diária/.test(f) && /empreita/.test(f))
   ok('fatos: pagamento e vale', /5º dia útil/.test(f) && /dia 20/.test(f))
   ok('fatos: alimentação', /almoço/.test(f) && /café/.test(f))

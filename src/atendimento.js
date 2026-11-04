@@ -18,7 +18,7 @@ import {
   funcaoFechadaCitada, vagaCitadaExata, responderFAQ,
 } from './brain.js'
 import { conversar, montarFatos, iaDisponivel } from './ia.js'
-import { vagasAtuais, cidadesAtuais, perguntaExperiencia } from './catalogo.js'
+import { vagasAtuais, cidadesAtuais, perguntaExperiencia, alojamentoVale } from './catalogo.js'
 import { proibidoNaConversa, FRASE_SEGURA } from './resposta-segura.js'
 import { fraseDeRegistro, PREFIXO_RESUMO } from './ficha-rh.js'
 import { norm } from './texto.js'
@@ -252,11 +252,13 @@ export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } 
     consegue vir e ficar. Por isso a resposta vai no MESMO campo
     alojamentoFirme, e o selo "pronto para ligar" do RH continua acendendo.
   */
-  if (/pedreiro/i.test(e.vaga ?? '') && tem(e.cidadeMora) && tem(e.cidade)
+  // Desde 11/2026 o alojamento é por função e por cidade (Peruíbe aloja
+  // carpinteiro também): vale para quem é de obra e não é ajudante.
+  if (/pedreiro|carpinteiro|meio oficial/i.test(e.vaga ?? '') && tem(e.cidadeMora) && tem(e.cidade)
     && !mesmaCidade(e.cidadeMora, e.cidade)) {
     const cidadeDaObra = cidadesAtuais().find(c => mesmaCidade(c.nome, e.cidade))
     if (e.alojamentoFirme) sabido.push(`disponibilidade real de ficar longe de casa: ${e.alojamentoFirme}`)
-    else if (cidadeDaObra?.alojamento) falta.push('se tem disponibilidade REAL de ficar no alojamento, longe de casa')
+    else if (cidadeDaObra && alojamentoVale(e.vaga, cidadeDaObra)) falta.push('se tem disponibilidade REAL de ficar no alojamento, longe de casa')
     else falta.push(`se consegue chegar e se manter em ${e.cidade} por conta própria (lá não tem alojamento)`)
   }
   if (tem(e.sinais)) sabido.push(`o que você já percebeu dela: ${e.sinais}`)

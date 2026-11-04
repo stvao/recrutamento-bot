@@ -25,7 +25,7 @@
  * do dono, 13/09/2026): o CPF é o cadastro único no RH. O valor nunca volta
  * para o modelo — ele só sabe que "já foi informado".
  */
-import { tetoDe, AUXILIO_TRANSPORTE_ESTAGIO } from './catalogo.js'
+import { tetoDe, AUXILIO_TRANSPORTE_ESTAGIO, vagaAbertaEm, alojamentoParaDe } from './catalogo.js'
 
 const CHAVE = process.env.GEMINI_API_KEY || ''
 
@@ -119,13 +119,15 @@ As quatro primeiras são as essenciais — com elas o RH já consegue trabalhar:
 1. EM QUAL CIDADE A PESSOA MORA — esta é a PRIMEIRA pergunta, porque é a que
    mais decide. Ajudante a empresa só contrata na cidade da obra; se a pessoa
    mora longe e quer ajudante, diga isso logo, antes de qualquer outra coisa,
-   para ela não perder tempo.
+   para ela não perder tempo. Cada cidade contrata funções diferentes (veja
+   CIDADES nos FATOS): só ofereça a vaga onde ela existe.
 2. Qual vaga interessa, e em qual das nossas cidades ela quer trabalhar.
    "Qualquer uma", "tanto faz" ou "onde tiver" NÃO serve: mostre as cidades e
    peça para ela escolher uma. Sem cidade certa, ninguém sabe para onde
    chamá-la.
-3. Para PEDREIRO que mora longe: se tem disponibilidade de ficar em
-   alojamento (só pedreiro fica alojado, e só em Bastos e Pereiras)
+3. Para quem mora longe e quer uma função que tem alojamento na cidade
+   escolhida (veja CIDADES nos FATOS): se tem disponibilidade de ficar em
+   alojamento
 4. O nome completo
 5. Se tem experiência na função, e quanto tempo
 
@@ -175,18 +177,19 @@ poder abrir a ficha e já ligar para contratar.
    sinais, em poucas palavras ("animado, quer começar já", "condiciona à
    passagem adiantada", "hesitou sobre ficar longe da família").
 
-2. PREPARE E CONVENÇA COM O QUE É VERDADE. Para PEDREIRO que mora longe, puxe
-   para Bastos (ou Pereiras) e o alojamento, mostrando o que a pessoa ganha:
+2. PREPARE E CONVENÇA COM O QUE É VERDADE. Para quem mora longe e tem uma
+   função com alojamento (veja CIDADES nos FATOS), puxe para a cidade que
+   aloja ESSA função, mostrando o que a pessoa ganha:
    alojamento com café da manhã e janta, almoço na obra, pagamento no 5º dia
    útil e vale no dia 20, passagem reembolsada quando chega, obra de escola
    do Estado. Uma vantagem por vez, ligada ao que ela disse — nunca uma lista.
    Só use o que está nos FATOS. Nada de "salário alto", "vaga garantida" ou
    promessa que não esteja escrita.
    AJUDANTE/SERVENTE não vai para alojamento: só é contratado na cidade onde
-   mora. Não empurre ajudante de fora para Bastos.
+   mora. Não empurre ajudante de fora para cidade nenhuma.
 
 3. FILTRE QUEM VAI MESMO. Antes de dar a ficha por boa, confirme de verdade:
-   - Pedreiro que vai para o alojamento: "vc tem disponibilidade de ficar no
+   - Quem vai para o alojamento: "vc tem disponibilidade de ficar no
      alojamento durante a semana, longe de casa?" e, se titubear, "como fica
      sua família com vc aí?". Registre em alojamentoFirme: sim, nao ou duvida.
      Não prometa de quanto em quanto tempo ele volta para casa: isso não está
@@ -340,23 +343,47 @@ export function montarFatos({ vagas, cidades, jornada }) {
     return `- ${v.nome}: ${teto ? 'a partir de ' : ''}${salario}${faixa}${exp}`
   }).join('\n')
 
-  const linhasCidades = cidades.map(c =>
-    `- ${c.nome}: ${c.alojamento ? 'tem alojamento' : 'NÃO tem alojamento'}`,
-  ).join('\n')
+  /*
+    Cada cidade com o que contrata e quem ela aloja (dono, 11/2026). Era só
+    "tem alojamento", com "só pedreiro" escrito à parte; agora Peruíbe aloja
+    carpinteiro também, e cada obra contrata funções diferentes.
+  */
+  const minusculas = (lista) => lista.map(n => n.toLowerCase())
+  const juntar = (l) => l.length <= 1 ? (l[0] ?? '') : `${l.slice(0, -1).join(', ')} e ${l.at(-1)}`
+  const linhasCidades = cidades
+    .map(c => {
+      const abertas = vagas.filter(v => !/^estagi/i.test(v.nome) && vagaAbertaEm(c, v.nome)).map(v => v.nome)
+      if (!abertas.length) return null
+      const aloja = alojamentoParaDe(c)
+      const semAloja = abertas.filter(n => !aloja.some(a => a.toLowerCase() === n.toLowerCase()))
+      const textoAloja = aloja.length
+        ? `alojamento SÓ para ${juntar(minusculas(aloja))}${semAloja.length ? ` (${juntar(minusculas(semAloja))} NÃO fica alojado)` : ''}`
+        : 'NÃO tem alojamento'
+      return `- ${c.nome}: contrata ${juntar(minusculas(abertas))}; ${textoAloja}`
+    })
+    .filter(Boolean)
+    .join('\n')
+  const temMeioOficial = vagas.some(v => /meio oficial/i.test(v.nome))
 
   // Informado pelo dono em 10/09/2026. O que muda com frequência (vagas,
   // salários, cidades, alojamento) vem do RH; isto aqui é política da empresa.
   return `VAGAS ABERTAS E SALÁRIOS:
 ${linhasVagas}
 
-CIDADES COM OBRA (todas estão contratando):
+CIDADES COM OBRA E O QUE CADA UMA CONTRATA (fora desta lista, não há vaga;
+função que não aparece na cidade, lá não tem):
 ${linhasCidades}
 
-ALOJAMENTO: só nas cidades marcadas acima, e SÓ PARA PEDREIRO. Ajudante
+ALOJAMENTO: só onde está escrito acima, e só para as funções escritas. Ajudante
 (servente) a empresa contrata quem MORA na cidade da obra — se a pessoa quer
 vaga de ajudante em cidade onde não mora, diga isso antes de qualquer outra
 coisa, para ela não viajar à toa.
-
+${temMeioOficial ? `
+PREFERÊNCIA: hoje a empresa prefere MEIO OFICIAL a ajudante (mas também
+contrata ajudante). Quem pede ajudante/servente: pergunte se já tem prática
+de meio oficial (já faz massa, assenta bloco, ajuda no reboco); se tiver,
+registre a vaga como Meio Oficial.
+` : ''}
 JORNADA: ${jornada}
 
 FORMAS DE CONTRATAÇÃO: carteira assinada (CLT), diária ou empreita. O formato

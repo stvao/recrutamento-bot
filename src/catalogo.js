@@ -49,9 +49,12 @@ const RESERVA = [
   // Só o que está ABERTO (dono, 12/09/2026). A reserva ainda oferecia
   // armador, serralheiro e eletricista — e é ela que atende quando o RH não
   // responde, justamente quando ninguém está olhando.
-  { nome: 'Servente',    salario: null, profissional: false, sinonimos: ['servente', 'ajudante', 'auxiliar', 'meio oficial'] },
+  // Meio oficial virou vaga à parte em 11/2026, e a PREFERIDA no lugar do
+  // ajudante (dono). Antes era apelido do servente.
+  { nome: 'Meio Oficial', salario: null, profissional: false, sinonimos: ['meio oficial', 'meia colher', 'meio-oficial'] },
+  { nome: 'Servente',    salario: null, profissional: false, sinonimos: ['servente', 'ajudante', 'auxiliar', 'ajudante geral'] },
   { nome: 'Pedreiro',    salario: null, profissional: false, sinonimos: ['pedreiro', 'alvenaria', 'bloqueiro', 'broqueiro'] },
-  { nome: 'Carpinteiro', salario: null, profissional: false, sinonimos: ['carpinteiro', 'carpintaria'] },
+  { nome: 'Carpinteiro', salario: null, profissional: false, sinonimos: ['carpinteiro', 'carpintaria', 'carpinteiro armador', 'armador'] },
   { nome: 'Estagiário',  salario: null, profissional: false, sinonimos: ['estagiario', 'estagiaria', 'estagio'] },
 ]
 
@@ -64,13 +67,13 @@ const RESERVA = [
  * alguém.
  */
 const CIDADES_RESERVA = [
-  { nome: 'Buritama', uf: 'SP', alojamento: false },
-  { nome: 'Pereiras', uf: 'SP', alojamento: false },
-  { nome: 'Bastos', uf: 'SP', alojamento: false },
-  { nome: 'Caraguatatuba', uf: 'SP', alojamento: false },
-  { nome: 'Praia Grande', uf: 'SP', alojamento: false },
-  { nome: 'Peruíbe', uf: 'SP', alojamento: false },
-  { nome: 'Itapevi', uf: 'SP', alojamento: false },
+  // O que cada cidade contrata (dono, 04/11/2026). O alojamento continua
+  // desligado aqui: ver o comentário acima.
+  { nome: 'Peruíbe',      uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Carpinteiro', 'Meio Oficial', 'Servente'] },
+  { nome: 'Pereiras',     uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro'] },
+  { nome: 'Praia Grande', uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Servente'] },
+  { nome: 'Bastos',       uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Meio Oficial', 'Servente'] },
+  { nome: 'Buritama',     uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Servente'] },
 ]
 
 let cache = null          // { vagas, cidades, buscadoEm, doRH }
@@ -126,6 +129,11 @@ async function buscarNoRH() {
             nome: String(c.nome),
             uf: String(c.uf ?? 'SP'),
             alojamento: Boolean(c.alojamento),
+            // null = o RH ainda não diz quais (versão antiga): todas valem.
+            vagas: Array.isArray(c.vagas) ? c.vagas.map(String) : null,
+            // RH antigo não manda a lista: vale a regra de antes, só pedreiro.
+            alojamentoPara: !c.alojamento ? []
+              : Array.isArray(c.alojamentoPara) ? c.alojamentoPara.map(String) : ['Pedreiro'],
           }))
         : CIDADES_RESERVA,
     }
@@ -221,25 +229,63 @@ export function perguntaExperiencia(nomeVaga) {
 }
 
 /**
- * Quem pode ficar no alojamento.
+ * O que cada cidade contrata, e quem pode ficar no alojamento dela.
  *
- * Informado pelo dono em 12/09/2026: hoje só se contrata PEDREIRO para ficar
- * alojado. Ajudante precisa morar na cidade da obra.
+ * Era uma regra só ("alojamento só para pedreiro", dono, 12/09/2026). Em
+ * 11/2026 virou por cidade: Peruíbe aloja pedreiro e carpinteiro, Pereiras só
+ * pedreiro, e ajudante continua sem alojamento. Quem marca é o RH, na tela de
+ * vagas; aqui só se lê.
  *
  * Isto não é detalhe de benefício: é o que decide se vale a pessoa se
  * candidatar. Um ajudante de outra cidade que descobre isso só na entrevista
  * viajou à toa — e é o tipo de coisa que o robô tem que dizer na primeira
  * mensagem.
  */
-const ALOJAMENTO_SO_PARA = ['pedreiro']
+const mesmoNome = (a, b) => norm(a ?? '') === norm(b ?? '')
+const ehEstagio = (nomeVaga) => norm(nomeVaga ?? '').startsWith('estagi')
 
-export function alojamentoVale(nomeVaga) {
-  const v = norm(nomeVaga ?? '')
-  return v ? ALOJAMENTO_SO_PARA.some(f => v.includes(f)) : null
+/** Esta vaga está aberta nesta cidade? Sem cidade, ou cidade sem lista: sim. */
+export function vagaAbertaEm(cidade, nomeVaga) {
+  if (!cidade || !nomeVaga) return true
+  // O estágio não é de obra: vale para qualquer cidade.
+  if (ehEstagio(nomeVaga)) return true
+  if (!Array.isArray(cidade.vagas)) return true
+  return cidade.vagas.some(v => mesmoNome(v, nomeVaga))
 }
 
-/** As funções que podem ficar alojadas, para dizer em voz alta. */
-export const funcoesComAlojamento = () => [...ALOJAMENTO_SO_PARA]
+/** As vagas abertas nesta cidade (todas, sem cidade). */
+export function vagasDaCidade(cidade) {
+  return vagasAtuais().filter(v => vagaAbertaEm(cidade, v.nome))
+}
+
+/** As cidades que estão contratando — e, com vaga, as que contratam ELA. */
+export function cidadesComVaga(nomeVaga = null) {
+  return cidadesAtuais().filter(c =>
+    (!Array.isArray(c.vagas) || c.vagas.some(v => vagasAtuais().some(x => mesmoNome(x.nome, v))))
+    && (!nomeVaga || vagaAbertaEm(c, nomeVaga)))
+}
+
+/** Quem pode ficar no alojamento desta cidade (vazio se ela não tem). */
+export function alojamentoParaDe(cidade) {
+  if (!cidade?.alojamento) return []
+  return Array.isArray(cidade.alojamentoPara) ? cidade.alojamentoPara : ['Pedreiro']
+}
+
+/**
+ * Esta função pode ficar alojada? Com cidade, NAQUELA cidade; sem cidade, em
+ * alguma. `null` quando não se sabe a vaga.
+ */
+export function alojamentoVale(nomeVaga, cidade = null) {
+  if (!norm(nomeVaga ?? '')) return null
+  const onde = cidade ? [cidade] : cidadesAtuais()
+  return onde.some(c => alojamentoParaDe(c).some(f => mesmoNome(f, nomeVaga)))
+}
+
+/** As funções que podem ficar alojadas em alguma cidade, para dizer em voz alta. */
+export function funcoesComAlojamento() {
+  const todas = cidadesAtuais().flatMap(alojamentoParaDe)
+  return [...new Map(todas.map(f => [norm(f), f])).values()]
+}
 
 /**
  * Auxílio-transporte do estágio, além da bolsa.

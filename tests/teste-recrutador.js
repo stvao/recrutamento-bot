@@ -84,7 +84,7 @@ function ok(nome, condicao) {
   ok('ela é recrutadora, não só atendente', /VOCÊ É RECRUTADORA, NÃO SÓ ATENDENTE/.test(ia))
   ok('sente a pessoa e anota em sinais', /SINTA A PESSOA/.test(ia) && /sinais/.test(ia))
   ok('convence só com o que é verdade', /CONVENÇA COM O QUE É VERDADE/.test(ia) && /Nada de "salário alto", "vaga garantida"/.test(ia))
-  ok('ajudante de fora não vai para Bastos', /Não empurre ajudante de fora para Bastos/.test(ia))
+  ok('ajudante de fora não vai para alojamento', /Não empurre ajudante de fora para cidade nenhuma/.test(ia))
   ok('não promete de quanto em quanto tempo volta para casa', /Não prometa de quanto em quanto tempo ele volta para casa/.test(ia))
   ok('perguntas técnicas por função', /levanta parede de bloco sozinho/.test(ia) && /monta forma de pilar e viga/.test(ia))
   ok('no máximo duas perguntas técnicas', /duas perguntas, no máximo/.test(ia))

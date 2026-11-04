@@ -13,6 +13,7 @@ import { fraseDeRegistro } from './ficha-rh.js'
 import {
   vagasAtuais, cidadesAtuais, termosDasVagas, tetoDe, alojamentoVale,
   perguntaExperiencia, AUXILIO_TRANSPORTE_ESTAGIO,
+  vagaAbertaEm, vagasDaCidade, cidadesComVaga, alojamentoParaDe,
 } from './catalogo.js'
 
 // ─── Base de conhecimento ────────────────────────────────────────────────────
@@ -55,9 +56,11 @@ function indiceEscolhido(msg, len) {
  * oficial" é servente, "ferreiro" é armador, "soldador" é serralheiro.
  */
 
-function matchVaga(msg) {
-  const i = indiceEscolhido(msg, vagasAtuais().length)
-  if (i) return vagasAtuais()[i - 1]
+function matchVaga(msg, lista = vagasAtuais()) {
+  // O número vale na lista que foi MOSTRADA (só as vagas da cidade); o nome,
+  // em todas — para poder dizer "essa não tem aí".
+  const i = indiceEscolhido(msg, lista.length)
+  if (i) return lista[i - 1]
   const nome = melhorMatch(msg, termosDasVagas(vagasAtuais()))
   return nome ? vagasAtuais().find(v => v.nome === nome) || null : null
 }
@@ -67,9 +70,10 @@ const APELIDOS_CIDADE = {
   'Praia Grande': ['pg'],
 }
 
-function matchCidade(msg) {
-  const i = indiceEscolhido(msg, cidadesAtuais().length)
-  if (i) return cidadesAtuais()[i - 1]
+function matchCidade(msg, lista = cidadesComVaga()) {
+  // Mesma ideia de matchVaga: número na lista mostrada, nome em todas.
+  const i = indiceEscolhido(msg, lista.length)
+  if (i) return lista[i - 1]
   const nome = melhorMatch(msg, cidadesAtuais().map(c => ({
     valor: c.nome,
     termos: [c.nome, ...(APELIDOS_CIDADE[c.nome] ?? [])],
@@ -117,13 +121,44 @@ function pareceNome(msg) {
 function querOutros(msg) {
   return temAlguma(msg, ['outro', 'outra', 'nao tem na lista', 'nenhuma dessas', 'nenhuma destas', 'fora da lista', 'minha funcao', 'minha area', 'nao achei'])
 }
-function listaVagasTexto() {
+function listaVagasTexto(cidade = null) {
   // Sem "outra função": a empresa só contrata o que está na lista, e a opção
   // convidava a pedir vaga que não existe — e registrava.
-  return vagasAtuais().map((v, i) => `${i + 1}. ${v.nome}${v.salario ? ` — ${fmtMoeda(v.salario)}` : ' — a combinar'}`).join('\n')
+  // Com a cidade escolhida, só o que ELA contrata (dono, 11/2026).
+  return vagasDaCidade(cidade).map((v, i) => `${i + 1}. ${v.nome}${v.salario ? ` — ${fmtMoeda(v.salario)}` : ' — a combinar'}`).join('\n')
 }
-function listaCidadesTexto() {
-  return cidadesAtuais().map((c, i) => `${i + 1}. ${c.nome}`).join('\n')
+/**
+ * As cidades que estão contratando, com o que cada uma contrata.
+ *
+ * Desde 11/2026 cada cidade tem as suas vagas (Peruíbe é a única com
+ * carpinteiro). Mostrar ao lado evita o pedreiro escolher a cidade e só depois
+ * descobrir. Com a vaga já dita, só as cidades que a têm.
+ */
+function listaCidadesTexto(vaga = null) {
+  return cidadesComVaga(vaga).map((c, i) => {
+    if (vaga || !Array.isArray(c.vagas)) return `${i + 1}. ${c.nome}`
+    const nomes = vagasDaCidade(c).filter(v => !ehVagaDeEstagio(v)).map(v => v.nome.toLowerCase())
+    return `${i + 1}. ${c.nome} (${juntar(nomes)})`
+  }).join('\n')
+}
+const cidadeDoEstado = (estado) => estado?.cidade
+  ? cidadesAtuais().find(c => c.nome === estado.cidade) ?? null
+  : null
+
+/** "pedreiro e carpinteiro" — quem pode ficar no alojamento da cidade. */
+function quemAloja(c) {
+  return juntar(alojamentoParaDe(c).map(f => f.toLowerCase()))
+}
+
+/** A frase para quem quer uma vaga que esta cidade não tem. */
+function naoTemNaCidade(c, vaga) {
+  const outras = cidadesComVaga(vaga).map(x => x.nome)
+  const aqui = vagasDaCidade(c).filter(v => !ehVagaDeEstagio(v)).map(v => v.nome.toLowerCase())
+  if (!aqui.length) {
+    return `Em ${c.nome} no momento não estamos contratando.${outras.length ? ` ${vaga} temos em ${juntar(outras)}.` : ''}`
+  }
+  return `Em ${c.nome} no momento não temos vaga de ${vaga.toLowerCase()}; lá estamos contratando ${juntar(aqui)}.`
+    + (outras.length ? ` ${vaga} temos em ${juntar(outras)}.` : '')
 }
 
 // ─── FAQ ────────────────────────────────────────────────────────────────────────────
@@ -337,22 +372,33 @@ export function responderFAQ(msg, estado = {}) {
       viajou à toa.
     */
     const vagaEmJogo = matchVaga(msg)?.nome ?? estado.vaga ?? null
-    if (vagaEmJogo && alojamentoVale(vagaEmJogo) === false) {
-      return { texto: `O alojamento hoje é só para pedreiro. Para ${vagaEmJogo.toLowerCase()}, a gente contrata quem mora na cidade da obra.` }
+    const c = matchCidade(msg) || cidadeDoEstado(estado)
+    const comAlojamento = cidadesComVaga().filter(x => alojamentoParaDe(x).length)
+
+    // Por função e por cidade (dono, 11/2026): Peruíbe aloja pedreiro e
+    // carpinteiro, Pereiras só pedreiro, ajudante em nenhuma.
+    if (vagaEmJogo && !ehVagaDeEstagio({ nome: vagaEmJogo })) {
+      const vaga = vagaEmJogo.toLowerCase()
+      const ondeTem = comAlojamento.filter(x => alojamentoVale(vagaEmJogo, x)).map(x => x.nome)
+      if (c) {
+        if (alojamentoVale(vagaEmJogo, c)) return { texto: `Sim! Em ${c.nome} tem alojamento para ${vaga}.` }
+        return { texto: `Em ${c.nome} não tem alojamento para ${vaga}.`
+          + (ondeTem.length ? ` Para ${vaga}, o alojamento é em ${juntar(ondeTem)}.` : ` Para ${vaga}, a gente contrata quem mora na cidade da obra.`) }
+      }
+      return { texto: ondeTem.length
+        ? `Para ${vaga}, tem alojamento em ${juntar(ondeTem)}.`
+        : `Para ${vaga} não temos alojamento: a gente contrata quem mora na cidade da obra.` }
     }
 
-    const cidades = cidadesAtuais()
-    const comAlojamento = cidades.filter(c => c.alojamento).map(c => c.nome)
-    const onde = comAlojamento.length ? ` Hoje o alojamento é em ${juntar(comAlojamento)}.` : ''
-    const c = matchCidade(msg) || (estado.cidade ? cidades.find(x => x.nome === estado.cidade) : null)
+    const resumo = comAlojamento.map(x => `${x.nome} (${quemAloja(x)})`)
     // Sem alojamento não quer dizer sem vaga: quem não precisa de onde
     // dormir trabalha na cidade que preferir (decisão do dono, 11/09/2026).
     // Confirma a cidade, não promete a vaga.
-    if (c) return { texto: c.alojamento
-      ? `Sim! Em ${c.nome} temos alojamento.`
-      : `Em ${c.nome} não temos alojamento.${onde} Se você não precisar de alojamento, pode trabalhar em ${c.nome} sim — a cidade você escolhe.` }
-    return { texto: comAlojamento.length
-      ? `Hoje temos alojamento em ${juntar(comAlojamento)}. O alojamento fica na própria cidade da obra.`
+    if (c) return { texto: alojamentoParaDe(c).length
+      ? `Sim! Em ${c.nome} temos alojamento, para ${quemAloja(c)}.`
+      : `Em ${c.nome} não temos alojamento.${resumo.length ? ` Hoje o alojamento é em ${juntar(resumo)}.` : ''} Se você não precisar de alojamento, pode trabalhar em ${c.nome} sim — a cidade você escolhe.` }
+    return { texto: resumo.length
+      ? `Hoje temos alojamento em ${juntar(resumo)}. O alojamento fica na própria cidade da obra.`
       : 'No momento não temos alojamento disponível.' }
   }
   if (/idade minima|menor de idade|(qual|que) (a )?idade|quantos anos (precisa|tem que)|tenho 1[4-7] anos/.test(t)) {
@@ -382,7 +428,12 @@ export function responderFAQ(msg, estado = {}) {
   }
   if (temAlguma(msg, ['cidade', 'onde tem', 'qual cidade', 'tem vaga em', 'regiao', 'local'])) {
     const c = matchCidade(msg)
-    if (c) return { texto: `Sim, temos obra em ${c.nome}, e você pode escolher trabalhar lá.${c.alojamento ? ' E tem alojamento.' : ' (Sem alojamento nesta cidade.)'}` }
+    if (c) {
+      const aqui = vagasDaCidade(c).filter(v => !ehVagaDeEstagio(v)).map(v => v.nome.toLowerCase())
+      if (!aqui.length) return { texto: `Em ${c.nome} no momento não estamos contratando. Hoje temos vagas nestas cidades:\n${listaCidadesTexto()}` }
+      const aloja = alojamentoParaDe(c).length ? ` Tem alojamento para ${quemAloja(c)}.` : ' (Sem alojamento nesta cidade.)'
+      return { texto: `Sim, em ${c.nome} estamos contratando ${juntar(aqui)}.${aloja}` }
+    }
     return { texto: `Hoje temos vagas nestas cidades:\n${listaCidadesTexto()}` }
   }
   return null
@@ -409,10 +460,10 @@ export function iniciar(whatsapp) {
 
 function promptAtual(estado) {
   switch (estado.etapa) {
-    case 'vaga':        return `Para qual vaga você quer se candidatar? (número ou nome)\n\n${listaVagasTexto()}`
-    case 'cidadeQualquer': return `Em qual cidade você quer trabalhar?\n\n${listaCidadesTexto()}`
+    case 'vaga':        return `Para qual vaga você quer se candidatar? (número ou nome)\n\n${listaVagasTexto(cidadeDoEstado(estado))}`
+    case 'cidadeQualquer': return `Em qual cidade você quer trabalhar?\n\n${listaCidadesTexto(estado.vaga)}`
     case 'vagaOutros':  return 'Qual é a função que você procura? Pode escrever.'
-    case 'cidade':      return `Em qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto()}`
+    case 'cidade':      return `Em qual cidade você quer trabalhar? (número ou nome)\n\n${listaCidadesTexto(estado.vaga)}`
     case 'experiencia': return `Você tem experiência na função de ${estado.vaga}?`
     case 'registro':    return 'Você já tem (ou já teve) registro em carteira nessa função?'
     case 'nome':        return 'Para finalizar, qual é o seu nome completo?'
@@ -422,9 +473,9 @@ function promptAtual(estado) {
 
 function respostaSatisfazEtapa(estado, msg) {
   switch (estado.etapa) {
-    case 'vaga':        return !!matchVaga(msg) && !ehPergunta(msg)
+    case 'vaga':        return !!matchVaga(msg, vagasDaCidade(cidadeDoEstado(estado))) && !ehPergunta(msg)
     case 'vagaOutros':  return msg.trim().length >= 2 && !ehPergunta(msg)
-    case 'cidade':      return !!matchCidade(msg) && !ehPergunta(msg)
+    case 'cidade':      return !!matchCidade(msg, cidadesComVaga(estado.vaga)) && !ehPergunta(msg)
     case 'experiencia':
     case 'registro':    return ehSim(msg) || ehNao(msg)
     case 'nome':        return pareceNome(msg)
@@ -474,11 +525,19 @@ function avancar(estado, mensagem) {
       if (querOutros(mensagem) || idxOutros === vagasAtuais().length + 1) {
         return { estado: { ...estado, etapa: 'vagaOutros' }, resposta: 'Sem problema! Qual é a função que você procura? Pode escrever.' }
       }
-      const v = matchVaga(mensagem)
+      const daCidade = cidadeDoEstado(estado)
+      const v = matchVaga(mensagem, vagasDaCidade(daCidade))
       if (!v) {
         const tent = (estado.tentativasVaga || 0) + 1
         const dica = ''
-        return { estado: { ...estado, tentativasVaga: tent }, resposta: `Não consegui identificar a vaga. Pode me dizer o número ou o nome?\n\n${listaVagasTexto()}${dica}` }
+        return { estado: { ...estado, tentativasVaga: tent }, resposta: `Não consegui identificar a vaga. Pode me dizer o número ou o nome?\n\n${listaVagasTexto(daCidade)}${dica}` }
+      }
+      // Vaga que existe, mas não NESTA cidade: diz onde tem e deixa escolher.
+      if (!vagaAbertaEm(daCidade, v.nome)) {
+        return {
+          estado: { ...estado, tentativasVaga: 0 },
+          resposta: `${naoTemNaCidade(daCidade, v.nome)}\n\nQual vaga de ${daCidade.nome} te interessa? (número ou nome) Se preferir outra cidade, é só escrever "recomeçar".\n\n${listaVagasTexto(daCidade)}`,
+        }
       }
       /*
         Quem decide se o roteiro pergunta experiência e registro é
@@ -528,9 +587,9 @@ function avancar(estado, mensagem) {
         proximidade fica no meio. Aqui ele pede uma cidade de verdade.
       */
       if (temAlguma(mensagem, ['qualquer', 'tanto faz', 'a combinar', 'qualquer lugar', 'onde tiver', 'qualquer cidade'])) {
-        return { estado, resposta: `Nossas obras são nestas cidades — me diz qual fica melhor pra você:\n\n${listaCidadesTexto()}` }
+        return { estado, resposta: `Nossas obras são nestas cidades — me diz qual fica melhor pra você:\n\n${listaCidadesTexto(estado.vaga)}` }
       }
-      const c = matchCidade(mensagem)
+      const c = matchCidade(mensagem, cidadesComVaga(estado.vaga))
       if (!c) {
         /*
           A pergunta era a cidade, mas a pessoa disse a VAGA ("sou pedreiro").
@@ -541,13 +600,27 @@ function avancar(estado, mensagem) {
         if (vagaDita && !estado.vaga) {
           return {
             estado: { ...estado, vaga: vagaDita.nome, vagaProfissional: perguntaExperiencia(vagaDita.nome) },
-            resposta: `certo, ${vagaDita.nome.toLowerCase()}. e em qual cidade vc quer trabalhar?\n\n${listaCidadesTexto()}`,
+            resposta: `certo, ${vagaDita.nome.toLowerCase()}. e em qual cidade vc quer trabalhar?\n\n${listaCidadesTexto(vagaDita.nome)}`,
           }
         }
-        return { estado, resposta: `Não encontrei essa cidade. Nossas obras são no interior e no litoral de São Paulo:\n\n${listaCidadesTexto()}` }
+        return { estado, resposta: `Não encontrei essa cidade. Nossas obras são no interior e no litoral de São Paulo:\n\n${listaCidadesTexto(estado.vaga)}` }
+      }
+      /*
+        Cidade que existe, mas sem a vaga (ou sem vaga nenhuma agora): diz o
+        que tem lá e onde tem a vaga dela, e pergunta de novo. Registrar
+        "pedreiro em Itapevi" mandaria ao RH uma ficha para obra que não
+        está contratando.
+      */
+      const vagaPedida = (funcaoFechadaCitada(mensagem) ? null : matchVaga(mensagem))?.nome ?? estado.vaga ?? null
+      if (!vagasDaCidade(c).some(v => !ehVagaDeEstagio(v)) || (vagaPedida && !vagaAbertaEm(c, vagaPedida))) {
+        const texto = vagaPedida ? naoTemNaCidade(c, vagaPedida) : `Em ${c.nome} no momento não estamos contratando.`
+        return {
+          estado: vagaPedida && !estado.vaga ? { ...estado, vaga: vagaPedida, vagaProfissional: perguntaExperiencia(vagaPedida) } : estado,
+          resposta: `${texto}\n\nEm qual cidade você quer trabalhar?\n\n${listaCidadesTexto(vagaPedida)}`,
+        }
       }
       const comCidade = { ...estado, cidade: c.nome }
-      const ondeEh = `Perfeito, ${c.nome}.${c.alojamento ? ' (Temos alojamento aí, para pedreiro.)' : ''}`
+      const ondeEh = `Perfeito, ${c.nome}.${alojamentoParaDe(c).length ? ` (Temos alojamento aí, para ${quemAloja(c)}.)` : ''}`
 
       /*
         Disse a cidade E a função na mesma frase ("quero vaga de pedreiro em
@@ -572,7 +645,7 @@ function avancar(estado, mensagem) {
 
       return {
         estado: { ...comCidade, etapa: 'vaga' },
-        resposta: `${ondeEh}\n\nPara qual vaga você quer se candidatar? (número ou nome)\n\n${listaVagasTexto()}`,
+        resposta: `${ondeEh}\n\nPara qual vaga você quer se candidatar? (número ou nome)\n\n${listaVagasTexto(c)}`,
       }
     }
     case 'experiencia': {
