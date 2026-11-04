@@ -53,8 +53,8 @@ const RESERVA = [
   // ajudante (dono). Antes era apelido do servente.
   { nome: 'Meio Oficial', salario: null, profissional: false, sinonimos: ['meio oficial', 'meia colher', 'meio-oficial'] },
   { nome: 'Servente',    salario: null, profissional: false, sinonimos: ['servente', 'ajudante', 'auxiliar', 'ajudante geral'] },
-  { nome: 'Pedreiro',    salario: null, profissional: false, sinonimos: ['pedreiro', 'alvenaria', 'bloqueiro', 'broqueiro'] },
-  { nome: 'Carpinteiro', salario: null, profissional: false, sinonimos: ['carpinteiro', 'carpintaria', 'carpinteiro armador', 'armador'] },
+  { nome: 'Pedreiro',    salario: null, profissional: true, sinonimos: ['pedreiro', 'alvenaria', 'bloqueiro', 'broqueiro'] },
+  { nome: 'Carpinteiro', salario: null, profissional: true, sinonimos: ['carpinteiro', 'carpintaria', 'carpinteiro armador', 'armador'] },
   { nome: 'Estagiário',  salario: null, profissional: false, sinonimos: ['estagiario', 'estagiaria', 'estagio'] },
 ]
 
@@ -69,11 +69,11 @@ const RESERVA = [
 const CIDADES_RESERVA = [
   // O que cada cidade contrata (dono, 04/11/2026). O alojamento continua
   // desligado aqui: ver o comentário acima.
-  { nome: 'Peruíbe',      uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Carpinteiro', 'Meio Oficial', 'Servente'] },
+  { nome: 'Peruíbe',      uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Carpinteiro', 'Meio Oficial', 'Servente', 'Estagiário'] },
   { nome: 'Pereiras',     uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro'] },
-  { nome: 'Praia Grande', uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Servente'] },
+  { nome: 'Praia Grande', uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Servente', 'Estagiário'] },
   { nome: 'Bastos',       uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Meio Oficial', 'Servente'] },
-  { nome: 'Buritama',     uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Servente'] },
+  { nome: 'Buritama',     uf: 'SP', alojamento: false, alojamentoPara: [], vagas: ['Pedreiro', 'Servente', 'Estagiário'] },
 ]
 
 let cache = null          // { vagas, cidades, buscadoEm, doRH }
@@ -223,7 +223,7 @@ export function tetoDe(nomeVaga) {
  */
 export function perguntaExperiencia(nomeVaga) {
   if (!nomeVaga) return false
-  if (tetoDe(nomeVaga)) return true
+  if (tetoDe(nomeVaga) || exigeCarteira(nomeVaga) || exigeComprovacao(nomeVaga)) return true
   const alvo = norm(nomeVaga)
   return Boolean(vagasAtuais().find(v => norm(v.nome) === alvo)?.profissional)
 }
@@ -242,13 +242,15 @@ export function perguntaExperiencia(nomeVaga) {
  * mensagem.
  */
 const mesmoNome = (a, b) => norm(a ?? '') === norm(b ?? '')
-const ehEstagio = (nomeVaga) => norm(nomeVaga ?? '').startsWith('estagi')
 
-/** Esta vaga está aberta nesta cidade? Sem cidade, ou cidade sem lista: sim. */
+/**
+ * Esta vaga está aberta nesta cidade? Sem cidade, ou cidade sem lista: sim.
+ *
+ * O estágio também é por cidade desde 04/11/2026 (Buritama, Peruíbe e Praia
+ * Grande): o estagiário acompanha a obra.
+ */
 export function vagaAbertaEm(cidade, nomeVaga) {
   if (!cidade || !nomeVaga) return true
-  // O estágio não é de obra: vale para qualquer cidade.
-  if (ehEstagio(nomeVaga)) return true
   if (!Array.isArray(cidade.vagas)) return true
   return cidade.vagas.some(v => mesmoNome(v, nomeVaga))
 }
@@ -285,6 +287,29 @@ export function alojamentoVale(nomeVaga, cidade = null) {
 export function funcoesComAlojamento() {
   const todas = cidadesAtuais().flatMap(alojamentoParaDe)
   return [...new Map(todas.map(f => [norm(f), f])).values()]
+}
+
+/**
+ * Registro em carteira OBRIGATÓRIO na função (dono, 04/11/2026).
+ *
+ * Pedreiro e carpinteiro (armador incluso) só com registro em carteira: é como
+ * se comprova a experiência. Substitui a regra de 12/09/2026, em que dava para
+ * começar sem experiência e a carteira só subia a faixa.
+ *
+ * Meio oficial precisa COMPROVAR, mas aceita outro comprovante ("registro em
+ * carteira ou algo do tipo"): não barra, avisa e deixa o RH avaliar.
+ */
+const EXIGE_CARTEIRA = ['pedreiro', 'carpinteiro', 'armador']
+const EXIGE_COMPROVACAO = ['meio oficial']
+
+export function exigeCarteira(nomeVaga) {
+  const v = norm(nomeVaga ?? '')
+  return Boolean(v) && EXIGE_CARTEIRA.some(f => v.includes(f))
+}
+
+export function exigeComprovacao(nomeVaga) {
+  const v = norm(nomeVaga ?? '')
+  return Boolean(v) && EXIGE_COMPROVACAO.some(f => v.includes(f))
 }
 
 /**

@@ -254,9 +254,9 @@ export function oQueJaSabe(estado = {}, { paradoHa = null, agora = new Date() } 
   */
   // Desde 11/2026 o alojamento é por função e por cidade (Peruíbe aloja
   // carpinteiro também): vale para quem é de obra e não é ajudante.
-  if (/pedreiro|carpinteiro|meio oficial/i.test(e.vaga ?? '') && tem(e.cidadeMora) && tem(e.cidade)
-    && !mesmaCidade(e.cidadeMora, e.cidade)) {
-    const cidadeDaObra = cidadesAtuais().find(c => mesmaCidade(c.nome, e.cidade))
+  const cidadeDaObra = tem(e.cidade) ? cidadesAtuais().find(c => mesmaCidade(c.nome, e.cidade)) : null
+  if ((/pedreiro|carpinteiro|meio oficial/i.test(e.vaga ?? '') || (cidadeDaObra && alojamentoVale(e.vaga, cidadeDaObra)))
+    && tem(e.cidadeMora) && tem(e.cidade) && !mesmaCidade(e.cidadeMora, e.cidade)) {
     if (e.alojamentoFirme) sabido.push(`disponibilidade real de ficar longe de casa: ${e.alojamentoFirme}`)
     else if (cidadeDaObra && alojamentoVale(e.vaga, cidadeDaObra)) falta.push('se tem disponibilidade REAL de ficar no alojamento, longe de casa')
     else falta.push(`se consegue chegar e se manter em ${e.cidade} por conta própria (lá não tem alojamento)`)

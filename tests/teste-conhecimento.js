@@ -98,20 +98,19 @@ ok('Pereiras tem alojamento', /^Sim/.test(texto('tem alojamento em pereiras?')))
 ok('as cidades vêm do RH, não de lista escrita à mão',
   /Caraguatatuba/.test(texto('quais cidades tem vaga?')) && !/Praia Grande/.test(texto('quais cidades tem vaga?')))
 
-// ── Experiência virou FAIXA, não porta (dono, 12/09/2026) ──────────
+// ── Carteira obrigatória para pedreiro e carpinteiro (dono, 04/11/2026) ──
 //
-// Dizer "pedreiro precisa de experiência" espantaria justamente quem a
-// empresa contrata por R$ 2.803.
+// Substitui a "faixa" de 12/09/2026: sem registro na função, não contrata.
 {
   const r = texto('precisa de experiencia?', { vaga: 'Pedreiro' })
-  ok('pedreiro: dá para começar sem experiência', /começar sem experiência/.test(r))
+  ok('pedreiro: registro em carteira obrigatório', /obrigatório ter registro em carteira/.test(r) && !/começar sem/.test(r))
   ok('pedreiro: as duas faixas na mesma frase', /2\.803,00/.test(r) && /3\.500,00/.test(r))
-  ok('pedreiro: a faixa maior exige carteira', /comprovada em carteira/.test(r))
+  ok('pedreiro: o teto continua como possibilidade', /até R\$\s?3\.500,00/.test(r))
   ok('pedreiro: nunca mais "é necessário ter experiência"', !/necessário ter experiência/.test(r))
 }
 ok('servente: não precisa de experiência', /não é preciso experiência/.test(texto('precisa de experiencia?', { vaga: 'Servente' })))
 ok('sem vaga escolhida: explica as duas funções',
-  /Pedreiro e Carpinteiro/.test(texto('precisa de experiencia?')))
+  /pedreiro e carpinteiro é obrigatório/.test(texto('precisa de experiencia?')))
 
 // ── Registro: formas de contratação, e NUNCA quando ────────────────────
 {
@@ -205,7 +204,7 @@ ok('jornada continua', /segunda a quinta/i.test(texto('qual o horario?')) && JOR
   const f = montarFatos({ vagas: catalogo.vagasAtuais(), cidades: catalogo.cidadesAtuais(), jornada: JORNADA })
   // Com ponto de milhar e espaço fino, como o resto do robô escreve dinheiro.
   ok('fatos: salários do RH', /Servente: R\$\s?2\.303,00/.test(f) && /Pedreiro: a partir de R\$\s?2\.803,00/.test(f))
-  ok('fatos: alojamento só para pedreiro', /Bastos: .*alojamento SÓ para pedreiro/.test(f) && /MORA na cidade da obra/.test(f))
+  ok('fatos: alojamento só para pedreiro', /Bastos: .*alojamento SÓ para pedreiro/.test(f) && /MORA na cidade da\s+obra/.test(f))
   ok('fatos: o teto exige carteira', /COMPROVADA EM CARTEIRA/.test(f))
   ok('fatos: teto só na linha do pedreiro',
     /Pedreiro:.*até R\$\s?3\.500,00/.test(f) && !/Servente:.*3500/.test(f) && !/Estagi.rio:.*3500/.test(f))

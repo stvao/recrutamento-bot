@@ -27,13 +27,14 @@ const RH = {
     { nome: 'Servente', salario: 2303, profissional: false, sinonimos: ['servente', 'ajudante'] },
     { nome: 'Pedreiro', salario: 2803, profissional: false, sinonimos: ['pedreiro'] },
     { nome: 'Carpinteiro', salario: 2803, profissional: false, sinonimos: ['carpinteiro', 'armador'] },
+    { nome: 'Estagiário', salario: 1200, profissional: false, sinonimos: ['estagiario', 'estagio'] },
   ],
   cidades: [
-    { nome: 'Peruíbe', uf: 'SP', alojamento: true, vagas: ['Pedreiro', 'Carpinteiro', 'Meio Oficial', 'Servente'], alojamentoPara: ['Pedreiro', 'Carpinteiro'] },
+    { nome: 'Peruíbe', uf: 'SP', alojamento: true, vagas: ['Pedreiro', 'Carpinteiro', 'Meio Oficial', 'Servente', 'Estagiário'], alojamentoPara: ['Pedreiro', 'Carpinteiro'] },
     { nome: 'Pereiras', uf: 'SP', alojamento: true, vagas: ['Pedreiro'], alojamentoPara: ['Pedreiro'] },
-    { nome: 'Praia Grande', uf: 'SP', alojamento: false, vagas: ['Pedreiro', 'Servente'], alojamentoPara: [] },
-    { nome: 'Bastos', uf: 'SP', alojamento: true, vagas: ['Pedreiro', 'Meio Oficial', 'Servente'], alojamentoPara: ['Pedreiro'] },
-    { nome: 'Buritama', uf: 'SP', alojamento: false, vagas: ['Pedreiro', 'Servente'], alojamentoPara: [] },
+    { nome: 'Praia Grande', uf: 'SP', alojamento: false, vagas: ['Pedreiro', 'Servente', 'Estagiário'], alojamentoPara: [] },
+    { nome: 'Bastos', uf: 'SP', alojamento: true, vagas: ['Pedreiro', 'Meio Oficial', 'Servente'], alojamentoPara: ['Pedreiro', 'Servente', 'Meio Oficial'] },
+    { nome: 'Buritama', uf: 'SP', alojamento: false, vagas: ['Pedreiro', 'Servente', 'Estagiário'], alojamentoPara: [] },
     { nome: 'Itapevi', uf: 'SP', alojamento: false, vagas: [], alojamentoPara: [] },
   ],
 }
@@ -105,8 +106,8 @@ ok('vaga em Bastos: diz as funções', /em Bastos estamos contratando meio ofici
 // ── O que a IA recebe ──────────────────────────────────────────────────
 {
   const f = montarFatos({ vagas: catalogo.vagasAtuais(), cidades: catalogo.cidadesAtuais(), jornada: JORNADA })
-  ok('fatos: Peruíbe com o que contrata', /Peruíbe: contrata meio oficial, servente, pedreiro e carpinteiro/.test(f))
-  ok('fatos: alojamento de Peruíbe por função', /alojamento SÓ para pedreiro e carpinteiro \(meio oficial e servente NÃO fica alojado\)/.test(f))
+  ok('fatos: Peruíbe com o que contrata', /Peruíbe: contrata meio oficial, servente, pedreiro, carpinteiro e estagiário/.test(f))
+  ok('fatos: alojamento de Peruíbe por função', /alojamento SÓ para pedreiro e carpinteiro \(meio oficial, servente e estagiário NÃO fica alojado\)/.test(f))
   ok('fatos: Itapevi fora', !/Itapevi/.test(f))
   ok('fatos: preferência por meio oficial', /prefere MEIO OFICIAL/.test(f))
 }
@@ -115,7 +116,43 @@ ok('vaga em Bastos: diz as funções', /em Bastos estamos contratando meio ofici
 {
   const antiga = { nome: 'X', alojamento: true, vagas: null, alojamentoPara: ['Pedreiro'] }
   ok('cidade sem lista: aceita qualquer vaga', catalogo.vagaAbertaEm(antiga, 'Carpinteiro'))
-  ok('estágio vale em qualquer cidade', catalogo.vagaAbertaEm(RH.cidades[1], 'Estagiário'))
+  ok('estágio: não em Pereiras', !catalogo.vagaAbertaEm(RH.cidades[1], 'Estagiário'))
+  ok('estágio: em Buritama', catalogo.vagaAbertaEm(RH.cidades[4], 'Estagiário'))
+}
+
+// ── Estágio por cidade (dono, 04/11/2026: Buritama, Peruíbe, Praia Grande) ──
+{
+  const r = iniciar('5511999999999').resposta
+  ok('lista: estágio em Buritama', /Buritama \(.*estagiário/.test(r))
+  ok('lista: sem estágio em Bastos', !/Bastos \([^)]*estagi/.test(r))
+  let e = responder(iniciar('1').estado, 'quero estagio')
+  ok('estágio: só as cidades com estágio', /Buritama/.test(e.resposta) && !/Bastos/.test(e.resposta))
+  e = responder(responder(iniciar('1').estado, 'bastos').estado, 'estagiario')
+  ok('estágio em Bastos: não tem, e diz onde tem', /Estagiário temos em Peruíbe, Praia Grande e Buritama/.test(e.resposta))
+}
+
+// ── Carteira obrigatória: pedreiro e carpinteiro (dono, 04/11/2026) ────
+{
+  let r = responder(iniciar('1').estado, 'praia grande')
+  r = responder(r.estado, 'pedreiro')
+  ok('pedreiro pergunta experiência', r.estado.etapa === 'experiencia')
+  r = responder(r.estado, 'sim')
+  r = responder(r.estado, 'nao')
+  ok('sem carteira: não registra como pedreiro', !r.estado.vaga && r.estado.etapa === 'vaga' && !r.acao)
+  ok('  diz que é obrigatório', /obrigatório ter registro em carteira/.test(r.resposta))
+  ok('  e oferece o que dá na cidade', /Servente/.test(r.resposta) && !/\d\. Pedreiro/.test(r.resposta))
+  r = responder(responder(responder(responder(iniciar('1').estado, 'bastos').estado, 'meio oficial').estado, 'sim').estado, 'nao')
+  ok('meio oficial sem carteira: segue (aceita outro comprovante)', r.estado.etapa === 'nome' && r.estado.vaga === 'Meio Oficial')
+}
+
+// ── Bastos aloja servente e meio oficial ──────────────────────────────
+ok('Bastos: alojamento para servente', /Sim! Em Bastos tem alojamento para servente/.test(faq('tem alojamento?', { vaga: 'Servente', cidade: 'Bastos' })))
+ok('Praia Grande: servente sem alojamento, aponta Bastos', /o alojamento é em Bastos/.test(faq('tem alojamento?', { vaga: 'Servente', cidade: 'Praia Grande' })))
+{
+  const f = montarFatos({ vagas: catalogo.vagasAtuais(), cidades: catalogo.cidadesAtuais(), jornada: JORNADA })
+  ok('fatos: carteira obrigatória', /Pedreiro: .*OBRIGATÓRIO registro em carteira/.test(f) && /Carpinteiro: .*OBRIGATÓRIO/.test(f))
+  ok('fatos: meio oficial comprova', /Meio Oficial: .*COMPROVAR/.test(f))
+  ok('fatos: estágio nas cidades', /Buritama: contrata .*estagiário/.test(f))
 }
 
 console.log(falhas ? `\n${falhas} falha(s).` : '\nTodos passaram.')

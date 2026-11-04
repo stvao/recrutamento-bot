@@ -25,7 +25,7 @@
  * do dono, 13/09/2026): o CPF é o cadastro único no RH. O valor nunca volta
  * para o modelo — ele só sabe que "já foi informado".
  */
-import { tetoDe, AUXILIO_TRANSPORTE_ESTAGIO, vagaAbertaEm, alojamentoParaDe } from './catalogo.js'
+import { tetoDe, AUXILIO_TRANSPORTE_ESTAGIO, vagaAbertaEm, alojamentoParaDe, exigeCarteira, exigeComprovacao } from './catalogo.js'
 
 const CHAVE = process.env.GEMINI_API_KEY || ''
 
@@ -117,7 +117,8 @@ O QUE VOCÊ PRECISA DESCOBRIR, nesta ordem, sem parecer formulário.
 As quatro primeiras são as essenciais — com elas o RH já consegue trabalhar:
 
 1. EM QUAL CIDADE A PESSOA MORA — esta é a PRIMEIRA pergunta, porque é a que
-   mais decide. Ajudante a empresa só contrata na cidade da obra; se a pessoa
+   mais decide. Ajudante a empresa só contrata quem mora na cidade da obra,
+   a não ser onde os FATOS dizem que tem alojamento para servente; se a pessoa
    mora longe e quer ajudante, diga isso logo, antes de qualquer outra coisa,
    para ela não perder tempo. Cada cidade contrata funções diferentes (veja
    CIDADES nos FATOS): só ofereça a vaga onde ela existe.
@@ -185,8 +186,9 @@ poder abrir a ficha e já ligar para contratar.
    do Estado. Uma vantagem por vez, ligada ao que ela disse — nunca uma lista.
    Só use o que está nos FATOS. Nada de "salário alto", "vaga garantida" ou
    promessa que não esteja escrita.
-   AJUDANTE/SERVENTE não vai para alojamento: só é contratado na cidade onde
-   mora. Não empurre ajudante de fora para cidade nenhuma.
+   AJUDANTE/SERVENTE só vai para alojamento onde os FATOS dizem que tem
+   alojamento para servente. Fora disso, só é contratado na cidade onde mora.
+   Não empurre ajudante de fora para cidade nenhuma.
 
 3. FILTRE QUEM VAI MESMO. Antes de dar a ficha por boa, confirme de verdade:
    - Quem vai para o alojamento: "vc tem disponibilidade de ficar no
@@ -339,7 +341,11 @@ export function montarFatos({ vagas, cidades, jornada }) {
       ligado no cadastro do RH, a linha do Pedreiro se contradizia sozinha —
       "a partir de R$ 2.803,00 … (exige experiência na função)".
     */
-    const exp = teto ? '' : v.profissional ? ' (exige experiência na função)' : ' (não precisa de experiência)'
+    // Pedreiro e carpinteiro: carteira obrigatória (dono, 04/11/2026).
+    const exp = exigeCarteira(v.nome) ? ' (OBRIGATÓRIO registro em carteira na função)'
+      : exigeComprovacao(v.nome) ? ' (precisa COMPROVAR a experiência: carteira ou outro comprovante)'
+      : /^estagi/i.test(v.nome) ? ' (precisa estar cursando engenharia, arquitetura ou curso ligado a obras)'
+      : teto ? '' : v.profissional ? ' (exige experiência na função)' : ' (não precisa de experiência)'
     return `- ${v.nome}: ${teto ? 'a partir de ' : ''}${salario}${faixa}${exp}`
   }).join('\n')
 
@@ -352,7 +358,7 @@ export function montarFatos({ vagas, cidades, jornada }) {
   const juntar = (l) => l.length <= 1 ? (l[0] ?? '') : `${l.slice(0, -1).join(', ')} e ${l.at(-1)}`
   const linhasCidades = cidades
     .map(c => {
-      const abertas = vagas.filter(v => !/^estagi/i.test(v.nome) && vagaAbertaEm(c, v.nome)).map(v => v.nome)
+      const abertas = vagas.filter(v => vagaAbertaEm(c, v.nome)).map(v => v.nome)
       if (!abertas.length) return null
       const aloja = alojamentoParaDe(c)
       const semAloja = abertas.filter(n => !aloja.some(a => a.toLowerCase() === n.toLowerCase()))
@@ -374,15 +380,22 @@ CIDADES COM OBRA E O QUE CADA UMA CONTRATA (fora desta lista, não há vaga;
 função que não aparece na cidade, lá não tem):
 ${linhasCidades}
 
-ALOJAMENTO: só onde está escrito acima, e só para as funções escritas. Ajudante
-(servente) a empresa contrata quem MORA na cidade da obra — se a pessoa quer
-vaga de ajudante em cidade onde não mora, diga isso antes de qualquer outra
-coisa, para ela não viajar à toa.
+ALOJAMENTO: só onde está escrito acima, e só para as funções escritas. Onde
+não há alojamento para a função, a empresa contrata quem MORA na cidade da
+obra — diga isso antes de qualquer outra coisa, para ninguém viajar à toa.
+
+REGISTRO EM CARTEIRA (dono, 04/11/2026): pedreiro e carpinteiro (armador
+também) só com registro em carteira NA FUNÇÃO, obrigatório — é assim que se
+comprova a experiência. Pergunte cedo. Quem não tem: diga com gentileza que
+para essa função não dá e ofereça o que a cidade tem sem essa exigência
+(servente, estágio). Nunca registre pedreiro ou carpinteiro sem carteira.
+Meio oficial precisa comprovar a experiência (carteira ou outro comprovante):
+avise, registre e deixe o RH avaliar.
 ${temMeioOficial ? `
 PREFERÊNCIA: hoje a empresa prefere MEIO OFICIAL a ajudante (mas também
-contrata ajudante). Quem pede ajudante/servente: pergunte se já tem prática
-de meio oficial (já faz massa, assenta bloco, ajuda no reboco); se tiver,
-registre a vaga como Meio Oficial.
+contrata ajudante). Quem pede ajudante/servente numa cidade que contrata meio
+oficial: pergunte se já tem prática de meio oficial e como comprova
+(carteira ou outro comprovante); se tiver, registre a vaga como Meio Oficial.
 ` : ''}
 JORNADA: ${jornada}
 

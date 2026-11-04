@@ -14,6 +14,7 @@ import {
   vagasAtuais, cidadesAtuais, termosDasVagas, tetoDe, alojamentoVale,
   perguntaExperiencia, AUXILIO_TRANSPORTE_ESTAGIO,
   vagaAbertaEm, vagasDaCidade, cidadesComVaga, alojamentoParaDe,
+  exigeCarteira, exigeComprovacao,
 } from './catalogo.js'
 
 // ─── Base de conhecimento ────────────────────────────────────────────────────
@@ -137,7 +138,7 @@ function listaVagasTexto(cidade = null) {
 function listaCidadesTexto(vaga = null) {
   return cidadesComVaga(vaga).map((c, i) => {
     if (vaga || !Array.isArray(c.vagas)) return `${i + 1}. ${c.nome}`
-    const nomes = vagasDaCidade(c).filter(v => !ehVagaDeEstagio(v)).map(v => v.nome.toLowerCase())
+    const nomes = vagasDaCidade(c).map(v => v.nome.toLowerCase())
     return `${i + 1}. ${c.nome} (${juntar(nomes)})`
   }).join('\n')
 }
@@ -153,7 +154,7 @@ function quemAloja(c) {
 /** A frase para quem quer uma vaga que esta cidade não tem. */
 function naoTemNaCidade(c, vaga) {
   const outras = cidadesComVaga(vaga).map(x => x.nome)
-  const aqui = vagasDaCidade(c).filter(v => !ehVagaDeEstagio(v)).map(v => v.nome.toLowerCase())
+  const aqui = vagasDaCidade(c).map(v => v.nome.toLowerCase())
   if (!aqui.length) {
     return `Em ${c.nome} no momento não estamos contratando.${outras.length ? ` ${vaga} temos em ${juntar(outras)}.` : ''}`
   }
@@ -242,6 +243,13 @@ function vagasAbertasTexto() {
 function semVagaPara(funcao) {
   return `no momento não temos vaga de ${funcao}. hoje estamos contratando ${vagasAbertasTexto()}. alguma dessas te interessa?`
 }
+
+/** O que pedreiro e carpinteiro exigem (dono, 04/11/2026). */
+const REQUISITO_CARTEIRA = (vaga) =>
+  `Para ${vaga.toLowerCase()} é obrigatório ter registro em carteira na função — é assim que a gente comprova a experiência.`
+/** Meio oficial: comprova, mas aceita outro documento (dono, 04/11/2026). */
+const REQUISITO_COMPROVACAO = (vaga) =>
+  `Para ${vaga.toLowerCase()} é preciso comprovar a experiência: registro em carteira ou outro comprovante da função.`
 
 /** O que o estágio exige. Informado pelo dono em 11/09/2026. */
 const REQUISITO_ESTAGIO = 'É preciso estar cursando engenharia, arquitetura ou algum curso ligado a obras.'
@@ -362,7 +370,9 @@ export function responderFAQ(msg, estado = {}) {
   if (/\b(almoco|comida|refeicao|alimentacao|marmita|janta|jantar)\b|cafe da manha/.test(t)) {
     return { texto: 'A empresa fornece o almoço na obra. Quem fica no alojamento tem também café da manhã e janta.' }
   }
-  if (temAlguma(msg, ['alojamento', 'moradia', 'dormir', 'ficar', 'hospeda', 'morar', 'estadia'])) {
+  // "estagio" fica a uma letra de "estadia": com a tolerância a erro, "quero
+  // estagio" caía aqui e recebia a lista de alojamentos (04/11/2026).
+  if (!/(^| )estagi/.test(t) && temAlguma(msg, ['alojamento', 'moradia', 'dormir', 'ficar', 'hospeda', 'morar', 'estadia'])) {
     /*
       O alojamento depende da FUNÇÃO antes de depender da cidade.
 
@@ -410,26 +420,24 @@ export function responderFAQ(msg, estado = {}) {
   if (temAlguma(msg, ['experiencia', 'precisa saber', 'sou iniciante', 'nunca trabalhei'])) {
     const v = matchVaga(msg) || (estado.vaga ? vagasAtuais().find(x => x.nome === estado.vaga) : null)
     /*
-      Experiência deixou de ser porta e virou FAIXA (dono, 12/09/2026): para
-      pedreiro e carpinteiro dá para começar sem experiência, e quem tem
-      carteira assinada na função entra na faixa maior. Dizer "precisa de
-      experiência" espantaria quem a empresa contrata.
+      Registro em carteira OBRIGATÓRIO para pedreiro e carpinteiro (dono,
+      04/11/2026) — é como se comprova a experiência. Meio oficial precisa
+      comprovar (carteira ou outro comprovante). Substitui a "faixa" de
+      12/09/2026, em que dava para começar sem experiência.
     */
     if (v) {
-      const teto = tetoDe(v.nome)
-      if (teto && v.salario) {
-        // "até", nunca o valor fechado: ver faixaSalarial().
-        return { texto: `Para ${v.nome} dá para começar sem experiência (${fmtMoeda(v.salario)}); com experiência comprovada em carteira pode chegar até ${fmtMoeda(teto)} — quem define é o responsável na entrevista.` }
-      }
+      if (exigeCarteira(v.nome)) return { texto: `${REQUISITO_CARTEIRA(v.nome)}${tetoDe(v.nome) && v.salario ? ` O salário é ${faixaSalarial(v)}.` : ''}` }
+      if (exigeComprovacao(v.nome)) return { texto: REQUISITO_COMPROVACAO(v.nome) }
+      if (ehVagaDeEstagio(v)) return { texto: REQUISITO_ESTAGIO }
       if (!v.profissional) return { texto: `Para ${v.nome} não é preciso experiência.` }
       return { texto: `Para ${v.nome} é necessário ter experiência na função.` }
     }
-    return { texto: `Para Servente não precisa de experiência. Para Pedreiro e Carpinteiro dá para começar sem, e quem tem experiência comprovada em carteira entra numa faixa maior. Para estágio, ${REQUISITO_ESTAGIO.charAt(0).toLowerCase()}${REQUISITO_ESTAGIO.slice(1)}` }
+    return { texto: `Para servente não precisa de experiência. Para pedreiro e carpinteiro é obrigatório ter registro em carteira na função. Para meio oficial é preciso comprovar a experiência (carteira ou outro comprovante). Para estágio, ${REQUISITO_ESTAGIO.charAt(0).toLowerCase()}${REQUISITO_ESTAGIO.slice(1)}` }
   }
   if (temAlguma(msg, ['cidade', 'onde tem', 'qual cidade', 'tem vaga em', 'regiao', 'local'])) {
     const c = matchCidade(msg)
     if (c) {
-      const aqui = vagasDaCidade(c).filter(v => !ehVagaDeEstagio(v)).map(v => v.nome.toLowerCase())
+      const aqui = vagasDaCidade(c).map(v => v.nome.toLowerCase())
       if (!aqui.length) return { texto: `Em ${c.nome} no momento não estamos contratando. Hoje temos vagas nestas cidades:\n${listaCidadesTexto()}` }
       const aloja = alojamentoParaDe(c).length ? ` Tem alojamento para ${quemAloja(c)}.` : ' (Sem alojamento nesta cidade.)'
       return { texto: `Sim, em ${c.nome} estamos contratando ${juntar(aqui)}.${aloja}` }
@@ -612,7 +620,7 @@ function avancar(estado, mensagem) {
         está contratando.
       */
       const vagaPedida = (funcaoFechadaCitada(mensagem) ? null : matchVaga(mensagem))?.nome ?? estado.vaga ?? null
-      if (!vagasDaCidade(c).some(v => !ehVagaDeEstagio(v)) || (vagaPedida && !vagaAbertaEm(c, vagaPedida))) {
+      if (!vagasDaCidade(c).length || (vagaPedida && !vagaAbertaEm(c, vagaPedida))) {
         const texto = vagaPedida ? naoTemNaCidade(c, vagaPedida) : `Em ${c.nome} no momento não estamos contratando.`
         return {
           estado: vagaPedida && !estado.vaga ? { ...estado, vaga: vagaPedida, vagaProfissional: perguntaExperiencia(vagaPedida) } : estado,
@@ -660,9 +668,11 @@ function avancar(estado, mensagem) {
         trás e dizia o contrário, espantando justamente quem a empresa
         contrata.
       */
-      const semExperiencia = tetoDe(estado.vaga)
-        ? `Sem problema, para ${estado.vaga} dá pra começar sem experiência; quem tem carteira na função entra na faixa maior.`
-        : `Entendi, vou registrar e o RH avalia.`
+      const semExperiencia = exigeCarteira(estado.vaga)
+        ? `Entendi. ${REQUISITO_CARTEIRA(estado.vaga)}`
+        : exigeComprovacao(estado.vaga)
+          ? `Entendi. ${REQUISITO_COMPROVACAO(estado.vaga)}`
+          : `Entendi, vou registrar e o RH avalia.`
       return {
         estado: { ...estado, etapa: 'registro', temExperiencia: sim },
         resposta: sim
@@ -674,6 +684,23 @@ function avancar(estado, mensagem) {
       const sim = ehSim(mensagem), nao = ehNao(mensagem)
       if (!sim && !nao) return { estado, resposta: 'Você já tem ou já teve registro em carteira nessa função? (sim ou não)' }
       const comRegistro = { ...estado, temRegistro: sim }
+      /*
+        Pedreiro e carpinteiro sem registro na função: não dá (dono,
+        04/11/2026). Diz com clareza, sem registrar a ficha nessa função, e
+        oferece o que a cidade tem sem essa exigência. Meio oficial segue: o
+        dono aceita outro comprovante, e quem avalia é o RH.
+      */
+      if (nao && exigeCarteira(estado.vaga)) {
+        const cidade = cidadeDoEstado(estado)
+        const alternativas = vagasDaCidade(cidade).filter(v => !exigeCarteira(v.nome))
+        const oferta = alternativas.length
+          ? `\n\nSe quiser, posso fazer sua ficha para outra vaga${cidade ? ` em ${cidade.nome}` : ''}:\n\n${alternativas.map((v, i) => `${i + 1}. ${v.nome}`).join('\n')}`
+          : ''
+        return {
+          estado: { ...comRegistro, etapa: 'vaga', vaga: null, vagaProfissional: false, semCarteiraPara: estado.vaga },
+          resposta: `Entendi. ${REQUISITO_CARTEIRA(estado.vaga)} Sem o registro, não conseguimos contratar como ${estado.vaga.toLowerCase()}.${oferta}`,
+        }
+      }
       /*
         Com o nome já em mãos, esta etapa NÃO volta a pedir o nome.
 
