@@ -870,9 +870,42 @@ async function numeroDaConversa(jid) {
  * digitou foi gente), e o robô se cala nesta conversa como se a resposta
  * tivesse saído do celular.
  */
+/**
+ * Os jeitos em que um número brasileiro pode estar no WhatsApp.
+ *
+ * Muitos celulares antigos, sobretudo fora de SP, estão no WhatsApp SEM o
+ * nono dígito (55 48 9636-0367), e quem digita o número quase sempre põe o 9.
+ * Mandar para o endereço errado não dá erro: a mensagem simplesmente não
+ * chega. Por isso se testam as duas formas.
+ */
+export function formasDoNumero(valor) {
+  let d = String(valor ?? '').replace(/\D/g, '')
+  if (d.length === 10 || d.length === 11) d = `55${d}`
+  const formas = [d]
+  if (d.startsWith('55') && d.length === 13 && d[4] === '9') formas.push(d.slice(0, 4) + d.slice(5))
+  if (d.startsWith('55') && d.length === 12 && /[6-9]/.test(d[4])) formas.push(`${d.slice(0, 4)}9${d.slice(4)}`)
+  return formas
+}
+
+/**
+ * O endereço de WhatsApp de um número digitado, perguntado ao próprio
+ * WhatsApp. Nulo se o número não tem WhatsApp (05/11/2026: o RH passou a
+ * poder iniciar conversa digitando um número).
+ */
+async function enderecoDoNumero(valor) {
+  for (const forma of formasDoNumero(valor)) {
+    try {
+      const [r] = (await sock.onWhatsApp(forma)) ?? []
+      if (r?.exists && r.jid) return r.jid
+    } catch { /* tenta a próxima forma */ }
+  }
+  return null
+}
+
 export async function enviarDoAtendimento(chave, texto, atendente, arquivo = null) {
   if (!sock || !conectado) return { ok: false, erro: 'WhatsApp desconectado' }
-  const jid = chave.includes('@') ? chave : `${chave.replace(/\D/g, '')}@s.whatsapp.net`
+  const jid = chave.includes('@') ? chave : await enderecoDoNumero(chave)
+  if (!jid) return { ok: false, erro: 'Este número não tem WhatsApp. Confira o DDD e o número.' }
   if (!ehPrivado(jid)) return { ok: false, erro: 'conversa inválida' }
   const nome = String(atendente ?? '').trim()
   const assinatura = nome ? `*${nome}:*` : ''
