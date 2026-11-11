@@ -10,3 +10,6 @@ dados/
 # Conversas reais exportadas do WhatsApp, para analise do atendimento.
 # Tem nome e telefone de candidato: nunca vai para o GitHub.
 conversas-reais/
+
+# Configuração do processo de cobrança de obras (token de integração).
+.env.cobranca

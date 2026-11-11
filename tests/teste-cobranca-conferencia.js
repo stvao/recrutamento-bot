@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   modoCobranca, destinoDoEnsaio, deveRodar, montarEnvios, textoDoEnsaio, rodar,
-  foiCobradoRecentemente, estadoDoDia, buscarCobrancas, LIMITE_ENSAIO, RODAPE,
+  foiCobradoRecentemente, estadoDoDia, buscarCobrancas, LIMITE_ENSAIO, RODAPE, CABECALHO,
 } from '../src/cobranca-conferencia.js'
 
 // 12/11/2026 é quinta. 9h em Brasília = 12h UTC.
@@ -148,6 +148,13 @@ test('dia novo zera os enviados e esquece cobrança velha', () => {
   assert.equal(e.dia, '2026-11-12')
   assert.deepEqual(e.enviados, [])
   assert.deepEqual(Object.keys(e.cobrados), ['5513999990002'])
+})
+
+test('do número do dono: abre dizendo que é aviso automático do sistema', () => {
+  const envios = montarEnvios(RESPOSTA, { modo: 'on', cabecalho: true })
+  assert.equal(envios[0].texto, CABECALHO + 'Olá, Maria. Ficou pendente…')
+  assert.ok(envios[0].texto.startsWith('🤖 *Aviso automático — Sistema NovaGestão Obras*'))
+  assert.ok(!envios[0].texto.includes(RODAPE))
 })
 
 test('busca: usa o token de integração, e falha vira null sem lançar', async () => {

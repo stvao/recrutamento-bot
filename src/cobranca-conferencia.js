@@ -105,11 +105,18 @@ export function textoDoEnsaio(resposta) {
 export const RODAPE = '\n\n_Mensagem automática do sistema de obras._'
 
 /**
+ * Quando a cobrança sai do número de uma PESSOA (o do dono), a primeira linha
+ * diz que foi o sistema que escreveu — quem lê sabe que não é bronca pessoal
+ * e que responder ali é falar com gente.
+ */
+export const CABECALHO = '🤖 *Aviso automático — Sistema NovaGestão Obras*\n\n'
+
+/**
  * O que mandar, e para quem. Cada envio tem uma `chave`: é ela que impede
  * mandar duas vezes no mesmo dia, inclusive depois de o robô reiniciar no
  * meio da rodada.
  */
-export function montarEnvios(resposta, { modo, ensaioPara } = {}) {
+export function montarEnvios(resposta, { modo, ensaioPara, cabecalho = false } = {}) {
   if (!resposta) return []
   if (modo === 'ensaio') {
     const texto = textoDoEnsaio(resposta)
@@ -125,7 +132,8 @@ export function montarEnvios(resposta, { modo, ensaioPara } = {}) {
       const chave = `${tipo}:${tel}`
       if (vistos.has(chave)) continue
       vistos.add(chave)
-      envios.push({ chave, telefone: tel, texto: m.texto + RODAPE, cobrado: tipo === 'equipe' })
+      const texto = cabecalho ? CABECALHO + m.texto : m.texto + RODAPE
+      envios.push({ chave, telefone: tel, texto, cobrado: tipo === 'equipe' })
     }
   }
   return envios
@@ -167,7 +175,7 @@ export function estadoDoDia(estado, agora = new Date()) {
  */
 export const DIAS_RESPOSTA = 3
 
-function formas(numero) {
+export function formas(numero) {
   const d = String(numero ?? '').split('@')[0].replace(/\D/g, '')
   if (!d) return []
   const c = d.length <= 11 ? `55${d}` : d
@@ -231,7 +239,7 @@ export function pausa() {
  */
 export async function rodar({
   agora = new Date(), env = process.env, enviar, esperar = (ms) => new Promise(ok => setTimeout(ok, ms)),
-  buscar = buscarCobrancas, ler = lerEstado, gravar = gravarEstado,
+  buscar = buscarCobrancas, ler = lerEstado, gravar = gravarEstado, cabecalho = false,
 } = {}) {
   let estado = estadoDoDia(ler(), agora)
   const d = deveRodar({ agora, env, estado })
@@ -241,7 +249,7 @@ export async function rodar({
   if (!resposta) return { rodou: false, motivo: 'sem resposta do sistema de obras' }
 
   const modo = modoCobranca(env)
-  const todos = montarEnvios(resposta, { modo, ensaioPara: destinoDoEnsaio(env) })
+  const todos = montarEnvios(resposta, { modo, ensaioPara: destinoDoEnsaio(env), cabecalho })
   const faltam = todos.filter(e => !estado.enviados.includes(e.chave))
   const agoraVai = faltam.slice(0, MAX_POR_RODADA)
 
