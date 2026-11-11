@@ -33,6 +33,7 @@ import * as guardados from './documentos-guardados.js'
 import * as fichasPendentes from './candidaturas-pendentes.js'
 import * as lembrete from './lembrete-cadastro.js'
 import * as cobranca from './cobranca-documentos.js'
+import * as conferencia from './cobranca-conferencia.js'
 import { estadoDaFicha, paradoHaDaFicha } from './ficha-rh.js'
 import { chavePixNoTexto, mensagemEhChavePix, respostaDaPendencia } from './contratacao.js'
 import * as resumoRecrutamento from './resumo-recrutamento.js'
@@ -567,6 +568,15 @@ async function atenderRecrutamento(msg) {
     desligado por decisão do dono (12/09/2026): o robô atende CANDIDATO. Para
     ligar, ATENDER_FUNCIONARIO=on.
   */
+  /*
+    Quem acabou de receber a cobrança do diário de obras e responde aqui
+    está falando do diário, não procurando vaga. Vai para gente.
+  */
+  if (conferencia.foiCobradoRecentemente(msg.de)) {
+    console.log(`[atendimento] ${discreto(msg.de)}: respondeu à cobrança do diário — calado, avisando o RH.`)
+    return calar(msg, 'Resposta à cobrança do diário de obras / controle de pessoal')
+  }
+
   const decisao = quemAtender({ texto: msg.texto, ficha })
   if (!decisao.atender) {
     console.log(`[atendimento] ${discreto(msg.de)}: ${decisao.motivo} — calado, avisando o RH.`)
@@ -1241,6 +1251,29 @@ async function rodarCobranca() {
 const relogioCobranca = setInterval(() => rodarCobranca().catch(e => console.error('[cobranca]', e.message)), 15 * 60 * 1000)
 relogioCobranca.unref?.()
 console.log(`[cobranca] documentos de funcionário: ${cobranca.cobrancaLigada() ? `LIGADA (${cobranca.diaDaCobranca()})` : 'desligada'}`)
+
+/*
+  Cobrança de diário de obras e controle de pessoal.
+
+  DESLIGADA por padrão (COBRAR_CONFERENCIA=ensaio|on). O texto vem pronto do
+  sistema de obras; aqui só se entrega, uma vez por dia, em conta-gotas.
+  Em "ensaio", tudo vai numa mensagem só para CONFERENCIA_ENSAIO_PARA.
+*/
+let conferindoAgora = false
+async function rodarConferencia() {
+  if (conferindoAgora || conferencia.modoCobranca() === 'off') return
+  if (!(await conectado())) return
+  conferindoAgora = true
+  try {
+    const r = await conferencia.rodar({ enviar: enviarMensagem })
+    if (r.rodou) console.log(`[conferencia] ${r.modo}: ${r.enviados} enviada(s) de ${r.total}${r.concluido ? '' : ' — o resto na próxima rodada'}`)
+  } finally {
+    conferindoAgora = false
+  }
+}
+const relogioConferencia = setInterval(() => rodarConferencia().catch(e => console.error('[conferencia]', e.message)), 10 * 60 * 1000)
+relogioConferencia.unref?.()
+console.log(`[conferencia] cobrança de diário e presença: ${conferencia.modoCobranca().toUpperCase()}${conferencia.modoCobranca() === 'ensaio' ? ` (só para ${discreto(conferencia.destinoDoEnsaio() ?? '')})` : ''}`)
 
 if (gastos.gastosAtivo()) {
   const s = gastos.situacao()
