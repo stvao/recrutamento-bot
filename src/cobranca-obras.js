@@ -90,6 +90,14 @@ async function conectar() {
     if (connection === 'close') {
       aberto = false
       const motivo = lastDisconnect?.error?.output?.statusCode
+      // Pareando e o código venceu (ou a conexão caiu antes de digitarem): sai,
+      // e um código novo sai quando rodar "parear" de novo. Não é o dono
+      // desconectando — não mexe em sessão nenhuma.
+      if (PAREAR && !state.creds.registered) {
+        try { writeFileSync(ARQUIVO_CODIGO, 'expirou\n') } catch {}
+        console.error(`[cobranca-obras] o código venceu (${motivo ?? '?'}). Rode "parear" de novo para um código novo.`)
+        process.exit(1)
+      }
       if (motivo === DisconnectReason.loggedOut) {
         // Desconectado no celular: é o dono dizendo "pare". Não tenta voltar.
         const guardada = `${PASTA}-removida-${Date.now()}`
