@@ -57,15 +57,16 @@ test('semanal: só no dia combinado', () => {
   assert.equal(deveRodar({ agora: SEGUNDA_9H, env }).rodar, true)
 })
 
-test('ensaio: uma mensagem só, para o dono, com tudo o que iria', () => {
-  const envios = montarEnvios(RESPOSTA, { modo: 'ensaio', ensaioPara: '5562981990765' })
-  assert.equal(envios.length, 1)
-  assert.equal(envios[0].telefone, '5562981990765')
-  assert.equal(envios[0].cobrado, false)
-  assert.match(envios[0].texto, /Nada disto foi enviado/)
-  assert.match(envios[0].texto, /Para Maria Eduarda\* \(final 0001\)/)
-  assert.match(envios[0].texto, /Estevão\* \(administrador\)/)
-  assert.doesNotMatch(envios[0].texto, /5514999990001/) // número inteiro não aparece
+test('ensaio: tudo para o dono, uma mensagem por pessoa, como ela receberia', () => {
+  const envios = montarEnvios(RESPOSTA, { modo: 'ensaio', ensaioPara: '5562981990765', cabecalho: true })
+  assert.equal(envios.length, 5) // abertura + Maria + Ricardo + quem não tem número + gestor
+  assert.ok(envios.every(e => e.telefone === '5562981990765' && e.cobrado === false))
+  assert.match(envios[0].texto, /Nada foi enviado para a equipe/)
+  assert.match(envios[1].texto, /Iria para \*Maria Eduarda\* \(final 0001\)/)
+  assert.ok(envios[1].texto.includes(CABECALHO + 'Olá, Maria. Ficou pendente…'))
+  assert.match(envios[4].texto, /Estevão\* \(administrador\)/)
+  assert.ok(envios.every(e => !e.texto.includes('5514999990001'))) // número inteiro não aparece
+  assert.equal(new Set(envios.map(e => e.chave)).size, envios.length) // cada uma marcada à parte
 })
 
 test('ensaio sem nada a cobrar: silêncio', () => {

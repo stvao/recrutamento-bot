@@ -31,6 +31,24 @@ const PASTA = process.env.COBRANCA_SESSAO || join(process.cwd(), 'dados', 'whats
 const NUMERO = String(process.env.COBRANCA_NUMERO ?? '').replace(/\D/g, '')
 const ARQUIVO_CODIGO = join(dirname(PASTA), 'cobranca-codigo.txt')
 const PAREAR = process.argv.includes('parear')
+// "parear qr": em vez do código de 8 letras, escreve uma página com o QR
+// (cobranca-qr.html, ao lado da sessão), que se recarrega sozinha a cada
+// troca de QR. Serve para conectar olhando a tela do computador.
+const POR_QR = process.argv.includes('qr')
+const ARQUIVO_QR = join(dirname(PASTA), 'cobranca-qr.html')
+
+function paginaDoQr(qr) {
+  const dado = JSON.stringify(qr).replace(/</g, '\\u003c')
+  return `<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="4">
+<title>Conectar cobrança</title>
+<body style="font-family:sans-serif;text-align:center;background:#fff;color:#111;padding:16px">
+<h2>WhatsApp → Aparelhos conectados → Conectar aparelho</h2>
+<p>Aponte a câmera para o código. Ele muda sozinho a cada ~20 s.</p>
+<div id="q" style="display:inline-block;padding:16px;background:#fff"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>new QRCode(document.getElementById('q'), { text: ${dado}, width: 320, height: 320 })</script>
+</body>`
+}
 
 let sock = null
 let aberto = false
@@ -68,7 +86,10 @@ async function conectar() {
         console.error('[cobranca-obras] sem sessão. Rode com "parear" para gerar o código de conexão.')
         process.exit(2)
       }
-      if (!codigoPedido && NUMERO.length >= 12) {
+      if (POR_QR) {
+        writeFileSync(ARQUIVO_QR, paginaDoQr(qr))
+        console.log('[cobranca-obras] QR novo em', ARQUIVO_QR)
+      } else if (!codigoPedido && NUMERO.length >= 12) {
         codigoPedido = true
         try {
           const codigo = await sock.requestPairingCode(NUMERO)
@@ -85,6 +106,9 @@ async function conectar() {
       aberto = true
       console.log(`[cobranca-obras] conectado no número de final ${String(sock.user?.id ?? '').split(/[:@]/)[0].slice(-4)}`)
       try { writeFileSync(ARQUIVO_CODIGO, 'conectado\n') } catch {}
+      if (POR_QR) {
+        try { writeFileSync(ARQUIVO_QR, '<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;text-align:center;padding:40px"><h1>✅ Conectado</h1><p>Pode fechar esta página.</p></body>') } catch {}
+      }
       if (PAREAR) {
         // Pareado: dá um tempo para gravar as chaves e sai; o pm2 sobe o de verdade.
         setTimeout(() => process.exit(0), 8000)
@@ -97,7 +121,9 @@ async function conectar() {
       // Pareando e o código venceu (ou a conexão caiu antes de digitarem): sai,
       // e um código novo sai quando rodar "parear" de novo. Não é o dono
       // desconectando — não mexe em sessão nenhuma.
-      if (PAREAR && !state.creds.registered) {
+      // Depois de ler o QR o WhatsApp derruba a conexão uma vez (515) para
+      // reabrir já pareado — aí `me` existe e é só reconectar.
+      if (PAREAR && !state.creds.registered && !state.creds.me) {
         try { writeFileSync(ARQUIVO_CODIGO, 'expirou\n') } catch {}
         console.error(`[cobranca-obras] o código venceu (${motivo ?? '?'}). Rode "parear" de novo para um código novo.`)
         process.exit(1)

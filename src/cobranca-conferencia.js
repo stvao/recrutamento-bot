@@ -119,8 +119,31 @@ export const CABECALHO = '🤖 *Aviso automático — Sistema NovaGestão Obras*
 export function montarEnvios(resposta, { modo, ensaioPara, cabecalho = false } = {}) {
   if (!resposta) return []
   if (modo === 'ensaio') {
-    const texto = textoDoEnsaio(resposta)
-    return texto && ensaioPara ? [{ chave: `ensaio:${ensaioPara}`, telefone: ensaioPara, texto, cobrado: false }] : []
+    // Tudo para o dono, mas uma mensagem POR PESSOA, exatamente como ela
+    // receberia — só com uma linha em cima dizendo para quem iria. Ver uma
+    // por uma é o que deixa o dono decidir se libera.
+    if (!ensaioPara) return []
+    const todas = [
+      ...(resposta.mensagens ?? []).map(m => ({ ...m, papel: '' })),
+      ...(resposta.gestores ?? []).map(m => ({ ...m, papel: ' (administrador)' })),
+    ].filter(m => m?.texto)
+    if (!todas.length) return []
+    const abre = {
+      chave: `ensaio:${ensaioPara}:abre`,
+      telefone: ensaioPara,
+      texto: `🧪 *Ensaio — cobrança de diário e presença*
+Nada foi enviado para a equipe. Hoje iriam ${todas.length} mensagem(ns); seguem uma por uma, como cada pessoa receberia.`,
+      cobrado: false,
+    }
+    return [abre, ...todas.map((m, i) => ({
+      chave: `ensaio:${ensaioPara}:${i}:${String(m.telefone ?? '').slice(-4)}`,
+      telefone: ensaioPara,
+      texto: `🧪 _Iria para *${m.nome ?? 'sem nome'}*${m.papel} (final ${ULTIMOS4(m.telefone)})_
+
+` +
+        (cabecalho ? CABECALHO + m.texto : m.texto + RODAPE),
+      cobrado: false,
+    }))]
   }
   if (modo !== 'on') return []
   const envios = []
