@@ -133,6 +133,20 @@ test('falha no meio: quem recebeu não recebe de novo; quem faltou recebe na pr�
   assert.deepEqual(enviados, ['5514999990001', '5562981990765', '5513999990002'])
 })
 
+test('feriado (o sistema diz que hoje não é expediente): não manda nada e encerra o dia', async () => {
+  const m = memoria()
+  const enviados = []
+  const env = { COBRAR_CONFERENCIA: 'on' }
+  const r = await rodar({ agora: QUINTA_9H, env, enviar: async (t) => { enviados.push(t); return { ok: true } }, esperar: async () => {}, buscar: async () => ({ ...RESPOSTA, hojeExpediente: false }), ler: m.ler, gravar: m.gravar })
+  assert.equal(r.rodou, false)
+  assert.deepEqual(enviados, [])
+  assert.equal(m.ver().concluido, true)
+})
+
+test('sábado não roda', () => {
+  assert.equal(deveRodar({ agora: new Date('2026-11-14T12:00:00Z'), env: { COBRAR_CONFERENCIA: 'on' } }).rodar, false)
+})
+
 test('ensaio não marca ninguém como cobrado', async () => {
   const m = memoria()
   const env = { COBRAR_CONFERENCIA: 'ensaio', CONFERENCIA_ENSAIO_PARA: '5562981990765' }

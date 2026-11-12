@@ -73,7 +73,7 @@ export function deveRodar({ agora = new Date(), env = process.env, estado = {} }
   if (modo === 'off') return { rodar: false, motivo: 'desligada' }
   if (modo === 'ensaio' && !destinoDoEnsaio(env)) return { rodar: false, motivo: 'ensaio sem CONFERENCIA_ENSAIO_PARA' }
   const { dia, hora } = semanaEHora(agora)
-  if (dia === 'Sun') return { rodar: false, motivo: 'domingo' }
+  if (dia === 'Sun' || dia === 'Sat') return { rodar: false, motivo: 'fim de semana' }
   if (frequencia(env) === 'semanal' && dia !== diaDaSemanal(env)) return { rodar: false, motivo: 'não é o dia' }
   if (hora < horaDeComecar(env) || hora >= horaDeParar(env)) return { rodar: false, motivo: 'fora do horário' }
   if (estado.dia === diaEmBrasilia(agora) && estado.concluido) return { rodar: false, motivo: 'já foi hoje' }
@@ -281,6 +281,12 @@ export async function rodar({
 
   const resposta = await buscar(frequencia(env), env)
   if (!resposta) return { rodou: false, motivo: 'sem resposta do sistema de obras' }
+  // Feriado, sábado e domingo: quem sabe é o sistema de obras (DIAS_EXPEDIENTE
+  // e feriados nacionais). Não manda nada e dá o dia por encerrado.
+  if (resposta.hojeExpediente === false) {
+    gravar({ ...estado, concluido: true })
+    return { rodou: false, motivo: 'hoje não é dia de expediente' }
+  }
 
   const modo = modoCobranca(env)
   const todos = montarEnvios(resposta, { modo, ensaioPara: destinoDoEnsaio(env), cabecalho })
