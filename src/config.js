@@ -23,6 +23,12 @@ import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// O servidor roda em UTC, e o robô fala com gente de Brasília: "hoje às
+// 20h29" saía para algo de 17h29, e o fechamento das 18h achava que já tinha
+// passado. Fixar o fuso aqui, antes de qualquer outro módulo, acerta todo
+// getHours/setHours de uma vez. Quem exportar outro TZ (testes) ganha.
+process.env.TZ ||= 'America/Sao_Paulo'
+
 const RAIZ = dirname(dirname(fileURLToPath(import.meta.url)))
 const CAMINHO = process.env.ENV_FILE || join(RAIZ, '.env')
 
