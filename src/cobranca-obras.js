@@ -37,7 +37,7 @@ let aberto = false
 let codigoPedido = false
 
 async function conectar() {
-  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } =
+  const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers } =
     await import('@whiskeysockets/baileys')
   if (!existsSync(PASTA)) mkdirSync(PASTA, { recursive: true })
   const { state, saveCreds } = await useMultiFileAuthState(PASTA)
@@ -52,7 +52,11 @@ async function conectar() {
     // Não precisa de conversa nenhuma: só envia.
     shouldSyncHistoryMessage: () => false,
     syncFullHistory: false,
-    browser: ['Sistema NovaGestão Obras', 'Chrome', '1.0.0'],
+    // Conexão por código só é aceita com um sistema que o WhatsApp conhece
+    // (Windows, Mac OS, Ubuntu). Nome inventado aqui = o celular recusa o
+    // código e a conexão vence em 408. Quem diz que é do sistema é o cabeçalho
+    // de cada mensagem, não o nome do aparelho.
+    browser: Browsers.windows('Chrome'),
   })
   sock.ev.on('creds.update', saveCreds)
 
