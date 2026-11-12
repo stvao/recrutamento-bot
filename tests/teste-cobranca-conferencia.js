@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   modoCobranca, destinoDoEnsaio, deveRodar, montarEnvios, textoDoEnsaio, rodar,
-  foiCobradoRecentemente, estadoDoDia, buscarCobrancas, LIMITE_ENSAIO, RODAPE, CABECALHO,
+  foiCobradoRecentemente, estadoDoDia, buscarCobrancas, LIMITE_ENSAIO, RODAPE, CABECALHO, RODAPE_DONO,
 } from '../src/cobranca-conferencia.js'
 
 // 12/11/2026 é quinta. 9h em Brasília = 12h UTC.
@@ -49,6 +49,13 @@ test('só de manhã até as 18h, nunca no domingo, uma vez por dia', () => {
   assert.equal(deveRodar({ agora: DOMINGO_9H, env }).rodar, false)
   assert.equal(deveRodar({ agora: QUINTA_9H, env, estado: { dia: '2026-11-12', concluido: true } }).rodar, false)
   assert.equal(deveRodar({ agora: QUINTA_9H, env, estado: { dia: '2026-11-11', concluido: true } }).rodar, true)
+})
+
+test('hora de parar configurável: 18h por padrão, CONFERENCIA_HORA_FIM estende', () => {
+  const as18 = new Date('2026-11-12T21:00:00Z') // 18h em Brasília
+  assert.equal(deveRodar({ agora: as18, env: { COBRAR_CONFERENCIA: 'on' } }).rodar, false)
+  assert.equal(deveRodar({ agora: as18, env: { COBRAR_CONFERENCIA: 'on', CONFERENCIA_HORA_FIM: '19' } }).rodar, true)
+  assert.equal(deveRodar({ agora: as18, env: { COBRAR_CONFERENCIA: 'on', CONFERENCIA_HORA_FIM: 'x' } }).rodar, false)
 })
 
 test('semanal: só no dia combinado', () => {
@@ -153,8 +160,8 @@ test('dia novo zera os enviados e esquece cobrança velha', () => {
 
 test('do número do dono: abre dizendo que é aviso automático do sistema', () => {
   const envios = montarEnvios(RESPOSTA, { modo: 'on', cabecalho: true })
-  assert.equal(envios[0].texto, CABECALHO + 'Olá, Maria. Ficou pendente…')
-  assert.ok(envios[0].texto.startsWith('🤖 *Aviso automático — Sistema NovaGestão Obras*'))
+  assert.equal(envios[0].texto, CABECALHO + 'Olá, Maria. Ficou pendente…' + RODAPE_DONO)
+  assert.ok(envios[0].texto.startsWith('🤖 *SISTEMA NOVAGESTÃO OBRAS*'))
   assert.ok(!envios[0].texto.includes(RODAPE))
 })
 

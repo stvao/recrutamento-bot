@@ -43,6 +43,12 @@ export function diaDaSemanal(env = process.env) {
 }
 
 /** A partir de que hora manda. Até as 18h: depois disso, fica para amanhã. */
+/** Até que horas pode sair (exclusive). Padrão 18h; CONFERENCIA_HORA_FIM muda. */
+export function horaDeParar(env = process.env) {
+  const h = Number(env.CONFERENCIA_HORA_FIM ?? 18)
+  return Number.isFinite(h) && h > horaDeComecar(env) && h <= 22 ? h : 18
+}
+
 export function horaDeComecar(env = process.env) {
   const h = Number(env.CONFERENCIA_HORA ?? 8)
   return Number.isFinite(h) && h >= 0 && h < 18 ? h : 8
@@ -69,7 +75,7 @@ export function deveRodar({ agora = new Date(), env = process.env, estado = {} }
   const { dia, hora } = semanaEHora(agora)
   if (dia === 'Sun') return { rodar: false, motivo: 'domingo' }
   if (frequencia(env) === 'semanal' && dia !== diaDaSemanal(env)) return { rodar: false, motivo: 'não é o dia' }
-  if (hora < horaDeComecar(env) || hora >= 18) return { rodar: false, motivo: 'fora do horário' }
+  if (hora < horaDeComecar(env) || hora >= horaDeParar(env)) return { rodar: false, motivo: 'fora do horário' }
   if (estado.dia === diaEmBrasilia(agora) && estado.concluido) return { rodar: false, motivo: 'já foi hoje' }
   return { rodar: true, motivo: modo }
 }
@@ -109,7 +115,12 @@ export const RODAPE = '\n\n_Mensagem automática do sistema de obras._'
  * diz que foi o sistema que escreveu — quem lê sabe que não é bronca pessoal
  * e que responder ali é falar com gente.
  */
-export const CABECALHO = '🤖 *Aviso automático — Sistema NovaGestão Obras*\n\n'
+export const CABECALHO =
+  '🤖 *SISTEMA NOVAGESTÃO OBRAS*\n' +
+  '_Mensagem automática, gerada pelo sistema a partir do diário de obras e do controle de pessoal. Chega pelo WhatsApp do Estevão, mas não foi ele quem escreveu._\n' +
+  '━━━━━━━━━━━━━━━\n\n'
+/** No fim: o que fazer se o sistema errou — responder ali é falar com gente. */
+export const RODAPE_DONO = '\n\n_Se algo aqui estiver errado (folga, chuva, obra parada), responda esta mensagem explicando._'
 
 /**
  * O que mandar, e para quem. Cada envio tem uma `chave`: é ela que impede
@@ -141,7 +152,7 @@ Nada foi enviado para a equipe. Hoje iriam ${todas.length} mensagem(ns); seguem 
       texto: `🧪 _Iria para *${m.nome ?? 'sem nome'}*${m.papel} (final ${ULTIMOS4(m.telefone)})_
 
 ` +
-        (cabecalho ? CABECALHO + m.texto : m.texto + RODAPE),
+        (cabecalho ? CABECALHO + m.texto + RODAPE_DONO : m.texto + RODAPE),
       cobrado: false,
     }))]
   }
@@ -155,7 +166,7 @@ Nada foi enviado para a equipe. Hoje iriam ${todas.length} mensagem(ns); seguem 
       const chave = `${tipo}:${tel}`
       if (vistos.has(chave)) continue
       vistos.add(chave)
-      const texto = cabecalho ? CABECALHO + m.texto : m.texto + RODAPE
+      const texto = cabecalho ? CABECALHO + m.texto + RODAPE_DONO : m.texto + RODAPE
       envios.push({ chave, telefone: tel, texto, cobrado: tipo === 'equipe' })
     }
   }
