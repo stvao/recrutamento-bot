@@ -117,7 +117,6 @@ export const RODAPE = '\n\n_Mensagem automática do sistema de obras._'
  */
 export const CABECALHO =
   '🤖 *SISTEMA NOVAGESTÃO OBRAS*\n' +
-  '_Mensagem automática, gerada pelo sistema a partir do diário de obras e do controle de pessoal. Chega pelo WhatsApp do Estevão, mas não foi ele quem escreveu._\n' +
   '━━━━━━━━━━━━━━━\n\n'
 /** No fim: o que fazer se o sistema errou — responder ali é falar com gente. */
 export const RODAPE_DONO = '\n\n_Se algo aqui estiver errado (folga, chuva, obra parada), responda esta mensagem explicando._'
