@@ -15,14 +15,14 @@
  */
 
 /** Quanto esperar depois da última mensagem. */
-const ESPERA_MS = Number(process.env.RAJADA_ESPERA_MS || 6000)
+const ESPERA_MS = Number(process.env.RAJADA_ESPERA_MS || 10000)
 
 /**
  * Teto para quem escreve sem parar: passado esse tempo desde a PRIMEIRA
  * mensagem, responde com o que tem. Sem isto, quem digita de dez em dez
  * segundos nunca receberia resposta.
  */
-const MAXIMO_MS = Number(process.env.RAJADA_MAXIMO_MS || 20000)
+const MAXIMO_MS = Number(process.env.RAJADA_MAXIMO_MS || 35000)
 
 export function criarAgrupador({ espera = ESPERA_MS, maximo = MAXIMO_MS } = {}) {
   /** chave -> { textos, primeiraEm, timer, aguardando } */

@@ -33,6 +33,7 @@ import { criarFiltro } from './recebimento.js'
 import * as maoHumana from './mao-humana.js'
 import * as atendimentoRh from './atendimento-rh.js'
 import { criarAgrupador } from './rajada.js'
+import * as ritmo from './ritmo.js'
 import { transcrever, audioDisponivel } from './ia-audio.js'
 
 /** Onde a sessão fica guardada. */
@@ -49,6 +50,8 @@ const ESPERA_MAX_MS = Number(process.env.BAILEYS_ESPERA_MAX || 5000)
 
 let sock = null
 let conectado = false
+/** O robô mostrou um QR desde a última conexão (ver src/ritmo.js). */
+let voltandoPorQr = false
 
 function espera(ms) {
   return new Promise(r => setTimeout(r, ms))
@@ -306,6 +309,8 @@ export async function conectar(aoReceber) {
     const { connection, lastDisconnect, qr } = u
 
     if (qr) {
+      // Voltar por QR é voltar de uma queda: a rampa recomeça ao conectar.
+      voltandoPorQr = true
       console.log('\n Leia este QR code no WhatsApp do número do robô:')
       console.log('   WhatsApp → Configurações → Aparelhos conectados → Conectar aparelho\n')
       qrcode.generate(qr, { small: true })
@@ -316,6 +321,8 @@ export async function conectar(aoReceber) {
       const meu = numeroDoJid(sock.user?.id)
       console.log(`\n WhatsApp conectado no número ${meu}. A Maria Vitória está atendendo.\n`)
       whatsappConectou(meu)
+      if (voltandoPorQr) { ritmo.recomecarRampa(); voltandoPorQr = false }
+      console.log('[ritmo]', JSON.stringify(ritmo.situacao()))
       carregarGrupos()
     }
 
@@ -690,11 +697,23 @@ function jaFalouIgual(jid, texto, agora = Date.now()) {
   return false
 }
 
-async function responder(jid, texto, { citar = null, rapido = false } = {}) {
+async function responder(jid, texto, { citar = null, rapido = false, forcar = false } = {}) {
   if (!sock) return { ok: false }
   if (jaFalouIgual(jid, texto)) {
     console.log('[whatsapp] mesma frase de novo no mesmo minuto — não repeti.')
     return { ok: true, id: null, repetida: true }
+  }
+  // Tetos do dia e volta gradual (src/ritmo.js). Só conversa com pessoa: o
+  // grupo de comprovantes fica de fora. Passou do teto, o robô se cala e a
+  // conversa segue na central, para alguém da equipe responder.
+  const comPessoa = ehPrivado(jid) && !rapido
+  if (comPessoa) {
+    const r = ritmo.podeEnviar(jid, { forcar })
+    if (!r.pode) {
+      if (r.avisarLog) console.log(`[ritmo] calado nesta conversa: ${r.motivo}. Fica para a equipe na central.`)
+      return { ok: false, calado: true, motivo: r.motivo }
+    }
+    await ritmo.esperarAVez()
   }
   try {
     // A pausa existe para o robô não se denunciar na conversa com candidato.
@@ -714,6 +733,7 @@ async function responder(jid, texto, { citar = null, rapido = false } = {}) {
     // Anota o que o robô disse no privado, e marca o id: a mesma mensagem
     // pode voltar como "minha", e não pode ser confundida com o dono.
     observacao.marcarDoRobo(enviada?.key?.id)
+    if (comPessoa) ritmo.anotarEnvio(jid)
     if (ehPrivado(jid)) {
       observacao.anotar({ chave: jid, autor: 'robo', tipo: 'texto', texto })
       atendimentoRh.repassar({ chave: jid, autor: 'robo', tipo: 'texto', texto, waId: enviada?.key?.id ?? null })
@@ -962,7 +982,9 @@ export async function devolverAoRobo(chave) {
 /** Envio avulso, para o resto do serviço usar. */
 export async function enviarPorBaileys(numero, texto) {
   const jid = numero.includes('@') ? numero : `${numero.replace(/\D/g, '')}@s.whatsapp.net`
-  return responder(jid, texto)
+  // O que chega aqui foi a equipe (ou uma rotina dela) que mandou enviar:
+  // conta no total do dia, mas não é barrado pelos tetos.
+  return responder(jid, texto, { forcar: true })
 }
 
 export function estaConectado() {
