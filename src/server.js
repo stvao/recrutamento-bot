@@ -312,6 +312,23 @@ app.post('/atendimento/historico', async (req, res) => {
   res.status(r.ok ? 200 : 502).json({ ok: r.ok, error: r.erro })
 })
 
+/**
+ * Como está o WhatsApp do robô, com o QR do momento quando ele pede leitura.
+ * É o que a tela Configurações → WhatsApp do RH mostra, para reconectar pelo
+ * navegador sem ninguém precisar entrar no servidor.
+ */
+app.get('/whatsapp/estado', async (req, res) => {
+  if (!simuladorAutorizado(req)) return res.sendStatus(404)
+  if (process.env.CONNECTOR !== 'baileys') return res.json({ ok: true, conector: process.env.CONNECTOR ?? null, conectado: null })
+  const { estadoDaConexao } = await import('./baileys.js')
+  const { desenharQr } = await import('./qr-desenho.js')
+  const e = estadoDaConexao()
+  res.set('Cache-Control', 'no-store').json({
+    ok: true, conector: 'baileys', conectado: e.conectado, numero: e.numero,
+    qr: e.qr ? desenharQr(e.qr) : null, qrHaSegundos: e.qrHaSegundos, ritmo: e.ritmo,
+  })
+})
+
 /** "Devolver para o robô": ele volta a responder a conversa. */
 app.post('/atendimento/robo', async (req, res) => {
   if (!simuladorAutorizado(req)) return res.sendStatus(404)

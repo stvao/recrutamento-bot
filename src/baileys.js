@@ -52,6 +52,9 @@ let sock = null
 let conectado = false
 /** O robô mostrou um QR desde a última conexão (ver src/ritmo.js). */
 let voltandoPorQr = false
+/** O QR que está valendo agora, e o número conectado. */
+let qrAtual = null
+let numeroConectado = null
 
 function espera(ms) {
   return new Promise(r => setTimeout(r, ms))
@@ -311,6 +314,9 @@ export async function conectar(aoReceber) {
     if (qr) {
       // Voltar por QR é voltar de uma queda: a rampa recomeça ao conectar.
       voltandoPorQr = true
+      // Guardado para a tela do RH mostrar (Configurações → WhatsApp): o QR
+      // só saía neste registro, e ler dependia de alguém entrar no servidor.
+      qrAtual = { texto: qr, em: Date.now() }
       console.log('\n Leia este QR code no WhatsApp do número do robô:')
       console.log('   WhatsApp → Configurações → Aparelhos conectados → Conectar aparelho\n')
       qrcode.generate(qr, { small: true })
@@ -321,6 +327,8 @@ export async function conectar(aoReceber) {
       const meu = numeroDoJid(sock.user?.id)
       console.log(`\n WhatsApp conectado no número ${meu}. A Maria Vitória está atendendo.\n`)
       whatsappConectou(meu)
+      qrAtual = null
+      numeroConectado = meu
       if (voltandoPorQr) { ritmo.recomecarRampa(); voltandoPorQr = false }
       console.log('[ritmo]', JSON.stringify(ritmo.situacao()))
       carregarGrupos()
@@ -989,4 +997,20 @@ export async function enviarPorBaileys(numero, texto) {
 
 export function estaConectado() {
   return conectado
+}
+
+/**
+ * Como está a conexão, para a tela do RH. O QR vai como o texto que o
+ * WhatsApp entregou; quem desenha é a rota (src/qr-desenho.js). QR com mais
+ * de 60 segundos já foi trocado pelo WhatsApp e não é devolvido.
+ */
+export function estadoDaConexao(agora = Date.now()) {
+  const qrVale = !conectado && qrAtual && agora - qrAtual.em < 60_000
+  return {
+    conectado,
+    numero: conectado ? numeroConectado : null,
+    qr: qrVale ? qrAtual.texto : null,
+    qrHaSegundos: qrVale ? Math.round((agora - qrAtual.em) / 1000) : null,
+    ritmo: ritmo.situacao(agora),
+  }
 }
