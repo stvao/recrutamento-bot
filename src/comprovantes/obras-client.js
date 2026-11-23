@@ -393,6 +393,11 @@ async function mexerNoLancado(metodo, id, campos) {
       status: r.status,
       motivo: j.mensagem || (typeof j.message === 'string' ? j.message : null) || `HTTP ${r.status}`,
       obras: j.obras ?? j.message?.obras ?? null,
+      // No 409 o sistema diz POR QUE não deixou: "RATEADO" (trocar a obra de
+      // um gasto dividido) ou "JA_ANALISADO", com o status em que o gasto
+      // está (aprovado ou rejeitado).
+      codigo: j.codigo ?? j.message?.codigo ?? null,
+      statusDoGasto: j.status ?? j.message?.status ?? null,
     }
   } catch (e) {
     console.error(`[obras] ${metodo} /lancados falhou:`, e.message)

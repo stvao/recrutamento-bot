@@ -547,7 +547,7 @@ let zipOn
 // Aqui não: lançaria em dobro tudo que foi digitado à mão.
 {
   const zip = gravarZip('parada.zip', [
-    { nome: '_chat.txt', dados: Buffer.from(`[${br(D3)}, 16:00:00] Maria: haia vidro 444 ‎<anexado: 00000201-PHOTO.jpg>`) },
+    { nome: '_chat.txt', dados: Buffer.from(`[${br(D3)}, 16:00:00] Maria: haia vidro 444 \u200e<anexado: 00000201-PHOTO.jpg>`) },
     { nome: '00000201-PHOTO.jpg', dados: foto() },
   ])
   const nLancs = lancs().length

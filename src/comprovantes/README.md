@@ -25,6 +25,7 @@ sem aprovação humana.
 | `atraso.js` | A leitura do grupo antigo: ensaio, execução em lotes, retomada e as rotas HTTP. |
 | `exportacao.js` | Lê a conversa exportada do WhatsApp (Android e iPhone) e acha os comprovantes. |
 | `zip.js` | Leitor de zip mínimo, que trata o arquivo como dado de fora. |
+| `correcao.js` | Corrigir ou cancelar pelo grupo um gasto já lançado, citando o comprovante ou a confirmação. |
 | `saida.js` | Lança o gasto pendente no Obras, ou manda para a caixa de comprovantes. |
 | `ronda.js` | O lembrete (uma vez, 3 h) e o prazo (24 h → caixa). Liga no arranque. |
 | `formato.js` | Como valor, data e item aparecem nas mensagens. |
@@ -36,7 +37,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Comprovante repetido
@@ -118,6 +119,46 @@ e para a comparação de repetido.
 Medida não é data: "tubo 3/4" e "joelho 1/2" são ignorados. Sem ano, a data
 só vale com o mês em dois dígitos ("05/09") ou com "dia", "data", "em" ou
 "de" antes ("dia 3/8"), e até 120 dias para trás; com ano, até um ano.
+
+## Corrigir pelo grupo
+
+Depois do "✅ Lançado", enquanto o gasto está **pendente**, dá para corrigir
+sem abrir o sistema: **citar** o comprovante (ou a confirmação) e escrever a
+correção.
+
+| Escrevendo (citando) | O que muda |
+|---|---|
+| `valor 1800` · `era 1.800,00` · `R$ 1800` | o valor |
+| `obra haia` · `é da haia` | a obra (ambígua ou desconhecida → pergunta com a lista) |
+| `data 30/10` | a data |
+| `material` · `locação` · `mão de obra` | a categoria |
+| `descrição areia lavada` | a descrição |
+| `apagar` · `cancelar` · `lancei errado` | cancela — depois de **uma** confirmação ("Cancelo o lançamento de R$ X em <obra>? Responde *sim*") |
+
+A resposta é curta e diz o antes e o depois: `✏️ Corrigido: R$ 1.500,00 → R$ 1.800,00`.
+Os textos são fixos, escritos no código — nenhuma IA redige.
+
+As travas:
+
+- **Sem citação, nada disto dispara.** "valor 1800" solto continua sendo o que
+  sempre foi (resposta a uma pergunta, ou nada).
+- **Quem pode:** quem mandou o comprovante, ou alguém de `GASTOS_AUTORIZADOS`
+  **por número**. O coringa `*` do grupo não basta para mexer no gasto de
+  outra pessoa.
+- **Só pendente.** Já aprovado: "Esse já foi aprovado — agora só pelo sistema."
+- Gasto dividido entre obras: o valor corrige; a obra, só pelo sistema.
+- Número solto só vale como valor com cara de dinheiro (`1.800,00`, `R$ 1800`);
+  `1800` puro pede `valor` ou `era` na frente. Citar e escrever outra coisa
+  ("obrigado") não faz nada.
+
+A memória do robô acompanha a correção (e esquece o gasto cancelado), para a
+comparação de repetido e o fechamento do dia não ficarem com o dado velho. O
+vínculo entre mensagem e gasto dura enquanto o lançamento está na memória (30
+dias). Usa `PATCH` e `DELETE /api/comprovantes/lancados/:id`; servidor sem
+essas rotas responde 404 e o robô manda corrigir pelo sistema.
+
+Limites: os lançamentos do grupo antigo não têm confirmação para citar; e no
+Telegram só citar o comprovante funciona (a confirmação não é reconhecida).
 
 ## O grupo antigo (comprovantes atrasados)
 

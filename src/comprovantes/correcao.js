@@ -169,6 +169,10 @@ function perguntarObra(msg, alvo, opcoes, escrito) {
 
 /** O que dizer quando o sistema não deixou. */
 function recusa(r) {
+  if (r.status === 409 && r.codigo === 'RATEADO') return 'Esse gasto está dividido entre obras — a obra só se troca pelo sistema.'
+  // Rejeitado inclui o que foi cancelado por aqui mesmo: dizer "aprovado"
+  // faria a pessoa procurar na despesa um gasto que não existe mais.
+  if (r.status === 409 && /rejeit/i.test(String(r.statusDoGasto ?? ''))) return 'Esse já foi rejeitado ou cancelado — não dá mais para mexer nele por aqui.'
   if (r.status === 409) return 'Esse já foi aprovado — agora só pelo sistema.'
   if (r.status === 404) return 'Não consegui mexer nesse lançamento por aqui — corrige pelo sistema.'
   if (r.status === 401) return '❌ Meu acesso ao sistema de obras foi recusado (token inválido ou revogado). Avisa quem cuida do sistema.'
