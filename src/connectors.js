@@ -68,6 +68,7 @@ export function parseWebhook(body) {
         return {
           canal: 'whatsapp-cloud',
           de: String(msg.from),
+          telefoneConhecido: true,
           chat: String(msg.from),
           // A API oficial não entrega mensagem de grupo. Não é configuração:
           // é limite da plataforma, e vale para receber e para enviar.
@@ -94,6 +95,7 @@ export function parseWebhook(body) {
     return {
       canal: 'zapi',
       de: String(body.phone),
+      telefoneConhecido: true,
       chat: String(body.phone),
       ehGrupo: Boolean(body.isGroup),
       texto: body.text?.message ?? body.message,

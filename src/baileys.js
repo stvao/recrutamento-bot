@@ -528,6 +528,10 @@ export async function conectar(aoReceber) {
         const resposta = await aoReceber({
           canal: 'whatsapp',
           de,
+          // `de` é um telefone de verdade, ou os dígitos de um @lid que não
+          // se conseguiu traduzir? O módulo de comprovantes só diz ao sistema
+          // "quem mandou" quando é telefone.
+          telefoneConhecido,
           chat: grupo ? jid : de,
           // O endereço ORIGINAL desta conversa. Em @lid sem telefone conhecido,
           // `de` são os dígitos do LID — um número que não existe. É por este

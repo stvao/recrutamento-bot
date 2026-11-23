@@ -76,6 +76,23 @@ const MAX_ESPERANDO = Number(process.env.GASTOS_MAX_AGUARDANDO || 50)
  */
 const ESPERA_LEGENDA_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 60000)
 
+/**
+ * O telefone de quem mandou, quando é telefone DE VERDADE.
+ *
+ * Em grupo o WhatsApp pode entregar o remetente como "@lid" — um
+ * identificador que esconde o número. Quando o robô não consegue traduzi-lo,
+ * `de` traz os dígitos do lid, que têm cara de telefone e não são de
+ * ninguém. Mandar isso ao sistema como "quem enviou" faria o reembolso ir
+ * para um desconhecido, ou — pior — casar por acaso com o número de outra
+ * pessoa. Então só vale quando quem entregou a mensagem afirma que conhece o
+ * telefone, e ele tem forma de número brasileiro (55 + DDD + número).
+ */
+function telefoneDeQuemMandou(msg) {
+  if (msg.telefoneConhecido !== true) return null
+  const numero = String(msg.de ?? '').replace(/\D/g, '')
+  return /^55\d{10,11}$/.test(numero) ? numero : null
+}
+
 export async function tratar(msg) {
   const { de, chat, chatNome, arquivo, nomeArquivo, tipo, texto, idMensagem } = msg
 
@@ -122,6 +139,9 @@ export async function tratar(msg) {
     // existe mais.
     chat,
     de, arquivo, nomeArquivo, tipo,
+    // Para o sistema saber de quem é o reembolso. null quando não se sabe o
+    // telefone de verdade — ver `telefoneDeQuemMandou`.
+    enviadoPor: telefoneDeQuemMandou(msg),
     descricao: texto || null,
     respostas: [],
     idMensagem,

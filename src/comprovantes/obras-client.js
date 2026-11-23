@@ -250,24 +250,26 @@ export async function lancarGasto(dados) {
   if (!dados.arquivo?.byteLength) return { ok: false, motivo: 'arquivo-vazio' }
   if (!dados.obra || dados.valor == null) return { ok: false, motivo: 'faltam-dados' }
 
-  const comDuplicata = !camposDeDuplicataRecusados && Boolean(dados.documento || dados.arquivoHash)
+  const comDuplicata = !camposDeDuplicataRecusados && Boolean(dados.documento || dados.arquivoHash || dados.enviadoPor)
   const r = await postarLancamento(dados, comDuplicata)
   if (r.ok || r.status !== 400 || !comDuplicata) return r
 
   /*
-    400 mandando `documento` e `arquivoHash`: servidor de versão anterior,
-    com validação estrita, recusando campo que ele ainda não conhece.
+    400 mandando `documento`, `arquivoHash` ou `enviadoPor`: servidor de
+    versão anterior, com validação estrita, recusando campo que ele ainda
+    não conhece.
 
-    Os dois campos só servem para o sistema reconhecer comprovante repetido.
-    Perder essa conferência é ruim; perder o lançamento por causa dela é
-    pior — então vai de novo sem eles, como sempre foi. A mesma
-    Idempotency-Key garante que não entram dois.
+    Os dois primeiros servem para o sistema reconhecer comprovante repetido;
+    o terceiro, para o reembolso ir no nome de quem mandou. Perder isso é
+    ruim; perder o lançamento por causa disso é pior — então vai de novo
+    sem eles, como sempre foi. A mesma Idempotency-Key garante que não
+    entram dois.
   */
-  console.warn('[obras] /lancar: 400 com documento/arquivoHash — tentando sem eles.')
+  console.warn('[obras] /lancar: 400 com os campos novos (documento/arquivoHash/enviadoPor) — tentando sem eles.')
   const sem = await postarLancamento(dados, false)
   if (sem.ok) {
     camposDeDuplicataRecusados = true
-    console.warn('[obras] ⚠ O servidor ainda não aceita documento/arquivoHash no /lancar. Sigo lançando sem eles.')
+    console.warn('[obras] ⚠ O servidor ainda não aceita documento/arquivoHash/enviadoPor no /lancar. Sigo lançando sem eles.')
   }
   return sem
 }
@@ -282,7 +284,7 @@ export async function lancarGasto(dados) {
 let camposDeDuplicataRecusados = false
 
 /** Uma tentativa de lançamento. */
-async function postarLancamento({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, rateio, pagoPor, idMensagem, confirmadoOutro, empresaPagou, documento, arquivoHash }, comDuplicata) {
+async function postarLancamento({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, rateio, pagoPor, idMensagem, confirmadoOutro, empresaPagou, documento, arquivoHash, enviadoPor }, comDuplicata) {
   const form = new FormData()
   form.append('arquivo', new Blob([arquivo], { type: tipo || 'application/octet-stream' }), nomeArquivo || 'comprovante')
   form.append('obra', String(obra))
@@ -303,6 +305,10 @@ async function postarLancamento({ arquivo, nomeArquivo, tipo, obra, valor, descr
   // vez de desconfiar de todo valor repetido.
   if (comDuplicata && documento) form.append('documento', String(documento).trim().slice(0, 60))
   if (comDuplicata && arquivoHash) form.append('arquivoHash', arquivoHash)
+  // O telefone de quem mandou a mensagem (só dígitos, com 55). O sistema
+  // procura o usuário que tem esse WhatsApp cadastrado: é no nome dele que o
+  // reembolso fica, em vez de ficar no de quem é dono do token do robô.
+  if (comDuplicata && enviadoPor) form.append('enviadoPor', enviadoPor)
 
   try {
     const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancar`, {
@@ -321,7 +327,10 @@ async function postarLancamento({ arquivo, nomeArquivo, tipo, obra, valor, descr
     // `reenvio`: o sistema reconheceu o comprovante como um que já estava
     // lançado e devolveu o existente — nada novo entrou. Não repassar isto
     // fazia quem chama comemorar ("✅ Lançado") e anotar de novo na memória.
-    if (r.ok) return { ok: true, reenvio: j.reenvio === true, id: j.id, obra: j.obra, obras: j.obras, rateio: j.rateio, pagoPor: j.pagoPor, mensagem: j.mensagem }
+    // `enviadoPor`: o NOME de quem o sistema reconheceu pelo telefone, ou
+    // null se não reconheceu. `undefined` é servidor que ainda não sabe do
+    // campo — e aí não há o que dizer a respeito.
+    if (r.ok) return { ok: true, reenvio: j.reenvio === true, id: j.id, ids: j.ids, obra: j.obra, obras: j.obras, rateio: j.rateio, pagoPor: j.pagoPor, enviadoPor: j.enviadoPor, mensagem: j.mensagem }
 
     if (r.status === 422) {
       // Obra não reconhecida: quem chama pergunta, oferecendo as opções.

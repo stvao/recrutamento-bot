@@ -412,6 +412,8 @@ let zipOn
   ok('lança direto os que têm obra e valor', lancs().length === 2)
   const [l1, l2] = lancs()
   ok('como pago pela EMPRESA', campoDe(l1.corpo, 'empresaPagou') === 'true')
+  // O remetente do atraso é um NOME tirado da conversa, não um telefone.
+  ok('sem `enviadoPor`: no atraso não se diz ao sistema quem mandou', lancs().every(c => campoDe(c.corpo, 'enviadoPor') === null))
   ok('com a data da mensagem original, não a de hoje', campoDe(l1.corpo, 'data') === D3)
   ok('a descrição veio do texto mandado logo depois da foto', campoDe(l1.corpo, 'valor') === '250' && campoDe(l1.corpo, 'obra') === OBRAS[1])
   ok('chave de idempotência estável, pela impressão digital', /^atraso-[0-9a-f]{32}$/.test(l1.chave ?? ''))

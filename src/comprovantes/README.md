@@ -36,7 +36,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Comprovante repetido
@@ -63,6 +63,25 @@ esquerda; com menos de 4 caracteres não vai), porque o Obras compara letra
 por letra. Todo `/lancar` leva o id da mensagem como `Idempotency-Key`. Com o
 Obras em versão anterior nada quebra: 404 na consulta = compara só com a
 memória; 400 nos campos novos = lança de novo sem eles.
+
+## Quem mandou (reembolso)
+
+O robô manda ao Obras, em `enviadoPor`, o telefone de quem enviou a mensagem
+(só dígitos, com 55), no `/lancar` e na caixa. O sistema procura o usuário
+que tem esse WhatsApp cadastrado e devolve o nome.
+
+Só vai telefone **de verdade**. Em grupo o WhatsApp pode esconder o número
+atrás de um `@lid`; quando o robô não consegue traduzi-lo, não manda nada —
+os dígitos de um lid parecem telefone e não são de ninguém. O atraso (grupo
+antigo) também não manda: lá o remetente é um nome da conversa exportada.
+
+Quando o gasto ficou reembolsável (nem a empresa pagou, nem um sócio):
+
+| O sistema respondeu | Linha na confirmação |
+|---|---|
+| o nome de quem mandou | "reembolso para Fulano" |
+| que não conhece o número | aviso de que o número não está cadastrado e o reembolso ficou no nome de quem aprova |
+| nada (versão anterior) | nenhuma |
 
 ## Valor lido da imagem
 

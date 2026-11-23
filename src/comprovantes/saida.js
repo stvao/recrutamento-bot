@@ -138,6 +138,10 @@ export async function lancar(pendente, dados) {
     // Por onde o sistema reconhece o mesmo comprovante mandado duas vezes.
     documento: dados.documento,
     arquivoHash: pendente.arquivoHash,
+    // Quem mandou a mensagem, para o reembolso. O atraso não manda: lá o
+    // remetente é um NOME tirado da conversa exportada, não um telefone em
+    // que se possa confiar — e a ficha dele nem tem este campo.
+    enviadoPor: pendente.enviadoPor ?? null,
   })
 
   if (r.ok && r.reenvio) {
@@ -179,6 +183,26 @@ export async function lancar(pendente, dados) {
       // o comprovante por causa de um nome seria trocar uma informação a
       // menos por um comprovante a menos —, mas quem mandou precisa saber.
       linhas.push(`⚠ Não achei "${dados.pagoPor}" no sistema — lancei sem o pagador.`)
+    }
+
+    /*
+      De quem é o reembolso.
+
+      Só quando o gasto ficou REEMBOLSÁVEL: nem a empresa pagou direto, nem
+      um sócio bancou. Aí alguém tirou do bolso, e o sistema registra a
+      dívida no nome de uma pessoa — antes, sempre no de quem é dono do
+      token do robô, que não gastou nada.
+
+      O sistema devolve o nome de quem ele reconheceu pelo telefone. Não
+      reconheceu? O reembolso ficou no nome de quem aprova, e quem mandou a
+      foto precisa saber agora — depois ninguém lembra de quem era.
+      Servidor que ainda não conhece o campo não devolve nada, e nada se diz.
+    */
+    const reembolsavel = !pendente.empresaPagou && !r.pagoPor
+    if (reembolsavel && typeof r.enviadoPor === 'string' && r.enviadoPor.trim()) {
+      linhas.push(`  reembolso para ${r.enviadoPor.trim()}`)
+    } else if (reembolsavel && r.enviadoPor === null && pendente.enviadoPor) {
+      linhas.push('⚠ O número de quem mandou não está cadastrado no sistema — o reembolso ficou no nome de quem aprova.')
     }
 
     // O gasto entrou num dia que não é o de hoje — às vezes em outro mês.
@@ -252,6 +276,7 @@ async function textoDaCaixa(pendente) {
       estabelecimento: dados.estabelecimento,
       documento: dados.documento,
       arquivoHash: pendente.arquivoHash,
+      enviadoPor: pendente.enviadoPor ?? null,
       formaPagamento: dados.formaPagamento,
       confianca: dados.confianca,
     },
