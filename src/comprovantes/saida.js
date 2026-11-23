@@ -61,9 +61,51 @@ export function diaDoEnvio(enviadoEm) {
     .format(new Date(enviadoEm ?? Date.now()))
 }
 
+/**
+ * Até quantos dias antes do envio a data lida no papel ainda vale.
+ *
+ * Comprovante se manda atrasado — uma semana, um mês quando alguém junta
+ * tudo. Mas uma data de muito tempo atrás, vinda de leitura de foto, é mais
+ * provavelmente um ano lido errado do que um recibo esquecido por quatro
+ * meses.
+ */
+const DATA_LIDA_ATE_DIAS = 120
+
+/** A partir de quantos dias de diferença para o envio a confirmação avisa. */
+const AVISAR_DATA_APOS_DIAS = 3
+
+const diasEntre = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) / (24 * 60 * 60 * 1000)
+
+/**
+ * A data com que o gasto entra.
+ *
+ * Era sempre o dia do envio. Só que comprovante se manda depois: o recibo do
+ * dia 30 mandado no dia 4 entrava no mês seguinte, e o custo da obra saía
+ * errado nos dois meses.
+ *
+ * A ordem é a de sempre — o que a pessoa digitou ganha da IA:
+ *
+ *  1. a data que a pessoa ESCREVEU ("dia 30/10");
+ *  2. a data que a IA LEU no papel, se a leitura é de confiança alta ou
+ *     média, não é depois do dia em que a foto foi mandada (recibo do futuro
+ *     é leitura errada) e não tem mais de 120 dias;
+ *  3. o dia do envio, como era antes.
+ */
+export function dataDoGasto(pendente, dados) {
+  const envio = diaDoEnvio(pendente?.enviadoEm)
+  if (dados?.dataEscrita) return dados.dataEscrita
+
+  const lida = dados?.dataComprovante
+  if (lida && ['alta', 'media'].includes(dados.confiancaLeitura)
+    && lida <= envio && diasEntre(lida, envio) <= DATA_LIDA_ATE_DIAS) {
+    return lida
+  }
+  return envio
+}
+
 /** Lança como gasto da equipe, pendente de aprovação. */
 export async function lancar(pendente, dados) {
-  const data = diaDoEnvio(pendente.enviadoEm)
+  const data = dataDoGasto(pendente, dados)
 
   const r = await lancarGasto({
     arquivo: pendentes.arquivoDe(pendente),
@@ -103,6 +145,7 @@ export async function lancar(pendente, dados) {
       categoria: dados.tipo, de: pendente.de, resultado: 'lancado',
       idMensagem: pendente.idMensagem,
       documento: dados.documento, arquivoHash: pendente.arquivoHash,
+      data,
     })
     const linhas = [`✅ ${r.mensagem || 'Lançado, aguardando aprovação.'}`]
     linhas.push([
@@ -127,6 +170,13 @@ export async function lancar(pendente, dados) {
       // o comprovante por causa de um nome seria trocar uma informação a
       // menos por um comprovante a menos —, mas quem mandou precisa saber.
       linhas.push(`⚠ Não achei "${dados.pagoPor}" no sistema — lancei sem o pagador.`)
+    }
+
+    // O gasto entrou num dia que não é o de hoje — às vezes em outro mês.
+    // Sem dizer, a pessoa procura o lançamento no dia em que mandou a foto e
+    // conclui que ele sumiu.
+    if (diasEntre(data, diaDoEnvio(pendente.enviadoEm)) > AVISAR_DATA_APOS_DIAS) {
+      linhas.push(`  comprovante de ${dataCurta(data)}`)
     }
 
     if (!dados.valorDigitado) linhas.push('⚠ Esse valor eu li da imagem. Confere ao aprovar.')
@@ -186,7 +236,9 @@ async function textoDaCaixa(pendente) {
       descricao: dados.descricao,
       categoria: dados.tipo,
       valor: dados.valor,
-      data: diaDoEnvio(pendente.enviadoEm),
+      // A mesma data que o lançamento usaria: é com ela que o formulário
+      // da caixa abre preenchido.
+      data: dataDoGasto(pendente, dados),
       dataComprovante: dados.dataComprovante,
       estabelecimento: dados.estabelecimento,
       documento: dados.documento,
@@ -205,6 +257,7 @@ async function textoDaCaixa(pendente) {
       categoria: dados.tipo, de: pendente.de, resultado: 'caixa',
       idMensagem: pendente.idMensagem,
       documento: dados.documento, arquivoHash: pendente.arquivoHash,
+      data: dataDoGasto(pendente, dados),
     })
   }
 

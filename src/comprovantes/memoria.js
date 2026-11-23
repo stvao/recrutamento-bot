@@ -90,8 +90,12 @@ for (const sinal of ['SIGINT', 'SIGTERM', 'beforeExit', 'exit']) process.on(sina
  * digital do arquivo) entraram depois. Lançamento gravado antes disso não tem
  * nenhum dos dois, e continua valendo: para ele a comparação segue sendo
  * obra + valor, como sempre foi.
+ *
+ * `data` é o dia com que o gasto entrou no sistema (AAAA-MM-DD) — que pode
+ * não ser hoje: é a data do comprovante, quando ela é conhecida. `quando`
+ * continua sendo o instante em que o robô lançou.
  */
-export function anotarLancamento({ obra, valor, descricao, categoria, de, resultado, idMensagem, documento, arquivoHash }) {
+export function anotarLancamento({ obra, valor, descricao, categoria, de, resultado, idMensagem, documento, arquivoHash, data }) {
   dados.lancamentos.push({
     obra: obra ?? null,
     valor: valor ?? null,
@@ -102,6 +106,7 @@ export function anotarLancamento({ obra, valor, descricao, categoria, de, result
     idMensagem: idMensagem ?? null,
     documento: documento ?? null,
     arquivoHash: arquivoHash ?? null,
+    data: data ?? null,
     quando: Date.now(),
   })
 

@@ -152,6 +152,75 @@ export function acharValor(texto) {
 }
 
 /**
+ * Acha a DATA que a pessoa escreveu ("dia 30/10", "30/10/2026").
+ *
+ * Serve para o gasto cair no dia certo quando o comprovante é mandado
+ * depois: a foto do dia 30 mandada no dia 4 entrava no mês seguinte. Quem
+ * escreveu a data sabe de quando é o pagamento, e o que a pessoa digitou
+ * ganha do que a IA leu.
+ *
+ * O cuidado aqui é com MEDIDA. Em obra se escreve "tubo 3/4", "joelho 1/2",
+ * "barra 3/8" o dia inteiro, e ler isso como 3 de abril jogaria o gasto
+ * meses para trás, em silêncio. Então:
+ *
+ *  - com ano ("30/10/2026", "30/10/26") vale sempre;
+ *  - sem ano, só com o mês em dois dígitos ("30/10", "05/09") ou com uma
+ *    palavra que diga que é data antes ("dia 3/8", "em 3/8", "data 3/8").
+ *
+ * Sem ano, é o ano em que a data não fica no futuro: "30/12" escrito em
+ * janeiro é dezembro do ano passado.
+ *
+ * Data que não existe (31/02) ou no futuro não vale — é erro de digitação,
+ * e errar a data para longe é pior que usar o dia do envio. Para trás, o
+ * limite depende de a pessoa ter escrito o ano: com ano, até um ano atrás;
+ * sem ano, até 120 dias — "30/12" escrito em novembro é quase certamente
+ * engano, e não um recibo de onze meses. Havendo mais de uma, vale a
+ * última: é a correção.
+ *
+ * Devolve { data: 'AAAA-MM-DD' | null }. O texto não é mexido — a data
+ * continua na descrição, onde quem aprova também a vê.
+ */
+export function acharData(texto, agora = new Date()) {
+  if (!texto) return { data: null }
+
+  const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(agora)
+  const anoAtual = Number(hoje.slice(0, 4))
+  const iso = (a, m, d) => `${a}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+  const existe = (a, m, d) => {
+    const dt = new Date(Date.UTC(a, m - 1, d))
+    return dt.getUTCFullYear() === a && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
+  }
+  const limite = iso(anoAtual - 1, Number(hoje.slice(5, 7)), Number(hoje.slice(8, 10)))
+  const limiteSemAno = new Date(Date.parse(hoje) - 120 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+  const padrao = /(\b(?:dia|data|em|de)\s+)?(?<![\d/.,])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?(?![\d/])/gi
+  let achada = null
+
+  for (const m of texto.matchAll(padrao)) {
+    const [, rotulo, dTxt, mTxt, aTxt] = m
+    const d = Number(dTxt)
+    const mes = Number(mTxt)
+
+    // Sem ano e sem nada que diga que é data: só com o mês em dois dígitos.
+    if (!aTxt && !rotulo && mTxt.length < 2) continue
+
+    let data = null
+    if (aTxt) {
+      const ano = aTxt.length === 2 ? 2000 + Number(aTxt) : Number(aTxt)
+      if (existe(ano, mes, d)) data = iso(ano, mes, d)
+    } else if (existe(anoAtual, mes, d) && iso(anoAtual, mes, d) <= hoje) {
+      data = iso(anoAtual, mes, d)
+    } else if (existe(anoAtual - 1, mes, d)) {
+      data = iso(anoAtual - 1, mes, d)
+    }
+
+    if (data && data <= hoje && data >= (aTxt ? limite : limiteSemAno)) achada = data
+  }
+
+  return { data: achada }
+}
+
+/**
  * Número que aparece na legenda mas não é o valor do gasto.
  *
  * Nota fiscal, placa, quilometragem, dia, hora — e quantidade com unidade
@@ -568,7 +637,7 @@ export function acharPagador(texto, pagadores) {
  * certo já vale, e quem aprova completa o que faltar.
  */
 export function interpretar(texto, obras = [], pagadores = []) {
-  const vazio = { obra: null, rateio: null, descricao: null, tipo: null, valor: null, pagoPor: null, candidatos: null, textoOriginal: texto ?? null }
+  const vazio = { obra: null, rateio: null, descricao: null, tipo: null, valor: null, data: null, pagoPor: null, candidatos: null, textoOriginal: texto ?? null }
   if (!texto?.trim()) return vazio
 
   // O pagador sai primeiro: é nome próprio no meio da frase, e deixado ali
@@ -635,6 +704,8 @@ export function interpretar(texto, obras = [], pagadores = []) {
   return {
     obra, rateio: rateio.length ? rateio : null,
     descricao, tipo, valor, pagoPor, candidatos, textoOriginal: texto,
+    // A data que a pessoa escreveu, quando escreveu ("dia 30/10").
+    data: acharData(texto).data,
     // Mais de um número sem cara de dinheiro: o valor é um palpite (o último).
     valorIncerto: valorIncerto ?? false,
     candidatosValor: candidatosValor ?? null,
@@ -687,9 +758,17 @@ export function combinar(escrito, lido) {
     // De onde veio cada coisa, para a caixa de aprovação poder mostrar o que
     // foi digitado e o que foi chutado por máquina.
     valorDigitado: escrito?.valor != null && !incerto,
-    // A data do comprovante, quando a IA conseguiu ler, vai junto — mas quem
-    // manda no lançamento é a data do envio, que é o que foi combinado.
+    // A data que a pessoa ESCREVEU ("dia 30/10"). Ganha de tudo.
+    dataEscrita: escrito?.data ?? null,
+    // A data que a IA leu no papel. Vale para o lançamento quando a leitura
+    // é confiável; quem decide entre esta, a escrita e o dia do envio é
+    // `dataDoGasto()`, em saida.js. (Antes mandava sempre o dia do envio, e
+    // o comprovante do dia 30 mandado no dia 4 caía no mês seguinte.)
     dataComprovante: lido?.data ?? null,
+    // A confiança da LEITURA em si. O campo `confianca` abaixo vira
+    // 'digitado' quando o valor foi escrito, e aí não diz mais nada sobre o
+    // quanto dá para acreditar na data lida.
+    confiancaLeitura: lido?.confianca ?? null,
     estabelecimento: lido?.estabelecimento ?? null,
     documento: lido?.documento ?? null,
     formaPagamento: lido?.formaPagamento ?? null,

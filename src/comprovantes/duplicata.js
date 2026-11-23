@@ -157,6 +157,13 @@ export function parecido({ obra, valor, documento, datas, idMensagem }, fontes =
 function quandoFoi(item) {
   // Da memória do robô: o instante em que ele lançou.
   if (item.quando) {
+    // Lançado com a data do comprovante, e ela não é o dia em que entrou:
+    // diz a data do GASTO, que é a que a pessoa reconhece.
+    const lancadoEm = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(item.quando))
+    if (item.data && item.data !== lancadoEm) {
+      const [, mm, dd] = /^\d{4}-(\d{2})-(\d{2})/.exec(item.data) ?? []
+      if (dd) return `com data de ${Number(dd)}/${Number(mm)}`
+    }
     const quando = new Date(item.quando)
     return quando.toDateString() === new Date().toDateString()
       ? `hoje às ${quando.getHours()}h${String(quando.getMinutes()).padStart(2, '0')}`

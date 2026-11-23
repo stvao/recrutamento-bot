@@ -25,7 +25,7 @@ sem aprovação humana.
 | `saida.js` | Lança o gasto pendente no Obras, ou manda para a caixa de comprovantes. |
 | `ronda.js` | O lembrete (uma vez, 3 h) e o prazo (24 h → caixa). Liga no arranque. |
 | `formato.js` | Como valor, data e item aparecem nas mensagens. |
-| `lancamento.js` | Lê a linha que a pessoa escreve: obra, descrição, tipo, valor, quem pagou. |
+| `lancamento.js` | Lê a linha que a pessoa escreve: obra, descrição, tipo, valor, data, quem pagou. |
 | `ia-visao.js` | Lê a imagem do comprovante e confere o que o modelo diz ter lido. |
 | `obras-client.js` | Fala com o NovaGestão Obras (lançar, caixa, lista de obras e sócios, consulta do que já foi lançado). |
 | `memoria.js` | O que já foi lançado (com nº do documento e impressão digital do arquivo) e os apelidos de obra aprendidos (`dados/memoria-gastos.json`). |
@@ -33,7 +33,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Comprovante repetido
@@ -57,6 +57,24 @@ a legenda certa é o conserto.
 O robô manda `documento` e `arquivoHash` no `/lancar` e na caixa. Com o
 Obras em versão anterior nada quebra: 404 na consulta = compara só com a
 memória; 400 nos campos novos = lança de novo sem eles.
+
+## Com que data o gasto entra
+
+Nesta ordem (`dataDoGasto`, em `saida.js`):
+
+1. a data que a pessoa **escreveu** na legenda ou numa resposta ("dia 30/10",
+   "30/10/2026");
+2. a data que a IA **leu** no papel, se a leitura é de confiança alta ou
+   média, não é depois do dia do envio e não tem mais de 120 dias;
+3. o **dia do envio**, como era antes.
+
+Quando a data usada fica a mais de 3 dias do envio, a confirmação ganha a
+linha "comprovante de 30/10". A mesma data vai para a caixa, para a memória
+e para a comparação de repetido.
+
+Medida não é data: "tubo 3/4" e "joelho 1/2" são ignorados. Sem ano, a data
+só vale com o mês em dois dígitos ("05/09") ou com "dia", "data", "em" ou
+"de" antes ("dia 3/8"), e até 120 dias para trás; com ano, até um ano.
 
 ## Configuração e dados
 

@@ -9,7 +9,7 @@ import { obrasDoSistema, pagadoresConhecidos, lancadosDoSistema } from './obras-
 import { enviarMensagem } from '../connectors.js'
 import { interpretar, combinar, acharValor } from './lancamento.js'
 import { perguntar, perguntarPagador } from './perguntas.js'
-import { lancar, paraCaixa, diaDoEnvio } from './saida.js'
+import { lancar, paraCaixa, diaDoEnvio, dataDoGasto } from './saida.js'
 import { mesmoArquivo, parecido, avisoDeMesmoArquivo, perguntaDeRepetido } from './duplicata.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
@@ -280,9 +280,12 @@ async function processar(pendente) {
       obra: dados.obra,
       valor: dados.valor,
       documento: dados.documento,
-      // O dia em que foi mandado e, quando a IA leu, o dia do comprovante:
-      // quem lança à mão costuma usar a data do papel.
-      datas: [diaDoEnvio(pendente.enviadoEm), dados.dataComprovante],
+      // A data com que este gasto vai entrar — a do comprovante, quando é
+      // conhecida, que é a que quem lança à mão também usa — e o dia em que
+      // foi mandado. A data lida no papel entra mesmo quando a leitura não
+      // foi boa o bastante para valer no lançamento: aqui ela só serve para
+      // PERGUNTAR, e perguntar a mais custa menos que deixar passar.
+      datas: [dataDoGasto(pendente, dados), diaDoEnvio(pendente.enviadoEm), dados.dataComprovante],
       idMensagem: pendente.idMensagem,
     }, jaLancados)
 
