@@ -6,9 +6,10 @@
  *
  * 1. O QUE JÁ FOI LANÇADO. Serve para desconfiar de comprovante repetido e
  *    para o resumo do fim do dia. O sistema de obras sabe disso melhor que
- *    ninguém, mas o token daqui só cria — não lê nada. Então o robô guarda o
- *    que ele mesmo mandou, que é o suficiente: duplicata que interessa é a
- *    que passa por ele duas vezes.
+ *    ninguém, e hoje o robô também pergunta a ele (`lancadosDoSistema`) —
+ *    mas a resposta pode faltar (servidor de versão anterior, rede fora) e
+ *    chega com alguns minutos de atraso. O que o robô acabou de mandar ele
+ *    sabe na hora, e é por isso que continua guardando.
  *
  * 2. OS APELIDOS QUE VOCÊ USA. Quando ele não reconhece o nome escrito,
  *    pergunta e você escolhe da lista — e é aí que ele aprende. "escola do
@@ -37,7 +38,7 @@ const ARQUIVO = process.env.GASTOS_MEMORIA
  * caçamba, a diária do mesmo pedreiro) em suspeita de duplicata, e aí o
  * aviso vira ruído e ninguém lê mais.
  */
-const DIAS_DE_COMPARACAO = Number(process.env.GASTOS_DIAS_DUPLICATA || 30)
+export const DIAS_DE_COMPARACAO = Number(process.env.GASTOS_DIAS_DUPLICATA || 30)
 
 let dados = { lancamentos: [], apelidos: {}, grupo: null }
 let sujo = false
@@ -82,8 +83,15 @@ for (const sinal of ['SIGINT', 'SIGTERM', 'beforeExit', 'exit']) process.on(sina
 
 // ─── 1. O que já foi lançado ───────────────────────────────────────────────
 
-/** Anota um lançamento. `resultado` é 'lancado' ou 'caixa'. */
-export function anotarLancamento({ obra, valor, descricao, categoria, de, resultado, idMensagem }) {
+/**
+ * Anota um lançamento. `resultado` é 'lancado' ou 'caixa'.
+ *
+ * `documento` (nº do cupom/NSU que a IA leu) e `arquivoHash` (impressão
+ * digital do arquivo) entraram depois. Lançamento gravado antes disso não tem
+ * nenhum dos dois, e continua valendo: para ele a comparação segue sendo
+ * obra + valor, como sempre foi.
+ */
+export function anotarLancamento({ obra, valor, descricao, categoria, de, resultado, idMensagem, documento, arquivoHash }) {
   dados.lancamentos.push({
     obra: obra ?? null,
     valor: valor ?? null,
@@ -92,6 +100,8 @@ export function anotarLancamento({ obra, valor, descricao, categoria, de, result
     de: de ?? null,
     resultado,
     idMensagem: idMensagem ?? null,
+    documento: documento ?? null,
+    arquivoHash: arquivoHash ?? null,
     quando: Date.now(),
   })
 
@@ -104,29 +114,19 @@ export function anotarLancamento({ obra, valor, descricao, categoria, de, result
 }
 
 /**
- * Já mandaram um igual a este?
+ * O que o robô LANÇOU e ainda serve de comparação, do mais recente para o
+ * mais antigo.
  *
- * "Igual" é MESMA OBRA e MESMO VALOR. Descrição não entra: a mesma compra
- * costuma ser descrita de jeitos diferentes por pessoas diferentes, e exigir
- * que ela bata deixaria passar justamente a duplicata que vem de duas
- * pessoas mandando o mesmo comprovante.
+ * Só o que virou gasto. O que foi para a caixa não conta: é comum a pessoa
+ * mandar a foto sem dizer nada, ela cair na caixa, e depois mandar DE NOVO
+ * com a legenda certa — barrar essa segunda seria barrar o conserto.
  *
- * Devolve o mais recente, ou null. Nunca decide nada sozinho: valor repetido
- * é comum de verdade — dois sacos de cimento no mesmo dia, a diária do mesmo
- * pedreiro na semana seguinte. Quem sabe se é duplicata é quem pagou.
+ * Quem decide se dois são o mesmo é `duplicata.js`; aqui só se guarda.
  */
-export function parecidoCom({ obra, valor }, ignorarIdMensagem = null) {
-  if (!obra || valor == null) return null
-
-  const alvo = norm(obra)
-  const iguais = dados.lancamentos
-    .filter(l => l.resultado === 'lancado'
-      && l.valor === valor
-      && norm(l.obra ?? '') === alvo
-      && l.idMensagem !== ignorarIdMensagem)
+export function lancadosRecentes() {
+  return dados.lancamentos
+    .filter(l => l.resultado === 'lancado')
     .sort((a, b) => b.quando - a.quando)
-
-  return iguais[0] ?? null
 }
 
 /** O que entrou num dia. `dia` é o começo do dia, em ms. */

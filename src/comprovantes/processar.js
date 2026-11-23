@@ -5,12 +5,12 @@
  * Parte do módulo de comprovantes (ver `entrada.js` para a visão geral).
  */
 import { lerComprovante } from './ia-visao.js'
-import { obrasDoSistema, pagadoresConhecidos } from './obras-client.js'
+import { obrasDoSistema, pagadoresConhecidos, lancadosDoSistema } from './obras-client.js'
 import { enviarMensagem } from '../connectors.js'
 import { interpretar, combinar, acharValor } from './lancamento.js'
 import { perguntar, perguntarPagador } from './perguntas.js'
-import { lancar, paraCaixa } from './saida.js'
-import { moeda } from './formato.js'
+import { lancar, paraCaixa, diaDoEnvio } from './saida.js'
+import { mesmoArquivo, parecido, avisoDeMesmoArquivo, perguntaDeRepetido } from './duplicata.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 
@@ -185,6 +185,32 @@ async function processar(pendente) {
     }
   }
 
+  /*
+    É O MESMO ARQUIVO de um gasto já lançado? Então não há o que perguntar.
+
+    Antes de ler a imagem, e antes de perguntar obra ou valor: a impressão
+    digital não depende de nada disso, e fazer a pessoa responder duas
+    perguntas para só então ouvir "esse já entrou" seria gastar o tempo dela
+    — e uma leitura da IA — à toa.
+
+    É a ÚNICA situação em que o robô deixa de lançar sem ninguém dizer "é o
+    mesmo". Vale porque aqui não há palpite: bytes iguais são o mesmo
+    comprovante, e não dois pagamentos de mesmo valor.
+  */
+  // Ficha gravada por uma versão anterior não tem a impressão: calcula agora.
+  if (!pendente.arquivoHash) pendente.arquivoHash = pendentes.impressaoDigital(pendentes.arquivoDe(pendente))
+
+  const desde = diaDoEnvio(Date.now() - memoria.DIAS_DE_COMPARACAO * 24 * 60 * 60 * 1000)
+  const jaLancados = { locais: memoria.lancadosRecentes(), doSistema: await lancadosDoSistema(desde) }
+
+  const identico = mesmoArquivo(
+    { arquivoHash: pendente.arquivoHash, idMensagem: pendente.idMensagem }, jaLancados,
+  )
+  if (identico) {
+    console.log(`[gastos] ${pendente.de} → mesmo arquivo de um gasto já lançado, não lancei de novo`)
+    return { perguntando: false, texto: avisoDeMesmoArquivo(identico) }
+  }
+
   // A imagem é lida UMA vez e guardada: numa segunda passada, depois da
   // resposta, reler custaria mais 20 segundos e daria o mesmo resultado.
   if (pendente.lido === undefined) {
@@ -238,35 +264,32 @@ async function processar(pendente) {
   }
 
   /*
-    Mesma obra e mesmo valor de um lançamento recente: pode ser duplicata.
+    Parece com um lançamento recente: pode ser duplicata.
 
     PERGUNTA, não recusa. Valor repetido é comum de verdade — dois sacos de
     cimento no mesmo dia, a diária do mesmo pedreiro na semana seguinte. Quem
     sabe se é o mesmo pagamento é quem pagou, e barrar sozinho faria o robô
     engolir gasto legítimo em silêncio, que é o pior erro que ele pode
     cometer aqui.
+
+    O que conta como "parece" está em duplicata.js. Olha a memória do robô e
+    o que está no sistema — inclusive o que foi lançado à mão.
   */
   if (!pendente.duplicataConfirmada) {
-    const igual = memoria.parecidoCom(
-      { obra: dados.obra, valor: dados.valor }, pendente.idMensagem,
-    )
+    const igual = parecido({
+      obra: dados.obra,
+      valor: dados.valor,
+      documento: dados.documento,
+      // O dia em que foi mandado e, quando a IA leu, o dia do comprovante:
+      // quem lança à mão costuma usar a data do papel.
+      datas: [diaDoEnvio(pendente.enviadoEm), dados.dataComprovante],
+      idMensagem: pendente.idMensagem,
+    }, jaLancados)
+
     if (igual) {
       pendente.esperandoDuplicata = true
       pendente.jaPerguntou = true
-      const quando = new Date(igual.quando)
-      const quandoTexto = quando.toDateString() === new Date().toDateString()
-        ? `hoje às ${quando.getHours()}h${String(quando.getMinutes()).padStart(2, '0')}`
-        : `em ${quando.getDate()}/${quando.getMonth() + 1}`
-      return {
-        perguntando: true,
-        texto: [
-          `⚠ Já lancei um igual a este ${quandoTexto}:`,
-          `   ${igual.obra} · ${igual.descricao ?? 'sem descrição'} · ${moeda(igual.valor)}`,
-          '',
-          'É outro pagamento, ou é o mesmo comprovante?',
-          'Responde *outro* para lançar, ou *mesmo* para descartar.',
-        ].join('\n'),
-      }
+      return { perguntando: true, texto: perguntaDeRepetido(igual) }
     }
   }
 

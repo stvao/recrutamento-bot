@@ -85,6 +85,12 @@ const { _limparCacheObras } = await import('../src/comprovantes/obras-client.js'
 const memoria = await import('../src/comprovantes/memoria.js')
 
 const foto = Buffer.from('imagem-do-comprovante')
+// Cada foto mandada é um arquivo DIFERENTE, como na vida real. Com o mesmo
+// conteúdo em todas, a segunda de cada teste seria reconhecida como o mesmo
+// arquivo da primeira e nem chegaria a ser lançada.
+let nFoto = 0
+const outraFoto = () => Buffer.from(`imagem-do-comprovante-${String(++nFoto).padStart(5, '0')}`)
+const TAMANHO_FOTO = outraFoto().length
 const base = { chat: '123@g.us', chatNome: 'Comprovantes', ehGrupo: true }
 const espera = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -101,7 +107,7 @@ function pessoa(de) {
   return {
     ditos,
     foto: async (texto) => guardar(await tratar({
-      ...base, de, arquivo: foto, nomeArquivo: 'c.jpg', tipo: 'image/jpeg',
+      ...base, de, arquivo: outraFoto(), nomeArquivo: 'c.jpg', tipo: 'image/jpeg',
       texto, idMensagem: `foto-${de}-${Math.random().toString(36).slice(2, 8)}`,
       enviarResposta,
     })),

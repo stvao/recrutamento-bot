@@ -9,9 +9,10 @@
  * data, erra a categoria — e lançar direto no custo trocaria "trabalho de
  * digitar" por "trabalho de auditar", que é pior.
  *
- * O token é restrito a criar comprovante: não lê nada, não lança conta, não
- * aprova. Gera-se em "Enviar pelo iPhone" (/m/atalho), aparece uma vez só, e
- * é revogável na mesma tela.
+ * O token é restrito: cria comprovante e gasto pendente, lista as obras e
+ * consulta o que já foi lançado (para reconhecer repetido). Não lança conta
+ * e não aprova. Gera-se em "Enviar pelo iPhone" (/m/atalho), aparece uma vez
+ * só, e é revogável na mesma tela.
  */
 const OBRAS_API_URL = process.env.OBRAS_API_URL || 'https://novagestaoobras.duckdns.org'
 const OBRAS_API_TOKEN = process.env.OBRAS_API_TOKEN || ''
@@ -244,11 +245,44 @@ export async function obrasDoSistema() {
  * O 422 é resposta esperada, não falha: quer dizer que o sistema não
  * reconheceu a obra, e vem com a lista para o robô PERGUNTAR qual é.
  */
-export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, rateio, pagoPor, idMensagem, confirmadoOutro, empresaPagou }) {
+export async function lancarGasto(dados) {
   if (!OBRAS_API_TOKEN) return { ok: false, motivo: 'nao-configurado' }
-  if (!arquivo?.byteLength) return { ok: false, motivo: 'arquivo-vazio' }
-  if (!obra || valor == null) return { ok: false, motivo: 'faltam-dados' }
+  if (!dados.arquivo?.byteLength) return { ok: false, motivo: 'arquivo-vazio' }
+  if (!dados.obra || dados.valor == null) return { ok: false, motivo: 'faltam-dados' }
 
+  const comDuplicata = !camposDeDuplicataRecusados && Boolean(dados.documento || dados.arquivoHash)
+  const r = await postarLancamento(dados, comDuplicata)
+  if (r.ok || r.status !== 400 || !comDuplicata) return r
+
+  /*
+    400 mandando `documento` e `arquivoHash`: servidor de versão anterior,
+    com validação estrita, recusando campo que ele ainda não conhece.
+
+    Os dois campos só servem para o sistema reconhecer comprovante repetido.
+    Perder essa conferência é ruim; perder o lançamento por causa dela é
+    pior — então vai de novo sem eles, como sempre foi. A mesma
+    Idempotency-Key garante que não entram dois.
+  */
+  console.warn('[obras] /lancar: 400 com documento/arquivoHash — tentando sem eles.')
+  const sem = await postarLancamento(dados, false)
+  if (sem.ok) {
+    camposDeDuplicataRecusados = true
+    console.warn('[obras] ⚠ O servidor ainda não aceita documento/arquivoHash no /lancar. Sigo lançando sem eles.')
+  }
+  return sem
+}
+
+/**
+ * O /lancar já recusou `documento` e `arquivoHash`?
+ *
+ * Mesma ideia de `extrasRecusados`: descobre na primeira tentativa, lembra
+ * daí em diante, e esquece no reinício — que é como ele percebe sozinho o dia
+ * em que o servidor passar a aceitar.
+ */
+let camposDeDuplicataRecusados = false
+
+/** Uma tentativa de lançamento. */
+async function postarLancamento({ arquivo, nomeArquivo, tipo, obra, valor, descricao, categoria, data, fornecedor, observacao, rateio, pagoPor, idMensagem, confirmadoOutro, empresaPagou, documento, arquivoHash }, comDuplicata) {
   const form = new FormData()
   form.append('arquivo', new Blob([arquivo], { type: tipo || 'application/octet-stream' }), nomeArquivo || 'comprovante')
   form.append('obra', String(obra))
@@ -264,6 +298,11 @@ export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, des
   if (pagoPor) form.append('pagoPor', pagoPor)
   if (confirmadoOutro) form.append('confirmadoOutro', 'true')
   if (empresaPagou) form.append('empresaPagou', 'true')
+  // O nº do cupom/NSU que a IA leu e a impressão digital do arquivo: é por
+  // eles que o sistema reconhece o MESMO comprovante mandado duas vezes, em
+  // vez de desconfiar de todo valor repetido.
+  if (comDuplicata && documento) form.append('documento', String(documento).trim().slice(0, 60))
+  if (comDuplicata && arquivoHash) form.append('arquivoHash', arquivoHash)
 
   try {
     const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancar`, {
@@ -279,7 +318,10 @@ export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, des
     let j = {}
     try { j = cru ? JSON.parse(cru) : {} } catch { j = {} }
 
-    if (r.ok) return { ok: true, id: j.id, obra: j.obra, obras: j.obras, rateio: j.rateio, pagoPor: j.pagoPor, mensagem: j.mensagem }
+    // `reenvio`: o sistema reconheceu o comprovante como um que já estava
+    // lançado e devolveu o existente — nada novo entrou. Não repassar isto
+    // fazia quem chama comemorar ("✅ Lançado") e anotar de novo na memória.
+    if (r.ok) return { ok: true, reenvio: j.reenvio === true, id: j.id, obra: j.obra, obras: j.obras, rateio: j.rateio, pagoPor: j.pagoPor, mensagem: j.mensagem }
 
     if (r.status === 422) {
       // Obra não reconhecida: quem chama pergunta, oferecendo as opções.
@@ -298,13 +340,69 @@ export async function lancarGasto({ arquivo, nomeArquivo, tipo, obra, valor, des
   }
 }
 
-/** Só para teste: esquece as obras guardadas. */
+/**
+ * O que já está lançado no sistema, de uma data para cá.
+ *
+ * É o que deixa o robô desconfiar de repetido olhando o SISTEMA, e não só a
+ * própria memória: o gasto que o dono lançou à mão, a conta cadastrada pelo
+ * escritório, o que entrou enquanto o robô estava fora do ar. Sem isto ele
+ * só reconhece o que passou por ele.
+ *
+ * Devolve a lista, ou null quando não dá para saber — sem token, rede fora,
+ * ou servidor de versão anterior (404: a rota ainda não existe). Null quer
+ * dizer "compare só com a memória", que é o que sempre se fez. Nunca lança.
+ *
+ * Guardada por pouco tempo. Curto de propósito: a lista muda a cada
+ * lançamento, e o que o próprio robô acabou de mandar já está na memória
+ * dele. O 404 é lembrado por mais tempo — versão antiga não muda de um
+ * minuto para o outro, e perguntar a cada comprovante seria só ruído no log.
+ */
+const VALIDADE_LANCADOS_MS = 1000 * 60 * 2
+const VALIDADE_SEM_ROTA_MS = 1000 * 60 * 30
+let cacheLancados = null   // { desde, lista, buscadoEm, validade }
+
+export async function lancadosDoSistema(desde) {
+  try {
+    if (!OBRAS_API_TOKEN || !/^\d{4}-\d{2}-\d{2}$/.test(String(desde ?? ''))) return null
+
+    if (cacheLancados && cacheLancados.desde === desde
+      && Date.now() - cacheLancados.buscadoEm < cacheLancados.validade) {
+      return cacheLancados.lista
+    }
+
+    const guardar = (lista, validade = VALIDADE_LANCADOS_MS) => {
+      cacheLancados = { desde, lista, buscadoEm: Date.now(), validade }
+      return lista
+    }
+
+    const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancados?desde=${desde}`, {
+      headers: { Authorization: `Bearer ${OBRAS_API_TOKEN}` },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (r.status === 404) return guardar(null, VALIDADE_SEM_ROTA_MS)
+    if (!r.ok) {
+      console.warn(`[obras] não consegui consultar os lançados (${r.status}) — comparo só com a minha memória.`)
+      return guardar(null)
+    }
+
+    const j = await r.json()
+    if (!Array.isArray(j?.lancados)) return guardar(null)
+    return guardar(j.lancados.filter(l => l && typeof l === 'object'))
+  } catch (e) {
+    console.warn('[obras] falha ao consultar os lançados:', e.message)
+    return null
+  }
+}
+
+/** Só para teste: esquece as obras guardadas (e os lançados consultados). */
 export function _limparCacheObras() {
   cacheObras = null
   cachePagadores = []
+  cacheLancados = null
 }
 
 /** Só para teste: esquece o que foi descoberto sobre os campos extras. */
 export function _esquecerDescoberta() {
   extrasRecusados = false
+  camposDeDuplicataRecusados = false
 }

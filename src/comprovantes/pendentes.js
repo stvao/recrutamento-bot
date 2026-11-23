@@ -20,6 +20,7 @@ import {
   readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, renameSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 
 const PASTA = process.env.GASTOS_PENDENTES_DIR
   || join(process.cwd(), 'dados', 'pendentes')
@@ -43,6 +44,25 @@ const caminhoFicha = (id) => join(PASTA, `${id}.json`)
 function idSeguro(idMensagem) {
   return String(idMensagem ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 60)
     || `p${Date.now()}${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * A impressão digital do arquivo: sha256, em hexadecimal.
+ *
+ * É o que diz, sem margem para dúvida, que dois comprovantes são O MESMO
+ * arquivo — a mesma foto encaminhada duas vezes, ou mandada por duas pessoas.
+ * Foto tirada de novo do mesmo papel dá outra impressão: aí quem decide é o
+ * número do documento e, na falta dele, a pergunta.
+ *
+ * Devolve null sem arquivo. Nunca lança.
+ */
+export function impressaoDigital(arquivo) {
+  try {
+    if (!arquivo?.byteLength) return null
+    return createHash('sha256').update(arquivo).digest('hex')
+  } catch {
+    return null
+  }
 }
 
 /** Grava a ficha. Atômico: escreve num temporário e renomeia. */
@@ -69,6 +89,10 @@ function gravarFicha(p) {
 export function guardar(p) {
   const id = p.id ?? idSeguro(p.idMensagem)
   const ficha = { ...p, id }
+
+  // Calculada aqui, enquanto o arquivo ainda está na mão: depois ele sai da
+  // memória, e reler do disco só para isto seria trabalho à toa.
+  if (!ficha.arquivoHash) ficha.arquivoHash = impressaoDigital(p.arquivo)
 
   try {
     garantirPasta()

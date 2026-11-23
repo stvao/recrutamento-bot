@@ -111,6 +111,12 @@ const resumo = await import('../src/comprovantes/resumo-diario.js')
 iniciarRonda()
 
 const foto = Buffer.from('imagem-do-comprovante')
+// Cada foto mandada é um arquivo DIFERENTE, como na vida real. Com o mesmo
+// conteúdo em todas, a segunda de cada teste seria reconhecida como o mesmo
+// arquivo da primeira e nem chegaria a ser lançada.
+let nFoto = 0
+const outraFoto = () => Buffer.from(`imagem-do-comprovante-${String(++nFoto).padStart(5, '0')}`)
+const TAMANHO_FOTO = outraFoto().length
 const base = { chat: '123@g.us', chatNome: 'Comprovantes', ehGrupo: true }
 const espera = (ms) => new Promise(r => setTimeout(r, ms))
 
@@ -142,7 +148,7 @@ function pessoa(de) {
     ditos,
     ultimoId: () => `bot-${de}-${n}`,
     foto: async (texto, id) => guardar(await tratar({
-      ...base, de, arquivo: foto, nomeArquivo: 'c.jpg', tipo: 'image/jpeg',
+      ...base, de, arquivo: outraFoto(), nomeArquivo: 'c.jpg', tipo: 'image/jpeg',
       texto, idMensagem: id ?? `foto-${de}-${Math.random().toString(36).slice(2, 8)}`,
       enviarResposta,
     })),
@@ -336,7 +342,7 @@ const enviados = () => lancados() + naCaixa()
   ok('o comprovante é relido do disco', outro.carregar() >= 1)
   const recuperado = outro.todos().find(x => x.idMensagem === 'foto-sobrevive')
   ok('com a ficha inteira', Boolean(recuperado))
-  ok('e o arquivo ainda lá', outro.arquivoDe(recuperado)?.length === foto.length)
+  ok('e o arquivo ainda lá', outro.arquivoDe(recuperado)?.length === TAMANHO_FOTO)
 }
 
 // ── 14. Comprovante repetido: PERGUNTA, não recusa ────────────────────────

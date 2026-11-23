@@ -21,19 +21,42 @@ sem aprovação humana.
 | `conversa.js` | Texto sem arquivo: resposta a uma pergunta, legenda atrasada, `pendentes`, `cancelar tudo`, `ping`. |
 | `perguntas.js` | Monta as perguntas (obra, valor, quem pagou) e lê a resposta de "quem pagou?". |
 | `processar.js` | O miolo: junta o escrito com o lido da imagem e decide — lança, pergunta ou caixa. Guarda o que está em andamento. |
+| `duplicata.js` | Decide se o comprovante já foi lançado: mesmo arquivo, mesmo documento, ou mesma obra e valor. Funções puras. |
 | `saida.js` | Lança o gasto pendente no Obras, ou manda para a caixa de comprovantes. |
 | `ronda.js` | O lembrete (uma vez, 3 h) e o prazo (24 h → caixa). Liga no arranque. |
 | `formato.js` | Como valor, data e item aparecem nas mensagens. |
 | `lancamento.js` | Lê a linha que a pessoa escreve: obra, descrição, tipo, valor, quem pagou. |
 | `ia-visao.js` | Lê a imagem do comprovante e confere o que o modelo diz ter lido. |
-| `obras-client.js` | Fala com o NovaGestão Obras (lançar, caixa, lista de obras e sócios). |
-| `memoria.js` | O que já foi lançado e os apelidos de obra aprendidos (`dados/memoria-gastos.json`). |
-| `pendentes.js` | Comprovantes esperando resposta, em disco (`dados/pendentes/`). |
+| `obras-client.js` | Fala com o NovaGestão Obras (lançar, caixa, lista de obras e sócios, consulta do que já foi lançado). |
+| `memoria.js` | O que já foi lançado (com nº do documento e impressão digital do arquivo) e os apelidos de obra aprendidos (`dados/memoria-gastos.json`). |
+| `pendentes.js` | Comprovantes esperando resposta, em disco (`dados/pendentes/`). Calcula a impressão digital (sha256) de cada arquivo. |
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
+
+## Comprovante repetido
+
+Cada comprovante é comparado com o que o robô lembra de ter lançado e com o
+que o Obras diz que está lançado (`GET /api/comprovantes/lancados`, que
+inclui o que foi digitado à mão). Gasto rejeitado não conta.
+
+| Situação | O que o robô faz |
+|---|---|
+| Mesmo arquivo (sha256 igual) de um gasto lançado | Avisa que já entrou e **não lança**. Não pergunta. |
+| Mesmo nº de documento e mesmo valor (em qualquer obra) | Pergunta "é outro ou é o mesmo?". |
+| Mesma obra e mesmo valor, documentos **diferentes** nos dois | Lança sem perguntar — são dois pagamentos. |
+| Mesma obra e mesmo valor, sem documento em algum dos lados | Pergunta, como sempre. |
+| Gasto digitado à mão no sistema (sem documento nem arquivo), mesma obra e valor | Pergunta só se a data estiver a até 3 dias do envio ou da data lida no papel. |
+
+Descartar continua exigindo a pessoa dizer *mesmo*; a única exceção é o
+arquivo idêntico. O que foi só para a **caixa** não barra: mandar de novo com
+a legenda certa é o conserto.
+
+O robô manda `documento` e `arquivoHash` no `/lancar` e na caixa. Com o
+Obras em versão anterior nada quebra: 404 na consulta = compara só com a
+memória; 400 nos campos novos = lança de novo sem eles.
 
 ## Configuração e dados
 

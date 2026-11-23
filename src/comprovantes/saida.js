@@ -84,6 +84,9 @@ export async function lancar(pendente, dados) {
     confirmadoOutro: !!pendente.duplicataConfirmada,
     // Pago direto pela empresa: não há reembolso a ninguém.
     empresaPagou: !!pendente.empresaPagou,
+    // Por onde o sistema reconhece o mesmo comprovante mandado duas vezes.
+    documento: dados.documento,
+    arquivoHash: pendente.arquivoHash,
   })
 
   if (r.ok && r.reenvio) {
@@ -99,6 +102,7 @@ export async function lancar(pendente, dados) {
       obra: r.obra, valor: dados.valor, descricao: dados.descricao,
       categoria: dados.tipo, de: pendente.de, resultado: 'lancado',
       idMensagem: pendente.idMensagem,
+      documento: dados.documento, arquivoHash: pendente.arquivoHash,
     })
     const linhas = [`✅ ${r.mensagem || 'Lançado, aguardando aprovação.'}`]
     linhas.push([
@@ -186,6 +190,7 @@ async function textoDaCaixa(pendente) {
       dataComprovante: dados.dataComprovante,
       estabelecimento: dados.estabelecimento,
       documento: dados.documento,
+      arquivoHash: pendente.arquivoHash,
       formaPagamento: dados.formaPagamento,
       confianca: dados.confianca,
     },
@@ -199,6 +204,7 @@ async function textoDaCaixa(pendente) {
       obra: dados.obra, valor: dados.valor, descricao: dados.descricao,
       categoria: dados.tipo, de: pendente.de, resultado: 'caixa',
       idMensagem: pendente.idMensagem,
+      documento: dados.documento, arquivoHash: pendente.arquivoHash,
     })
   }
 
