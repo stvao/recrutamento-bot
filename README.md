@@ -54,14 +54,8 @@ mostra quantas conversas começaram, terminaram e onde as pessoas desistem.
 | `rh-client.js` | Envia candidatura e alerta ao RH, e pergunta quem é funcionário. |
 | `triagem.js` | O primeiro contato de quem o sistema não conhece. Não presume nada. |
 | `funcionario.js` | Atende quem já trabalha aqui — **sem dado pessoal e sem link**. |
-| `memoria.js` | O que já foi lançado e os apelidos de obra que você usa. |
-| `resumo-diario.js` | O fechamento do dia no grupo dos comprovantes. |
-| `pendentes.js` | Comprovantes esperando resposta, em disco. |
+| `comprovantes/` | O módulo de comprovantes (gastos), na pasta dele. O resto do robô só importa `comprovantes/index.js`. Ver [src/comprovantes/README.md](src/comprovantes/README.md). |
 | `telegram.js` | Conexão com o Telegram (long polling — sem webhook nem domínio). |
-| `gastos.js` | O módulo de comprovantes: quem pode lançar, e o que vira envio. |
-| `ia-visao.js` | Lê o comprovante e **confere** o que o modelo diz ter lido. |
-| `obras-client.js` | Envia o comprovante ao sistema de obras. |
-| `lancamento.js` | Lê a linha que você escreve: obra, descrição, tipo, valor. |
 
 A regra que organiza tudo: **o modelo decide o que dizer; o código é dono dos
 fatos e do que fica gravado.** Salário e alojamento entram prontos, vindos do

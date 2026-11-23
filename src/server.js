@@ -40,7 +40,7 @@ import * as resumoRecrutamento from './resumo-recrutamento.js'
 import { lerDocumentoCandidato, MAX_DOCUMENTO_BYTES } from './ia-documento.js'
 import * as funcionario from './funcionario.js'
 import * as triagem from './triagem.js'
-import * as gastos from './gastos.js'
+import * as gastos from './comprovantes/index.js'
 import * as limite from './limite.js'
 import { decidir as quemAtender, ehCobranca } from './quem-atender.js'
 import * as maoHumana from './mao-humana.js'
@@ -1116,7 +1116,7 @@ gastos.iniciarRonda()
 
 // Fechamento do dia no grupo dos comprovantes. Desligado por padrão — uma
 // mensagem automática diária é decisão de quem usa, não do código.
-const { agendar: agendarResumo } = await import('./resumo-diario.js')
+const { agendarResumo } = gastos
 agendarResumo()
 
 /*

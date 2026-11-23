@@ -15,8 +15,8 @@ process.env.GASTOS_GRUPOS = '120363000000000000@g.us'
 process.env.OBRAS_API_TOKEN = 'token-de-teste'
 process.env.GASTOS_ESPERA_DESCRICAO_MS = '50'
 
-const { autorizado, origemAceita, montarTexto, tratar, _limparPendentes } = await import('../src/gastos.js')
-const { conferir, CATEGORIAS } = await import('../src/ia-visao.js')
+const { autorizado, origemAceita, montarTexto, tratar, _limparPendentes } = await import('../src/comprovantes/index.js')
+const { conferir, CATEGORIAS } = await import('../src/comprovantes/ia-visao.js')
 const { parseWebhook } = await import('../src/connectors.js')
 
 let falhas = 0
@@ -151,7 +151,7 @@ ok('webhook de texto segue sem mídia', soTexto?.texto === 'quero a vaga' && soT
 // Ninguém sabe de cabeça que o grupo é "120363...@g.us", mas todo mundo sabe
 // que ele se chama "Comprovantes".
 {
-  const mod = await import('../src/gastos.js?porNome=1')
+  const mod = await import('../src/comprovantes/index.js?porNome=1')
   // (mesma configuração do topo do arquivo — o módulo já está carregado)
   ok('grupo pelo identificador continua valendo', mod.origemAceita('120363000000000000@g.us'))
 }
@@ -168,7 +168,7 @@ function comAmbiente(env, script) {
 
 const porNome = comAmbiente(
   { GASTOS_GRUPOS: 'Comprovantes', GASTOS_AUTORIZADOS: '5511999998888', OBRAS_API_TOKEN: 'x' },
-  `const g = await import('./src/gastos.js')
+  `const g = await import('./src/comprovantes/index.js')
    console.log(JSON.stringify({
      nomeExato: g.origemAceita('123@g.us', 'Comprovantes'),
      semAcentoNemCaixa: g.origemAceita('123@g.us', 'COMPROVANTES'),
@@ -186,7 +186,7 @@ ok('sem nome e sem id certo, NÃO passa', !n.semNome)
 // identificado pelo IDENTIFICADOR, nunca pelo nome.
 const coringa = comAmbiente(
   { GASTOS_GRUPOS: '120363000000000000@g.us', GASTOS_AUTORIZADOS: '*', OBRAS_API_TOKEN: 'x' },
-  `const g = await import('./src/gastos.js')
+  `const g = await import('./src/comprovantes/index.js')
    const grupo = { chat: '120363000000000000@g.us', chatNome: 'Comprovantes', ehGrupo: true }
    console.log(JSON.stringify({
      ativo: g.gastosAtivo(),
@@ -209,7 +209,7 @@ ok('mas NÃO no privado', !c2.doPrivado)
 // financeiro da empresa.
 const ataque = comAmbiente(
   { GASTOS_GRUPOS: 'Comprovantes', GASTOS_AUTORIZADOS: '*', OBRAS_API_TOKEN: 'x' },
-  `const g = await import('./src/gastos.js')
+  `const g = await import('./src/comprovantes/index.js')
    console.log(JSON.stringify({
      soComNome: g.coringaSoComNome(),
      ativo: g.gastosAtivo(),
@@ -232,7 +232,7 @@ ok('e o módulo fica INATIVO, para o dono ver o aviso', !a2.ativo)
 // nome não é a credencial, é só um filtro de onde o robô escuta.
 const nomeComLista = comAmbiente(
   { GASTOS_GRUPOS: 'Comprovantes', GASTOS_AUTORIZADOS: '5511999998888', OBRAS_API_TOKEN: 'x' },
-  `const g = await import('./src/gastos.js')
+  `const g = await import('./src/comprovantes/index.js')
    console.log(JSON.stringify({
      ativo: g.gastosAtivo(),
      daLista: g.podeLancarGasto({ de: '5511999998888', chat: '123@g.us', chatNome: 'Comprovantes', ehGrupo: true }),
@@ -247,7 +247,7 @@ ok('e o estranho do mesmo grupo continua barrado', !nl.estranho)
 // e aí qualquer um que descobrisse o número lançaria no financeiro.
 const perigo = comAmbiente(
   { GASTOS_GRUPOS: '', GASTOS_AUTORIZADOS: '*', OBRAS_API_TOKEN: 'x' },
-  `const g = await import('./src/gastos.js')
+  `const g = await import('./src/comprovantes/index.js')
    console.log(JSON.stringify({
      ativo: g.gastosAtivo(),
      invalido: g.coringaInvalido(),
@@ -278,7 +278,7 @@ ok('não autorizado não recebe nem o ping', (await tratar({ ...noGrupo, de: '55
 // Era UTC: o recibo mandado depois das 21h entrava no dia seguinte — e, no
 // último dia do mês, no mês seguinte.
 {
-  const { diaDoEnvio } = await import('../src/gastos.js')
+  const { diaDoEnvio } = await import('../src/comprovantes/index.js')
   ok('22h de 30/09 em Brasília é 30/09', diaDoEnvio('2026-10-01T01:00:00.000Z') === '2026-09-30')
   ok('10h de 01/10 em Brasília é 01/10', diaDoEnvio('2026-10-01T13:00:00.000Z') === '2026-10-01')
 }

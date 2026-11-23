@@ -13,7 +13,7 @@
  * O documento é opcional para o candidato (regra do dono, 13/09/2026): quem
  * não quiser mandar segue a candidatura normalmente.
  */
-import { modelosDeVisao } from './ia-visao.js'
+import { modelosDeVisao } from './comprovantes/ia-visao.js'
 
 const CHAVE = process.env.GEMINI_API_KEY || ''
 const PRAZO_MS = Number(process.env.IA_DOCUMENTO_PRAZO_MS || 30000)

@@ -12,7 +12,7 @@
  */
 import * as memoria from './memoria.js'
 import * as pendentes from './pendentes.js'
-import { enviarMensagem } from './connectors.js'
+import { enviarMensagem } from '../connectors.js'
 
 /**
  * A que horas o dia "fecha". Formato 24h, hora local.

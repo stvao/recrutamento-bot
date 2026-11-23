@@ -32,7 +32,7 @@
  * haia". Por isso vale também o APELIDO: uma palavra que só exista naquela
  * obra a identifica sozinha. Ver apelidosDe().
  */
-import { norm, melhorMatch, distancia } from './texto.js'
+import { norm, melhorMatch, distancia } from '../texto.js'
 import { CATEGORIAS } from './ia-visao.js'
 
 /**

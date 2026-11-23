@@ -21,9 +21,10 @@ function ok(nome, condicao) {
   else { falhas++; console.log(`FALHOU ${nome}`) }
 }
 
-// O código mora em src/; os testes, aqui. Os dois são conferidos.
+// O código mora em src/ (e o módulo de comprovantes, na pasta dele); os
+// testes, aqui. Todos são conferidos.
 const AQUI = dirname(fileURLToPath(import.meta.url))
-const PASTAS = [join(AQUI, '..', 'src'), AQUI]
+const PASTAS = [join(AQUI, '..', 'src'), join(AQUI, '..', 'src', 'comprovantes'), AQUI]
 
 // Tudo abaixo do espaço, menos tabulação, quebra de linha e retorno de carro.
 const INVISIVEL = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/

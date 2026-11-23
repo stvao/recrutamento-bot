@@ -23,7 +23,7 @@
  */
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { norm } from './texto.js'
+import { norm } from '../texto.js'
 
 const ARQUIVO = process.env.GASTOS_MEMORIA
   || join(process.cwd(), 'dados', 'memoria-gastos.json')

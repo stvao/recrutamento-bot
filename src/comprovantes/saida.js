@@ -1,0 +1,224 @@
+/**
+ * Comprovantes — para onde o comprovante vai: LANÇADO como gasto pendente no
+ * sistema de obras, ou mandado para a CAIXA de comprovantes quando não dá.
+ *
+ * Parte do módulo de comprovantes (ver `entrada.js` para a visão geral).
+ */
+import { enviarComprovante, lancarGasto } from './obras-client.js'
+import { perguntar } from './perguntas.js'
+import { moeda, dataCurta } from './formato.js'
+import * as pendentes from './pendentes.js'
+import * as memoria from './memoria.js'
+
+/**
+ * O resumo que vai no campo `texto` do comprovante.
+ *
+ * Usado só no caminho da CAIXA — quando não deu para lançar. É por esta
+ * linha que a pessoa confere sem abrir a foto, então ela sai na ordem em que
+ * se lê um lançamento: obra, o que foi, tipo, quanto.
+ */
+export function montarTexto(dados, observacao) {
+  const linhas = []
+
+  const cabeca = [
+    dados?.obra,
+    dados?.descricao,
+    dados?.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
+    moeda(dados?.valor),
+  ].filter(Boolean)
+  if (cabeca.length) linhas.push(cabeca.join(' · '))
+
+  const detalhe = [
+    dados?.estabelecimento && dados.estabelecimento !== dados.descricao ? dados.estabelecimento : null,
+    dados?.formaPagamento,
+    dados?.documento ? `doc ${dados.documento}` : null,
+    dados?.dataComprovante ? `comprovante de ${dataCurta(dados.dataComprovante)}` : null,
+  ].filter(Boolean)
+  if (detalhe.length) linhas.push(detalhe.join(' · '))
+
+  if (observacao) linhas.push(`⚠ ${observacao}`)
+
+  // Só avisa quando o valor veio de máquina. Valor digitado por gente não
+  // precisa de aviso — e encher de alerta o que está certo faz a pessoa
+  // parar de ler os alertas.
+  if (dados?.valor != null && !dados.valorDigitado) {
+    linhas.push('(valor lido da imagem, não digitado — confira)')
+  }
+  if (dados?.valor == null) linhas.push('(sem valor — precisa digitar)')
+
+  return linhas.join('\n') || 'Comprovante enviado pelo WhatsApp.'
+}
+
+/**
+ * O dia em que o comprovante foi mandado, em Brasília.
+ *
+ * Era toISOString(), que é UTC: o recibo da janta, do hotel ou do
+ * combustível mandado depois das 21h entrava com a data do dia seguinte — e
+ * no último dia do mês, no mês seguinte.
+ */
+export function diaDoEnvio(enviadoEm) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' })
+    .format(new Date(enviadoEm ?? Date.now()))
+}
+
+/** Lança como gasto da equipe, pendente de aprovação. */
+export async function lancar(pendente, dados) {
+  const data = diaDoEnvio(pendente.enviadoEm)
+
+  const r = await lancarGasto({
+    arquivo: pendentes.arquivoDe(pendente),
+    nomeArquivo: pendente.nomeArquivo,
+    tipo: pendente.tipo,
+    obra: dados.obra,
+    valor: dados.valor,
+    descricao: dados.descricao || dados.estabelecimento || 'Comprovante enviado pelo WhatsApp',
+    categoria: dados.tipo,
+    data,
+    fornecedor: dados.estabelecimento,
+    observacao: dados.valorDigitado ? null : 'Valor lido da imagem pelo robô — confira.',
+    rateio: dados.rateio,
+    pagoPor: dados.pagoPor,
+    idMensagem: pendente.idMensagem,
+    // A pessoa disse "é outro". Sem avisar o sistema, a trava de reenvio de
+    // lá engolia este segundo gasto como se fosse o primeiro de novo.
+    confirmadoOutro: !!pendente.duplicataConfirmada,
+    // Pago direto pela empresa: não há reembolso a ninguém.
+    empresaPagou: !!pendente.empresaPagou,
+  })
+
+  if (r.ok && r.reenvio) {
+    // O sistema reconheceu como o MESMO gasto já lançado: não entrou nada
+    // novo. Anotar de novo somava o valor duas vezes no resumo do dia.
+    console.log(`[gastos] ${pendente.de} → reenvio, o sistema devolveu o gasto já lançado`)
+    return { perguntando: false, texto: `ℹ️ ${r.mensagem || 'Esse comprovante já tinha sido lançado.'}` }
+  }
+
+  if (r.ok) {
+    console.log(`[gastos] ${pendente.de} → LANÇADO em ${r.obra} (${moeda(dados.valor)})`)
+    memoria.anotarLancamento({
+      obra: r.obra, valor: dados.valor, descricao: dados.descricao,
+      categoria: dados.tipo, de: pendente.de, resultado: 'lancado',
+      idMensagem: pendente.idMensagem,
+    })
+    const linhas = [`✅ ${r.mensagem || 'Lançado, aguardando aprovação.'}`]
+    linhas.push([
+      r.rateio?.length > 1 ? null : r.obra,
+      dados.descricao,
+      dados.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
+      moeda(dados.valor),
+    ].filter(Boolean).join(' · '))
+
+    // Rateado: mostra quanto foi para cada obra. É o que a pessoa precisa
+    // conferir — o total ela já sabe, está no comprovante na mão dela.
+    if (r.rateio?.length > 1) {
+      for (const parte of r.rateio) linhas.push(`  · ${parte.obra}: ${moeda(parte.valor)}`)
+    }
+
+    // Quem bancou entra na confirmação: é a informação que some mais fácil,
+    // e quem mandou a foto precisa ver que ela foi entendida.
+    if (r.pagoPor) {
+      linhas.push(`  pago por ${r.pagoPor}`)
+    } else if (dados.pagoPor) {
+      // Nome escrito que o sistema não reconheceu. O gasto entrou — recusar
+      // o comprovante por causa de um nome seria trocar uma informação a
+      // menos por um comprovante a menos —, mas quem mandou precisa saber.
+      linhas.push(`⚠ Não achei "${dados.pagoPor}" no sistema — lancei sem o pagador.`)
+    }
+
+    if (!dados.valorDigitado) linhas.push('⚠ Esse valor eu li da imagem. Confere ao aprovar.')
+
+    // Dizer que aprendeu não é enfeite: é o que faz a pessoa confiar em
+    // escrever daquele jeito de novo, em vez de achar que deu sorte.
+    if (pendente.apelidoAprendido) {
+      linhas.push(`_(anotei que "${pendente.apelidoAprendido}" é essa obra — da próxima vez já sei)_`)
+    }
+
+    return { perguntando: false, texto: linhas.join('\n') }
+  }
+
+  // A obra não foi reconhecida pelo SISTEMA (não pela nossa lista): pergunta
+  // de novo com os nomes que ele mesmo devolveu, que são os certos.
+  if (r.obraNaoAchada && !pendente.jaPerguntouObra) {
+    pendente.jaPerguntouObra = true
+    pendente.jaPerguntou = false
+    // O que a pessoa escreveu COMO obra e o sistema não reconheceu. É daqui
+    // que se aprende o apelido quando ela apontar a obra — e não da descrição
+    // da compra, que é o que sobrava depois de zerar a obra.
+    if (dados.obra) pendente.obraEscrita = String(dados.obra)
+    pendente.dados = { ...dados, obra: null }
+    return { perguntando: true, texto: perguntar(pendente, ['obra'], r.obras ?? []) }
+  }
+
+  if (r.semRota) console.warn('[gastos] servidor ainda sem /lancar — mandando para a caixa.')
+  else console.warn('[gastos] lançamento falhou:', r.motivo ?? r.status)
+
+  const cx = await paraCaixa(pendente)
+  return { perguntando: false, texto: cx.texto, caixaRecusou: !cx.ok }
+}
+
+/**
+ * Manda para a caixa — o caminho de quando não dá para lançar.
+ *
+ * Devolve { ok, texto }. Quem chama só tira o comprovante da espera com
+ * ok: antes ele era apagado mesmo quando a caixa recusava (Obras fora do ar,
+ * token revogado, limite de envios) — e não ficava em lugar nenhum.
+ */
+export async function paraCaixa(pendente) {
+  const texto = await textoDaCaixa(pendente)
+  const ok = !pendente.caixaRecusouEm
+  return { ok, texto }
+}
+
+async function textoDaCaixa(pendente) {
+  const dados = pendente.dados ?? {}
+  const envio = await enviarComprovante({
+    arquivo: pendentes.arquivoDe(pendente),
+    nomeArquivo: pendente.nomeArquivo,
+    tipo: pendente.tipo,
+    texto: montarTexto(dados, pendente.lido?.observacao),
+    idMensagem: pendente.idMensagem,
+    extras: {
+      obra: dados.obra,
+      descricao: dados.descricao,
+      categoria: dados.tipo,
+      valor: dados.valor,
+      data: diaDoEnvio(pendente.enviadoEm),
+      dataComprovante: dados.dataComprovante,
+      estabelecimento: dados.estabelecimento,
+      documento: dados.documento,
+      formaPagamento: dados.formaPagamento,
+      confianca: dados.confianca,
+    },
+  })
+
+  console.log(`[gastos] ${pendente.de} → caixa: ${envio.ok ? 'ok' : envio.motivo}`)
+  if (envio.ok) delete pendente.caixaRecusouEm
+  else pendente.caixaRecusouEm = Date.now()
+  if (envio.ok) {
+    memoria.anotarLancamento({
+      obra: dados.obra, valor: dados.valor, descricao: dados.descricao,
+      categoria: dados.tipo, de: pendente.de, resultado: 'caixa',
+      idMensagem: pendente.idMensagem,
+    })
+  }
+
+  if (!envio.ok) {
+    if (envio.status === 401) return '❌ Meu acesso ao sistema de obras foi recusado (token inválido ou revogado). Avisa quem cuida do sistema.'
+    if (envio.status === 429) return '⏳ Muitos envios de uma vez. Manda esse de novo daqui a um minuto, por favor.'
+    if (envio.motivo === 'grande-demais') return '❌ O arquivo passou de 20 MB. Manda a foto em vez do PDF, ou tira outra foto.'
+    if (envio.status === 400) return `❌ O sistema de obras não aceitou esse arquivo (${envio.motivo}).`
+    return '❌ Não consegui falar com o sistema de obras agora. Manda de novo daqui a pouco — não vai duplicar.'
+  }
+
+  const linhas = [`📥 ${envio.mensagem || 'Comprovante recebido.'}`]
+  const resumo = [
+    dados.obra, dados.descricao,
+    dados.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
+    moeda(dados.valor),
+  ].filter(Boolean)
+  if (resumo.length) linhas.push(resumo.join(' · '))
+
+  const falta = [!dados.obra && 'a obra', dados.valor == null && 'o valor'].filter(Boolean)
+  if (falta.length) linhas.push(`Faltou ${falta.join(' e ')} — completa em /m/gasto, na caixa.`)
+  return linhas.join('\n')
+}
