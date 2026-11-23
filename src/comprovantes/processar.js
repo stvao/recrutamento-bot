@@ -8,7 +8,7 @@ import { lerComprovante } from './ia-visao.js'
 import { obrasDoSistema, pagadoresConhecidos, lancadosDoSistema } from './obras-client.js'
 import { enviarMensagem } from '../connectors.js'
 import { interpretar, combinar, acharValor } from './lancamento.js'
-import { perguntar, perguntarPagador } from './perguntas.js'
+import { perguntar, perguntarPagador, perguntarValorLido } from './perguntas.js'
 import { lancar, paraCaixa, diaDoEnvio, dataDoGasto } from './saida.js'
 import { mesmoArquivo, parecido, avisoDeMesmoArquivo, perguntaDeRepetido } from './duplicata.js'
 import * as pendentes from './pendentes.js'
@@ -229,6 +229,17 @@ async function processar(pendente) {
   // Idem para o sócio apontado na resposta à pergunta "quem pagou?".
   if (pendente.pagadorEscolhido) dados.pagoPor = pendente.pagadorEscolhido
 
+  // A pessoa confirmou o valor lido ("sim"): passa a valer como digitado —
+  // sai o aviso de "confira", e a pergunta não se repete. Só enquanto o
+  // valor for AQUELE: se uma resposta posterior trouxer outro número, é o
+  // número novo que vale, e ele já é digitado por conta própria.
+  if (dados.valorDaImagem && pendente.valorConfirmado != null
+    && Math.abs(dados.valor - pendente.valorConfirmado) < 0.005) {
+    dados.valorDaImagem = false
+    dados.valorDigitado = true
+    dados.confianca = 'digitado'
+  }
+
   pendente.dados = dados
 
   const falta = []
@@ -241,6 +252,26 @@ async function processar(pendente) {
   if (falta.length) {
     const cx = await paraCaixa(pendente)
     return { perguntando: false, texto: cx.texto, caixaRecusou: !cx.ok }
+  }
+
+  /*
+    O valor veio só da imagem, e a leitura não é de confiança alta: confirma
+    antes de lançar.
+
+    Depois da obra — sem ela o comprovante nem pode entrar, e perguntar as
+    duas coisas juntas faz a pessoa responder uma e esquecer a outra — e
+    antes de "quem pagou" e da suspeita de repetido, que dependem de o valor
+    estar certo. Quando falta o valor INTEIRO a pergunta já foi feita acima
+    ("qual foi o valor?"), e a resposta dela é digitada: não há segunda
+    pergunta.
+
+    Sem resposta, a ronda cuida como dos outros: um lembrete e, no prazo, a
+    caixa — com o valor lido indo como sugestão para quem completar à mão.
+  */
+  if (dados.valorDaImagem && dados.confiancaLeitura !== 'alta') {
+    pendente.esperandoValor = true
+    pendente.jaPerguntou = true
+    return { perguntando: true, texto: perguntarValorLido(pendente, dados) }
   }
 
   /*

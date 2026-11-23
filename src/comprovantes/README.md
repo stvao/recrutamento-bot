@@ -19,7 +19,7 @@ sem aprovação humana.
 | `entrada.js` | `tratar(msg)`: recebe a mensagem, guarda o comprovante e decide o caminho. Tem a visão geral do módulo no cabeçalho e o diagnóstico (`situacao`). |
 | `autorizacao.js` | Quem pode lançar e de onde a mensagem pode vir (`GASTOS_AUTORIZADOS`, `GASTOS_GRUPOS`, o coringa `*`). É segurança. |
 | `conversa.js` | Texto sem arquivo: resposta a uma pergunta, legenda atrasada, `pendentes`, `cancelar tudo`, `ping`. |
-| `perguntas.js` | Monta as perguntas (obra, valor, quem pagou) e lê a resposta de "quem pagou?". |
+| `perguntas.js` | Monta as perguntas (obra, valor, confirmação do valor lido, quem pagou) e lê a resposta de "quem pagou?". |
 | `processar.js` | O miolo: junta o escrito com o lido da imagem e decide — lança, pergunta ou caixa. Guarda o que está em andamento. |
 | `duplicata.js` | Decide se o comprovante já foi lançado: mesmo arquivo, mesmo documento, ou mesma obra e valor. Funções puras. |
 | `saida.js` | Lança o gasto pendente no Obras, ou manda para a caixa de comprovantes. |
@@ -33,7 +33,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Comprovante repetido
@@ -57,6 +57,24 @@ a legenda certa é o conserto.
 O robô manda `documento` e `arquivoHash` no `/lancar` e na caixa. Com o
 Obras em versão anterior nada quebra: 404 na consulta = compara só com a
 memória; 400 nos campos novos = lança de novo sem eles.
+
+## Valor lido da imagem
+
+Valor que a pessoa digitou entra direto. Valor que veio **só da imagem**
+depende da confiança da leitura:
+
+| Confiança | O que o robô faz |
+|---|---|
+| alta | Lança, com o aviso "esse valor eu li da imagem, confere ao aprovar". |
+| média ou baixa | Pergunta antes: "Li R$ X no comprovante. Confirma? Responde *sim* ou manda o valor certo." |
+
+*sim*, *isso*, *confirma*, *ok* confirmam, e o valor passa a contar como
+digitado. Um número na resposta substitui o lido. *não*, sozinho, faz a
+pergunta voltar. Sem resposta vale a ronda: um lembrete e, no prazo, a
+caixa — com o valor lido como sugestão.
+
+A ordem das perguntas é: obra e valor (o que falta) → confirmação do valor
+lido → quem pagou → repetido.
 
 ## Com que data o gasto entra
 

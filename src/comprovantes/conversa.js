@@ -7,7 +7,7 @@
 import { visaoDisponivel } from './ia-visao.js'
 import { obrasConfigurado } from './obras-client.js'
 import { ehVocabularioConhecido } from './lancamento.js'
-import { lerRespostaDePagador } from './perguntas.js'
+import { lerRespostaDePagador, CONFIRMA_VALOR, NEGA_VALOR } from './perguntas.js'
 import { processarUmaVez, entregar, timersLegenda } from './processar.js'
 import { paraCaixa } from './saida.js'
 import { apelidoDoItem, faz } from './formato.js'
@@ -157,6 +157,30 @@ function aplicarResposta(p, texto) {
   if (/^\d{1,2}$/.test(so) && p.opcoesPendentes?.length) {
     const dito = escolherPeloNumero(p.opcoesPendentes, so)
     if (dito) return dito
+  }
+
+  /*
+    Resposta a "Li R$ X no comprovante. Confirma?".
+
+    Tratada ANTES da lista de obras: a resposta aqui é um número, e "3" tem
+    de ser R$ 3,00, não "a obra 3".
+
+    "sim" confirma o valor lido, que passa a valer como digitado. Um número
+    entra como resposta comum e, sendo o que a pessoa escreveu, ganha da
+    imagem. "não", sozinho, não informa nada: o robô pergunta de novo, e a
+    palavra não vai parar na descrição do gasto.
+  */
+  if (p.esperandoValor) {
+    p.esperandoValor = false
+    if (CONFIRMA_VALOR.test(texto)) {
+      if (p.dados?.valor != null) p.valorConfirmado = p.dados.valor
+    } else if (!NEGA_VALOR.test(texto)) {
+      p.respostas.push(texto.trim())
+    }
+    p.jaPerguntou = false
+    p.perguntadoEm = null
+    pendentes.atualizar(p)
+    return processarUmaVez(p)
   }
 
   /*

@@ -758,6 +758,10 @@ export function combinar(escrito, lido) {
     // De onde veio cada coisa, para a caixa de aprovação poder mostrar o que
     // foi digitado e o que foi chutado por máquina.
     valorDigitado: escrito?.valor != null && !incerto,
+    // O valor veio SÓ da imagem — a pessoa não escreveu número nenhum. É o
+    // caso em que uma leitura insegura precisa ser confirmada antes de virar
+    // lançamento (ver processar.js).
+    valorDaImagem: escrito?.valor == null && lido?.valor != null,
     // A data que a pessoa ESCREVEU ("dia 30/10"). Ganha de tudo.
     dataEscrita: escrito?.data ?? null,
     // A data que a IA leu no papel. Vale para o lançamento quando a leitura

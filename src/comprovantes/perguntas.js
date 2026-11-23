@@ -38,6 +38,48 @@ export function perguntarPagador(pendente, dados, socios) {
   return linhas.join('\n')
 }
 
+/**
+ * "Li R$ X no comprovante. Confirma?" — quando o valor veio só da imagem e a
+ * leitura não é de confiança alta.
+ *
+ * Antes esse valor era lançado direto, com um aviso para conferir na
+ * aprovação. Só que quem aprova vê dezenas de gastos e o aviso vira
+ * paisagem: 1.500 lido onde era 1.800 passava, e só aparecia no fechamento
+ * do mês. Quem mandou a foto tem o papel na mão — é a pessoa certa para
+ * conferir, e a hora certa é agora.
+ *
+ * A lista de obras numerada é apagada aqui: a resposta a esta pergunta é um
+ * número, e com a lista guardada um "3" (um café de R$ 3) trocaria a obra
+ * que já estava certa.
+ */
+export function perguntarValorLido(pendente, dados) {
+  const linhas = []
+
+  const sabido = [
+    dados.obra, dados.descricao,
+    dados.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null,
+  ].filter(Boolean)
+  if (sabido.length) linhas.push(`Anotei: ${sabido.join(' · ')}`)
+
+  const pergunta = `Li *${moeda(dados.valor)}* no comprovante. Confirma? Responde *sim* ou manda o valor certo.`
+  pendente.ultimaPergunta = pergunta
+  pendente.opcoes = null
+  linhas.push(pergunta)
+  return linhas.join('\n')
+}
+
+/** "é isso mesmo" — as formas de confirmar o valor lido. */
+export const CONFIRMA_VALOR = /^\s*(sim|s|isso|isso mesmo|[eé] isso|[eé] isso mesmo|confirma|confirmo|confirmado|ok|okay|certo|correto|t[aá] certo|est[aá] certo|exato|exatamente|👍)\s*[!.]*\s*$/i
+
+/**
+ * "não é esse" — sem dizer qual é.
+ *
+ * Separado do resto porque esta resposta não é informação sobre o gasto:
+ * guardada junto com a legenda, "não" iria parar na descrição do lançamento.
+ * O robô só pergunta de novo.
+ */
+export const NEGA_VALOR = /^\s*(n|n[aã]o|errado|t[aá] errado|est[aá] errado|n[aã]o [eé] isso|n[aã]o [eé] esse|incorreto)\s*[!.]*\s*$/i
+
 /** "não foi sócio nenhum" — as formas de dizer isso. */
 const PULAR_PAGADOR = /^\s*(pular|pula|nenhum|ningu[eé]m|n[aã]o sei|nao sei|sei l[aá]|-)\s*[?!.]*\s*$/i
 
