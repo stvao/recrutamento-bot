@@ -44,7 +44,10 @@ import { moeda } from './formato.js'
 const DIAS_PERTO = 3
 
 /**
- * O número do documento, do jeito que dá para comparar.
+ * O número do documento, do jeito que dá para comparar — e é NESTA forma que
+ * ele é mandado ao sistema de obras e guardado na memória. O sistema não
+ * normaliza nada: compara exatamente o que recebeu. Então a forma tem de ser
+ * decidida num lugar só, e é aqui.
  *
  * A IA lê o mesmo cupom como "000.123-4" numa foto e "1234" na outra. Fica
  * só letra e número, sem zero à esquerda.

@@ -72,7 +72,7 @@ const srv = createServer((req, res) => {
       }) }] } }] })
     }
 
-    chamadas.push({ url: req.url, corpo })
+    chamadas.push({ url: req.url, corpo, chave: req.headers['idempotency-key'] ?? null })
     const campo = (n) => new RegExp(`name="${n}"\r?\n\r?\n([^\r]*)`).exec(corpo)?.[1] ?? null
 
     if (req.url.endsWith('/comprovantes/obras')) return json(200, { obras: OBRAS })
@@ -88,7 +88,8 @@ const srv = createServer((req, res) => {
       }
       const obra = campo('obra')
       if (respondeReenvio) {
-        return json(200, { ok: true, reenvio: true, id: 'g-antigo', obra, mensagem: 'Esse comprovante já estava lançado.' })
+        // Como o servidor responde a token que não é de sócio: sem id nem obra.
+        return json(200, { ok: true, reenvio: true, motivo: 'arquivo', mensagem: 'Esse comprovante já estava lançado.' })
       }
       return json(201, { ok: true, id: 'g1', obra, obras: [obra], mensagem: `Lançado em ${obra}, aguardando sua aprovação.` })
     }
@@ -162,10 +163,47 @@ const campoDe = (corpo, n) => new RegExp(`name="${n}"\r?\n\r?\n([^\r]*)`).exec(c
   const arq = cupom('NSU-000123')
   await p.foto('haia cimento 250', arq)
   ok('lança', lancs().length === 1)
-  ok('manda o nº do documento', campoDe(lancs()[0].corpo, 'documento') === 'NSU-000123')
+  ok('manda o nº do documento numa forma só (sem pontuação nem zero à esquerda)', campoDe(lancs()[0].corpo, 'documento') === 'NSU000123')
   ok('manda a impressão digital do arquivo', campoDe(lancs()[0].corpo, 'arquivoHash') === sha(arq))
   const anotado = memoria.lancadosRecentes()[0]
-  ok('a memória guarda os dois', anotado?.documento === 'NSU-000123' && anotado?.arquivoHash === sha(arq))
+  ok('a memória guarda os dois, o documento na mesma forma', anotado?.documento === 'NSU000123' && anotado?.arquivoHash === sha(arq))
+}
+
+// A mesma nota lida de dois jeitos chega ao sistema igual — ele compara letra
+// por letra, e "000123" e "123" seriam dois documentos.
+{
+  const p = pessoa('5511900000130')
+  await p.foto('haia cimento 250', cupom('000.123-4'))
+  await p.foto('tsuya areia 90', cupom(' 1234 '))
+  ok('"000.123-4" e "1234" vão como o mesmo documento',
+    campoDe(lancs()[0].corpo, 'documento') === '1234' && campoDe(lancs()[1].corpo, 'documento') === '1234')
+}
+// Documento curto demais não identifica nada: não vai, para o sistema não
+// tomar dois cupons "02" de mesmo valor por um só.
+{
+  const p = pessoa('5511900000131')
+  await p.foto('haia cimento 250', cupom('02'))
+  ok('documento curto demais não é mandado', lancs().length === 1 && campoDe(lancs()[0].corpo, 'documento') === null)
+}
+// A chave de idempotência é a da mensagem — inclusive na segunda tentativa.
+{
+  const p = pessoa('5511900000132')
+  recusaCamposNovos = true
+  await p.foto('haia cimento 250', cupom('606060'))
+  ok('duas tentativas com a MESMA Idempotency-Key',
+    lancs().length === 2 && lancs()[0].chave && lancs()[0].chave === lancs()[1].chave)
+  ok('e é o id da mensagem', /^foto-5511900000132-/.test(lancs()[0].chave))
+}
+{
+  const p = pessoa('5511900000133')
+  await p.foto('haia cimento 250', cupom('707070'))
+  await p.foto('haia cimento 250', cupom('707070'))
+  await espera(20)
+  await p.diz('outro')
+  await espera(20)
+  ok('o "outro" (confirmadoOutro) vai com a chave do SEU comprovante, diferente do primeiro',
+    lancs().length === 2 && lancs()[1].chave && lancs()[1].chave !== lancs()[0].chave
+    && campoDe(lancs()[1].corpo, 'confirmadoOutro') === 'true')
 }
 
 // A caixa também recebe a impressão digital.
@@ -384,7 +422,7 @@ const campoDe = (corpo, n) => new RegExp(`name="${n}"\r?\n\r?\n([^\r]*)`).exec(c
   const p = pessoa('5511900000123')
   respondeReenvio = true
   const r = await p.foto('haia cimento 250', cupom('500001'))
-  ok('responde que já estava lançado', /já estava lançado/i.test(r ?? '') && !/✅/.test(r ?? ''))
+  ok('reenvio sem id nem obra não quebra: responde que já estava lançado', /já estava lançado/i.test(r ?? '') && !/✅/.test(r ?? ''))
   ok('e não anota na memória', memoria.lancadosRecentes().length === 0)
 }
 

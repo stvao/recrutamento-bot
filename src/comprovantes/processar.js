@@ -10,7 +10,7 @@ import { enviarMensagem } from '../connectors.js'
 import { interpretar, combinar, acharValor } from './lancamento.js'
 import { perguntar, perguntarPagador, perguntarValorLido } from './perguntas.js'
 import { lancar, paraCaixa, diaDoEnvio, dataDoGasto } from './saida.js'
-import { mesmoArquivo, parecido, avisoDeMesmoArquivo, perguntaDeRepetido } from './duplicata.js'
+import { mesmoArquivo, parecido, avisoDeMesmoArquivo, perguntaDeRepetido, documentoComparavel } from './duplicata.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 
@@ -228,6 +228,21 @@ async function processar(pendente) {
 
   // Idem para o sócio apontado na resposta à pergunta "quem pagou?".
   if (pendente.pagadorEscolhido) dados.pagoPor = pendente.pagadorEscolhido
+
+  /*
+    O nº do documento, numa forma só — aqui, antes de mandar, guardar ou
+    comparar.
+
+    O sistema de obras grava o que recebe e compara letra por letra: "000123"
+    e "123" são, para ele, dois documentos. E a IA lê o mesmo cupom de um
+    jeito numa foto e de outro na seguinte. Mandando cada leitura como veio,
+    a trava de repetido do sistema nunca fecharia.
+
+    O que foi lido fica guardado à parte (`documentoLido`), para o texto da
+    caixa mostrar o número como está no papel.
+  */
+  dados.documentoLido = dados.documento
+  dados.documento = documentoComparavel(dados.documento)
 
   // A pessoa confirmou o valor lido ("sim"): passa a valer como digitado —
   // sai o aviso de "confira", e a pergunta não se repete. Só enquanto o

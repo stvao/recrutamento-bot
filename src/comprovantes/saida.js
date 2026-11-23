@@ -31,7 +31,7 @@ export function montarTexto(dados, observacao) {
   const detalhe = [
     dados?.estabelecimento && dados.estabelecimento !== dados.descricao ? dados.estabelecimento : null,
     dados?.formaPagamento,
-    dados?.documento ? `doc ${dados.documento}` : null,
+    (dados?.documentoLido ?? dados?.documento) ? `doc ${dados.documentoLido ?? dados.documento}` : null,
     dados?.dataComprovante ? `comprovante de ${dataCurta(dados.dataComprovante)}` : null,
   ].filter(Boolean)
   if (detalhe.length) linhas.push(detalhe.join(' · '))
@@ -120,7 +120,12 @@ export async function lancar(pendente, dados) {
     observacao: dados.valorDigitado ? null : 'Valor lido da imagem pelo robô — confira.',
     rateio: dados.rateio,
     pagoPor: dados.pagoPor,
-    idMensagem: pendente.idMensagem,
+    // Vira o Idempotency-Key. Tem de ser ESTÁVEL para este comprovante: com
+    // `confirmadoOutro` o sistema pula todas as travas de repetido, e a única
+    // coisa que impede um reenvio (queda de rede, webhook reentregue) de criar
+    // o gasto em dobro é a chave ser a mesma. Sem id da mensagem, vale o id
+    // da ficha, que mora em disco e não muda.
+    idMensagem: pendente.idMensagem ?? pendente.id,
     // A pessoa disse "é outro". Sem avisar o sistema, a trava de reenvio de
     // lá engolia este segundo gasto como se fosse o primeiro de novo.
     confirmadoOutro: !!pendente.duplicataConfirmada,
@@ -230,7 +235,7 @@ async function textoDaCaixa(pendente) {
     nomeArquivo: pendente.nomeArquivo,
     tipo: pendente.tipo,
     texto: montarTexto(dados, pendente.lido?.observacao),
-    idMensagem: pendente.idMensagem,
+    idMensagem: pendente.idMensagem ?? pendente.id,
     extras: {
       obra: dados.obra,
       descricao: dados.descricao,

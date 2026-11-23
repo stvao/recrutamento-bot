@@ -54,7 +54,10 @@ Descartar continua exigindo a pessoa dizer *mesmo*; a única exceção é o
 arquivo idêntico. O que foi só para a **caixa** não barra: mandar de novo com
 a legenda certa é o conserto.
 
-O robô manda `documento` e `arquivoHash` no `/lancar` e na caixa. Com o
+O robô manda `documento` e `arquivoHash` no `/lancar` e na caixa. O documento
+vai sempre numa forma só (maiúsculas, só letra e número, sem zeros à
+esquerda; com menos de 4 caracteres não vai), porque o Obras compara letra
+por letra. Todo `/lancar` leva o id da mensagem como `Idempotency-Key`. Com o
 Obras em versão anterior nada quebra: 404 na consulta = compara só com a
 memória; 400 nos campos novos = lança de novo sem eles.
 
