@@ -24,7 +24,8 @@ sem aprovação humana.
 | `duplicata.js` | Decide se o comprovante já foi lançado: mesmo arquivo, mesmo documento, ou mesma obra e valor. Funções puras. |
 | `atraso.js` | A leitura do grupo antigo: ensaio, execução em lotes, retomada e as rotas HTTP. |
 | `exportacao.js` | Lê a conversa exportada do WhatsApp (Android e iPhone) e acha os comprovantes. |
-| `zip.js` | Leitor de zip mínimo, que trata o arquivo como dado de fora. |
+| `zip.js` | Leitor de zip mínimo, que trata o arquivo como dado de fora — e o gerador do zip do leitor pela conta. |
+| `leitor-conta.js` | Lê o grupo antigo pela conta do dono (aparelho conectado) e monta um zip igual ao da exportação. Só lê. Usado por `scripts/ler-grupo-pela-conta.js`, fora do robô. |
 | `correcao.js` | Corrigir ou cancelar pelo grupo um gasto já lançado, citando o comprovante ou a confirmação. |
 | `habito.js` | De qual obra e categoria costuma ser cada fornecedor. Só sugere — nunca lança. Funções puras. |
 | `a-pagar.js` | Decide se o documento é pagamento feito ou conta a pagar (boleto, orçamento, nota a prazo). Funções puras. |
@@ -39,7 +40,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`, `teste-a-pagar.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`, `teste-a-pagar.js`, `teste-leitor-conta.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Comprovante repetido
@@ -308,6 +309,73 @@ Em vez de `?arquivo=`, o zip pode ir no corpo do pedido
 (`curl -X POST --data-binary @conversa.zip -H "Content-Type: application/zip" http://localhost:3100/comprovantes/atraso`).
 As rotas só atendem de dentro do próprio servidor, ou com
 `Authorization: Bearer <GASTOS_ATRASO_TOKEN>` se esse token for definido.
+
+### Sem exportar: ler o grupo pela conta do dono
+
+Em vez do passo 1 e 2 (exportar pelo celular e copiar o zip), dá para ler o
+grupo direto da conta de quem está nele. É uma **ferramenta avulsa**, de
+rodar uma vez num computador com Node — **não** dentro do robô:
+`scripts/ler-grupo-pela-conta.js`. Ela entra no WhatsApp do dono como
+"aparelho conectado", lê só o grupo pedido, baixa imagens e PDFs e gera um
+zip no mesmo formato da exportação.
+
+O que ela garante:
+
+- **Só lê.** Não manda mensagem, não marca como lido, não aparece online.
+- **Só o grupo.** A conta recebe todas as conversas do dono; o que não é do
+  grupo pedido é descartado na hora, na memória — não vai para o disco nem
+  para a tela.
+- **Sessão própria** (`dados/whatsapp-leitor`, fora do git). Não toca na
+  sessão do robô nem na da cobrança de obras.
+
+Passo a passo, na pasta do robô:
+
+1. **Conectar e ler** (na primeira vez mostra um código de 8 letras):
+
+   ```
+   node scripts/ler-grupo-pela-conta.js ler --grupo "Nome exato do grupo" --numero 55DDDNUMERO
+   ```
+
+   No celular: WhatsApp → Aparelhos conectados → Conectar aparelho →
+   *Conectar com número de telefone*, e digitar o código. (Com `--qr` no
+   lugar de `--numero`, sai uma página com o QR em `dados/leitor-qr.html`.)
+   Ele espera a conta mandar o histórico, pede ao celular o que veio antes —
+   devagar, um pedido a cada poucos segundos — até passar da data de corte
+   (`--desde`, padrão `2026-09-22`), e baixa as mídias. **O celular precisa
+   estar ligado e com internet**: é ele que manda o histórico e reenvia a
+   mídia antiga.
+2. **Ler o resumo**, em `dados/leitor-saida/resumo.txt`: mensagens lidas,
+   comprovantes, mídias baixadas, as que falharam e a data da mensagem mais
+   antiga alcançada. O que não baixou está em `falhas.csv` (data, remetente,
+   legenda), para achar à mão. Se a leitura não chegou à data de corte, o
+   resumo diz — rodar o mesmo comando de novo **continua de onde parou** e
+   não baixa nada duas vezes.
+3. **Ensaio aqui mesmo** (opcional), sem mandar nada ao servidor do robô:
+
+   ```
+   node scripts/ler-grupo-pela-conta.js ensaio
+   ```
+
+   Precisa de `OBRAS_API_TOKEN` (e `OBRAS_API_URL`, se não for o padrão) no
+   ambiente, só para **ler** o que já está lançado, e de `GEMINI_API_KEY`
+   para ler as imagens. Não lança, não manda para a caixa, não escreve em
+   conversa nenhuma, e não usa a pasta `dados/` do robô. O relatório sai em
+   `dados/leitor-saida/grupo-antigo-ensaio.csv`.
+4. **Desconectar o aparelho** quando terminar:
+
+   ```
+   node scripts/ler-grupo-pela-conta.js sair
+   ```
+
+   (ou, no celular, Aparelhos conectados → tocar no aparelho → Desconectar).
+5. O zip (`dados/leitor-saida/grupo-antigo.zip`) segue pelo passo a passo
+   de cima, a partir do passo 2.
+
+Limites que não dependem da ferramenta: o WhatsApp só manda a um aparelho
+novo as conversas recentes. Se o grupo estiver parado há muito tempo e não
+vier nenhuma mensagem dele, não há ponto de partida para pedir as
+anteriores — a ferramenta para e avisa, e o caminho é a exportação pelo
+celular. E mídia que o celular já apagou não volta.
 
 ### O que cada comprovante vira
 

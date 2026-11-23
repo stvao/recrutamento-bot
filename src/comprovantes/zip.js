@@ -22,7 +22,7 @@
  * meses caiba na memória). Entrada cifrada ou com compressão que não seja
  * "guardada" ou "deflate" é ignorada — o WhatsApp não gera nenhuma das duas.
  */
-import { openSync, readSync, closeSync, fstatSync } from 'node:fs'
+import { openSync, readSync, writeSync, closeSync, fstatSync } from 'node:fs'
 import { inflateRawSync } from 'node:zlib'
 
 /** Mais entradas que isto não é uma conversa exportada. */
@@ -159,5 +159,86 @@ export function abrirZip(caminho) {
   } catch (e) {
     try { closeSync(fd) } catch { /* nada a fazer */ }
     throw e
+  }
+}
+
+// ─── Escrever ──────────────────────────────────────────────────────────────
+
+/** A tabela do CRC-32, para quando o Node não traz `zlib.crc32`. */
+let TABELA_CRC = null
+function crc32(dados) {
+  if (!TABELA_CRC) {
+    TABELA_CRC = new Uint32Array(256)
+    for (let n = 0; n < 256; n++) {
+      let c = n
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+      TABELA_CRC[n] = c >>> 0
+    }
+  }
+  let crc = 0xffffffff
+  for (let i = 0; i < dados.length; i++) crc = TABELA_CRC[(crc ^ dados[i]) & 0xff] ^ (crc >>> 8)
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+/**
+ * Escreve um zip com as entradas dadas: `[{ nome, dados }]`, onde `dados` é
+ * um Buffer ou uma função que o devolve (para não segurar centenas de fotos
+ * na memória ao mesmo tempo).
+ *
+ * Sem compressão: o que vai aqui são fotos e PDFs, que já são comprimidos —
+ * comprimir de novo só gastaria tempo. É o formato mais simples que o leitor
+ * de cima (e qualquer outro programa) abre.
+ *
+ * Serve para montar, a partir do que foi lido da conta, um arquivo igual ao
+ * da "Exportar conversa" do WhatsApp. Não passa de 4 GB nem de 65 mil
+ * arquivos; acima disso recusa, em vez de gerar um zip que ninguém abre.
+ */
+export function escreverZip(caminho, entradas) {
+  if (entradas.length > 65000) throw new Error('arquivos demais para um zip só')
+  const fd = openSync(caminho, 'w')
+  try {
+    const centrais = []
+    let posicao = 0
+    for (const entrada of entradas) {
+      const dados = typeof entrada.dados === 'function' ? entrada.dados() : entrada.dados
+      const nome = Buffer.from(String(entrada.nome), 'utf8')
+      const crc = crc32(dados)
+      if (posicao + dados.length > 0xfff00000) throw new Error('zip passaria de 4 GB')
+
+      const local = Buffer.alloc(30)
+      local.writeUInt32LE(ASSINATURA_LOCAL, 0)
+      local.writeUInt16LE(20, 4)          // versão mínima para abrir
+      local.writeUInt16LE(0x0800, 6)      // nome em UTF-8
+      local.writeUInt16LE(0, 8)           // guardado, sem compressão
+      local.writeUInt32LE(crc, 14)
+      local.writeUInt32LE(dados.length, 18)
+      local.writeUInt32LE(dados.length, 22)
+      local.writeUInt16LE(nome.length, 26)
+      writeSync(fd, local); writeSync(fd, nome); writeSync(fd, dados)
+
+      const central = Buffer.alloc(46)
+      central.writeUInt32LE(ASSINATURA_CENTRAL, 0)
+      central.writeUInt16LE(20, 4)
+      central.writeUInt16LE(20, 6)
+      central.writeUInt16LE(0x0800, 8)
+      central.writeUInt32LE(crc, 16)
+      central.writeUInt32LE(dados.length, 20)
+      central.writeUInt32LE(dados.length, 24)
+      central.writeUInt16LE(nome.length, 28)
+      central.writeUInt32LE(posicao, 42)
+      centrais.push(central, nome)
+      posicao += 30 + nome.length + dados.length
+    }
+
+    const diretorio = Buffer.concat(centrais)
+    const fim = Buffer.alloc(22)
+    fim.writeUInt32LE(ASSINATURA_FIM, 0)
+    fim.writeUInt16LE(entradas.length, 8)
+    fim.writeUInt16LE(entradas.length, 10)
+    fim.writeUInt32LE(diretorio.length, 12)
+    fim.writeUInt32LE(posicao, 16)
+    writeSync(fd, diretorio); writeSync(fd, fim)
+  } finally {
+    closeSync(fd)
   }
 }
