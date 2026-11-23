@@ -134,6 +134,15 @@ export function lancadosRecentes() {
     .sort((a, b) => b.quando - a.quando)
 }
 
+/**
+ * O que foi feito com o comprovante de uma mensagem — o registro mais
+ * recente — ou null se o robô não anotou nada sobre ela.
+ */
+export function resultadoDe(idMensagem) {
+  if (!idMensagem) return null
+  return dados.lancamentos.filter(l => l.idMensagem === idMensagem).sort((a, b) => b.quando - a.quando)[0] ?? null
+}
+
 /** O que entrou num dia. `dia` é o começo do dia, em ms. */
 export function doDia(dia = comecoDeHoje()) {
   const fim = dia + 24 * 60 * 60 * 1000

@@ -10,7 +10,9 @@ import { enviarMensagem } from '../connectors.js'
 import { interpretar, combinar, acharValor } from './lancamento.js'
 import { perguntar, perguntarPagador, perguntarValorLido } from './perguntas.js'
 import { lancar, paraCaixa, diaDoEnvio, dataDoGasto } from './saida.js'
-import { mesmoArquivo, parecido, avisoDeMesmoArquivo, perguntaDeRepetido, documentoComparavel } from './duplicata.js'
+import {
+  mesmoArquivo, parecido, classificar, avisoDeMesmoArquivo, avisoDeJaLancado, perguntaDeRepetido, documentoComparavel,
+} from './duplicata.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 
@@ -58,6 +60,12 @@ async function obrasConhecidas() {
  */
 export async function avisar(pendente, texto) {
   if (!texto) return null
+
+  // Comprovante que não chegou pela conversa (veio do grupo antigo): tudo que
+  // se diz sobre ele começa dizendo DE QUAL se está falando — data, quem
+  // mandou, o que escreveu. Não há foto ali para a pessoa olhar.
+  if (pendente?.prefixo) texto = `${pendente.prefixo}\n${texto}`
+
   try {
     if (typeof pendente?.enviar === 'function') {
       const r = await pendente.enviar(texto)
@@ -74,8 +82,12 @@ export async function avisar(pendente, texto) {
       caixa.
     */
     if (pendente?.chat) {
-      await enviarMensagem(pendente.chat, texto)
-      return null
+      // O id da mensagem volta para quem chamou: é por ele que a pessoa
+      // responde CITANDO. Antes era jogado fora, e uma pergunta feita por
+      // este caminho saía duas vezes — quem chamava, sem o id, concluía que
+      // nada tinha sido dito e mandava de novo.
+      const r = await enviarMensagem(pendente.chat, texto)
+      return r?.id ?? null
     }
 
     console.log(`[gastos] (sem canal para avisar) ${pendente?.de}: ${String(texto).replace(/\n/g, ' / ')}`)
@@ -105,6 +117,10 @@ export function processarUmaVez(p) {
  */
 async function resolveDireto(p) {
   const r = await processar(p)
+
+  // Como terminou, para quem está acompanhando de fora (o atraso). Fica no
+  // objeto, que continua na mão de quem chamou mesmo depois de sair do disco.
+  p.desfecho = r.desfecho ?? null
 
   if (!r.perguntando) {
     // A caixa recusou: o comprovante CONTINUA esperando, e a ronda tenta de
@@ -150,8 +166,17 @@ export function entregar(p, texto) {
  *
  * Devolve `{ perguntando, texto }`. Quem chama precisa saber a diferença:
  * uma pergunta trava a fila esperando resposta; o resto segue adiante.
+ *
+ * Devolve também `desfecho` — 'lancado', 'reenvio', 'mesmo-arquivo',
+ * 'ja-lancado', 'caixa', 'caixa-recusou', 'pergunta' (com `pergunta` dizendo
+ * qual) — e, quando bateu com um lançamento, o `item`.
+ *
+ * Com `ensaio`, decide tudo igual e NÃO ESCREVE nada: não lança, não manda
+ * para a caixa. Onde lançaria, devolve o desfecho 'lancaria'. É o que permite
+ * ao atraso mostrar o que faria antes de fazer — pela MESMA decisão, e não
+ * por uma cópia dela que um dia divergiria.
  */
-async function processar(pendente) {
+export async function processar(pendente, { ensaio = false } = {}) {
   const obras = await obrasConhecidas()
 
   /*
@@ -200,15 +225,23 @@ async function processar(pendente) {
   // Ficha gravada por uma versão anterior não tem a impressão: calcula agora.
   if (!pendente.arquivoHash) pendente.arquivoHash = pendentes.impressaoDigital(pendentes.arquivoDe(pendente))
 
-  const desde = diaDoEnvio(Date.now() - memoria.DIAS_DE_COMPARACAO * 24 * 60 * 60 * 1000)
-  const jaLancados = { locais: memoria.lancadosRecentes(), doSistema: await lancadosDoSistema(desde) }
+  // Comprovante do atraso é de semanas atrás: a comparação com o sistema
+  // tem de começar antes dele, e não nos últimos 30 dias.
+  const desde = pendente.atraso?.desde
+    ?? diaDoEnvio(Date.now() - memoria.DIAS_DE_COMPARACAO * 24 * 60 * 60 * 1000)
+  const jaLancados = {
+    // `simulados`: num ensaio, o que os comprovantes anteriores DO MESMO
+    // ensaio lançariam — senão dois iguais no mesmo zip passariam os dois.
+    locais: [...memoria.lancadosRecentes(), ...(pendente.simulados ?? [])],
+    doSistema: await lancadosDoSistema(desde),
+  }
 
   const identico = mesmoArquivo(
     { arquivoHash: pendente.arquivoHash, idMensagem: pendente.idMensagem }, jaLancados,
   )
   if (identico) {
     console.log(`[gastos] ${pendente.de} → mesmo arquivo de um gasto já lançado, não lancei de novo`)
-    return { perguntando: false, texto: avisoDeMesmoArquivo(identico) }
+    return { perguntando: false, texto: avisoDeMesmoArquivo(identico), desfecho: 'mesmo-arquivo', item: identico }
   }
 
   // A imagem é lida UMA vez e guardada: numa segunda passada, depois da
@@ -261,12 +294,12 @@ async function processar(pendente) {
   if (!dados.obra) falta.push('obra')
   if (dados.valor == null) falta.push('valor')
 
-  if (falta.length && !pendente.jaPerguntou) {
-    return { perguntando: true, texto: perguntar(pendente, falta, obras) }
+  if (falta.length && (!pendente.jaPerguntou || ensaio)) {
+    return { perguntando: true, texto: perguntar(pendente, falta, obras), desfecho: 'pergunta', pergunta: falta.join(' e ') }
   }
   if (falta.length) {
     const cx = await paraCaixa(pendente)
-    return { perguntando: false, texto: cx.texto, caixaRecusou: !cx.ok }
+    return { perguntando: false, texto: cx.texto, caixaRecusou: !cx.ok, desfecho: cx.ok ? 'caixa' : 'caixa-recusou' }
   }
 
   /*
@@ -286,7 +319,7 @@ async function processar(pendente) {
   if (dados.valorDaImagem && dados.confiancaLeitura !== 'alta') {
     pendente.esperandoValor = true
     pendente.jaPerguntou = true
-    return { perguntando: true, texto: perguntarValorLido(pendente, dados) }
+    return { perguntando: true, texto: perguntarValorLido(pendente, dados), desfecho: 'pergunta', pergunta: 'confirmar o valor lido' }
   }
 
   /*
@@ -306,7 +339,7 @@ async function processar(pendente) {
     pendente.pagadorPerguntado = true
     pendente.esperandoPagador = true
     pendente.jaPerguntou = true
-    return { perguntando: true, texto: perguntarPagador(pendente, dados, socios) }
+    return { perguntando: true, texto: perguntarPagador(pendente, dados, socios), desfecho: 'pergunta', pergunta: 'quem pagou' }
   }
 
   /*
@@ -322,7 +355,7 @@ async function processar(pendente) {
     o que está no sistema — inclusive o que foi lançado à mão.
   */
   if (!pendente.duplicataConfirmada) {
-    const igual = parecido({
+    const novo = {
       obra: dados.obra,
       valor: dados.valor,
       documento: dados.documento,
@@ -333,14 +366,37 @@ async function processar(pendente) {
       // PERGUNTAR, e perguntar a mais custa menos que deixar passar.
       datas: [dataDoGasto(pendente, dados), diaDoEnvio(pendente.enviadoEm), dados.dataComprovante],
       idMensagem: pendente.idMensagem,
-    }, jaLancados)
+    }
+
+    /*
+      No ATRASO a régua é outra, e mais graduada (ver `classificar`, em
+      duplicata.js). Ali o robô não está conversando com quem acabou de
+      pagar: está passando por centenas de comprovantes antigos, parte já
+      digitada à mão. Mesmo documento e mesmo valor é "já lançado" e segue
+      sem pergunta — perguntar cem vezes o óbvio faria a pessoa parar de
+      responder antes de chegar nas dúvidas de verdade.
+    */
+    const igual = pendente.atraso ? classificar(novo, jaLancados) : parecido(novo, jaLancados)
+
+    if (igual?.grau === 'ja-lancado') {
+      console.log(`[gastos] ${pendente.de} → já lançado (mesmo documento e valor), não lancei de novo`)
+      return { perguntando: false, texto: avisoDeJaLancado(igual), desfecho: 'ja-lancado', item: igual }
+    }
 
     if (igual) {
       pendente.esperandoDuplicata = true
       pendente.jaPerguntou = true
-      return { perguntando: true, texto: perguntaDeRepetido(igual) }
+      return {
+        perguntando: true,
+        texto: perguntaDeRepetido(igual),
+        desfecho: 'pergunta',
+        pergunta: igual.grau === 'duvida' ? 'dúvida de repetido' : 'provável repetido',
+        item: igual,
+      }
     }
   }
+
+  if (ensaio) return { perguntando: false, texto: null, desfecho: 'lancaria' }
 
   return lancar(pendente, dados)
 }

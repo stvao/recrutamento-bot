@@ -1119,6 +1119,13 @@ gastos.iniciarRonda()
 const { agendarResumo } = gastos
 agendarResumo()
 
+// A leitura do grupo antigo (comprovantes atrasados). Desligada por padrão
+// (GASTOS_ATRASO=off). Depois de `iniciarRonda`, de propósito: a retomada
+// confere as perguntas que estavam no ar, e para isso os comprovantes que
+// esperavam já têm de ter sido relidos do disco.
+gastos.registrarRotasDoAtraso(app)
+gastos.retomarAtraso()
+
 /*
   A mensagem para quem parou no meio do cadastro, e o lembrete de documentos.
 

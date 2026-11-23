@@ -130,7 +130,11 @@ export async function lancar(pendente, dados) {
     // lá engolia este segundo gasto como se fosse o primeiro de novo.
     confirmadoOutro: !!pendente.duplicataConfirmada,
     // Pago direto pela empresa: não há reembolso a ninguém.
-    empresaPagou: !!pendente.empresaPagou,
+    //
+    // No atraso todo comprovante nasce como "a empresa pagou". Mas se a
+    // legenda diz quem pagou ("pago por Fulano"), a legenda ganha — é a regra
+    // de sempre, o que a pessoa escreveu vale mais que a suposição.
+    empresaPagou: !!pendente.empresaPagou && !(pendente.legendaGanhaPagador && dados.pagoPor),
     // Por onde o sistema reconhece o mesmo comprovante mandado duas vezes.
     documento: dados.documento,
     arquivoHash: pendente.arquivoHash,
@@ -140,7 +144,7 @@ export async function lancar(pendente, dados) {
     // O sistema reconheceu como o MESMO gasto já lançado: não entrou nada
     // novo. Anotar de novo somava o valor duas vezes no resumo do dia.
     console.log(`[gastos] ${pendente.de} → reenvio, o sistema devolveu o gasto já lançado`)
-    return { perguntando: false, texto: `ℹ️ ${r.mensagem || 'Esse comprovante já tinha sido lançado.'}` }
+    return { perguntando: false, texto: `ℹ️ ${r.mensagem || 'Esse comprovante já tinha sido lançado.'}`, desfecho: 'reenvio' }
   }
 
   if (r.ok) {
@@ -192,7 +196,7 @@ export async function lancar(pendente, dados) {
       linhas.push(`_(anotei que "${pendente.apelidoAprendido}" é essa obra — da próxima vez já sei)_`)
     }
 
-    return { perguntando: false, texto: linhas.join('\n') }
+    return { perguntando: false, texto: linhas.join('\n'), desfecho: 'lancado' }
   }
 
   // A obra não foi reconhecida pelo SISTEMA (não pela nossa lista): pergunta
@@ -205,14 +209,14 @@ export async function lancar(pendente, dados) {
     // da compra, que é o que sobrava depois de zerar a obra.
     if (dados.obra) pendente.obraEscrita = String(dados.obra)
     pendente.dados = { ...dados, obra: null }
-    return { perguntando: true, texto: perguntar(pendente, ['obra'], r.obras ?? []) }
+    return { perguntando: true, texto: perguntar(pendente, ['obra'], r.obras ?? []), desfecho: 'pergunta', pergunta: 'obra' }
   }
 
   if (r.semRota) console.warn('[gastos] servidor ainda sem /lancar — mandando para a caixa.')
   else console.warn('[gastos] lançamento falhou:', r.motivo ?? r.status)
 
   const cx = await paraCaixa(pendente)
-  return { perguntando: false, texto: cx.texto, caixaRecusou: !cx.ok }
+  return { perguntando: false, texto: cx.texto, caixaRecusou: !cx.ok, desfecho: cx.ok ? 'caixa' : 'caixa-recusou' }
 }
 
 /**

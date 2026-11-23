@@ -22,6 +22,9 @@ sem aprovação humana.
 | `perguntas.js` | Monta as perguntas (obra, valor, confirmação do valor lido, quem pagou) e lê a resposta de "quem pagou?". |
 | `processar.js` | O miolo: junta o escrito com o lido da imagem e decide — lança, pergunta ou caixa. Guarda o que está em andamento. |
 | `duplicata.js` | Decide se o comprovante já foi lançado: mesmo arquivo, mesmo documento, ou mesma obra e valor. Funções puras. |
+| `atraso.js` | A leitura do grupo antigo: ensaio, execução em lotes, retomada e as rotas HTTP. |
+| `exportacao.js` | Lê a conversa exportada do WhatsApp (Android e iPhone) e acha os comprovantes. |
+| `zip.js` | Leitor de zip mínimo, que trata o arquivo como dado de fora. |
 | `saida.js` | Lança o gasto pendente no Obras, ou manda para a caixa de comprovantes. |
 | `ronda.js` | O lembrete (uma vez, 3 h) e o prazo (24 h → caixa). Liga no arranque. |
 | `formato.js` | Como valor, data e item aparecem nas mensagens. |
@@ -33,7 +36,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Comprovante repetido
@@ -96,6 +99,98 @@ e para a comparação de repetido.
 Medida não é data: "tubo 3/4" e "joelho 1/2" são ignorados. Sem ano, a data
 só vale com o mês em dois dígitos ("05/09") ou com "dia", "data", "em" ou
 "de" antes ("dia 3/8"), e até 120 dias para trás; com ano, até um ano.
+
+## O grupo antigo (comprovantes atrasados)
+
+Lê a conversa **exportada** do grupo onde os comprovantes caíam e trata cada
+um, de uma data para cá, pela mesma decisão do dia a dia. Tudo nasce como
+**pago pelo caixa da empresa** (se a legenda disser "pago por Fulano", vale a
+legenda). Nada é dito no grupo antigo: as perguntas e o resumo saem só no
+grupo de conversa com o robô.
+
+Desligado por padrão. Liga-se em dois tempos — primeiro o ensaio, depois de
+verdade.
+
+### Passo a passo
+
+1. **Exportar.** No celular, abrir o grupo antigo → ⋮ (ou o nome do grupo, no
+   iPhone) → *Exportar conversa* → **Incluir mídia**. Sai um `.zip`.
+2. **Pôr o zip no servidor**, na pasta `dados/atraso/` do robô (por `scp`,
+   por exemplo: `scp conversa.zip servidor:/caminho/do/robo/dados/atraso/grupo-antigo.zip`).
+3. **Ensaio.** No `.env`: `GASTOS_ATRASO=ensaio`. Reiniciar o robô
+   (`pm2 restart recrutamento-bot`). No servidor:
+
+   ```
+   curl -X POST "http://localhost:3100/comprovantes/atraso?arquivo=grupo-antigo.zip"
+   ```
+
+   Ele responde na hora quantos comprovantes achou e segue em segundo plano
+   (com a pausa padrão, uns 15 por minuto). Para acompanhar:
+
+   ```
+   curl http://localhost:3100/comprovantes/atraso
+   ```
+
+4. **Ler o relatório.** Quando `rodando` voltar `false`:
+
+   ```
+   curl -o grupo-antigo-ensaio.csv http://localhost:3100/comprovantes/atraso/relatorio.csv
+   ```
+
+   Abre no Excel. Uma linha por comprovante: data, remetente, legenda, obra,
+   valor, de onde veio o valor, a data que seria usada e o **destino** —
+   *lançaria*, *já lançado* (com qual lançamento bateu), *provável repetido*
+   ou *perguntaria* (o quê). O resumo com os totais vem no `resumo` da
+   consulta acima e em `dados/atraso/resumo.txt`. No ensaio **nada** é
+   lançado, mandado para a caixa ou escrito em conversa nenhuma.
+5. **Ligar.** No `.env`: `GASTOS_ATRASO=on`. Reiniciar. Repetir o mesmo
+   `curl -X POST` do passo 3. As leituras da IA feitas no ensaio são
+   aproveitadas.
+6. **Responder.** As perguntas chegam no grupo de conversa, **5 de cada
+   vez**, cada uma dizendo de que dia é, quem mandou e o que estava escrito.
+   Responde-se **citando** a pergunta (qualquer pessoa autorizada do grupo
+   pode). O lote seguinte só sai quando o anterior estiver resolvido —
+   respondido, ou encerrado pela ronda (um lembrete e, em 24 h, a caixa).
+   Quando todos os arquivos tiverem passado, sai **uma** mensagem com os
+   totais: lançados (R$), já estavam no sistema, esperando resposta, na caixa.
+7. **Desligar.** Terminado, voltar `GASTOS_ATRASO=off`.
+
+Pode-se mandar o mesmo zip de novo, ou reiniciar o robô no meio: o que foi
+feito com cada arquivo fica em `dados/atraso/estado.json`, pela impressão
+digital dele, e nada é lançado nem perguntado duas vezes.
+
+Em vez de `?arquivo=`, o zip pode ir no corpo do pedido
+(`curl -X POST --data-binary @conversa.zip -H "Content-Type: application/zip" http://localhost:3100/comprovantes/atraso`).
+As rotas só atendem de dentro do próprio servidor, ou com
+`Authorization: Bearer <GASTOS_ATRASO_TOKEN>` se esse token for definido.
+
+### O que cada comprovante vira
+
+| Situação | Destino |
+|---|---|
+| Mesmo arquivo de um gasto lançado, ou mesmo nº de documento e valor | Já lançado — pula, sem pergunta |
+| Mesma obra, mesmo valor, data a até 3 dias de um lançamento | Provável repetido — pergunta |
+| Mesma obra e valor com data mais longe (até 30 dias), ou mesmo valor em outra obra com data perto | Dúvida — pergunta |
+| Falta obra ou valor, ou o valor veio de leitura insegura da imagem | Pergunta |
+| Tem obra e valor e não parece repetido | Lança pendente, pago pela empresa, com a data da mensagem original (ou a do comprovante, pelas regras de data acima) |
+
+Ficam de fora, e são contados no relatório: figurinha, áudio, vídeo, mídia
+omitida, o que é de antes do corte, arquivo citado na conversa que não veio
+no zip, arquivo que não é imagem nem PDF de verdade (confere-se o conteúdo,
+não a extensão) e arquivo acima de 20 MB.
+
+### Variáveis
+
+| Variável | Padrão | Para quê |
+|---|---|---|
+| `GASTOS_ATRASO` | `off` | `ensaio` ou `on` |
+| `GASTOS_ATRASO_GRUPO` | o grupo de onde os comprovantes já vêm | Onde perguntar e mandar o resumo. Tem de estar em `GASTOS_GRUPOS` |
+| `GASTOS_ATRASO_DESDE` | `2026-09-22` | Data de corte (também `?desde=AAAA-MM-DD` no pedido) |
+| `GASTOS_ATRASO_PAGADOR` | `legenda` | `empresa` faz ignorar "pago por Fulano" da legenda |
+| `GASTOS_ATRASO_LOTE` | `5` | Perguntas no ar de cada vez |
+| `GASTOS_ATRASO_PAUSA_MS` | `4000` | Pausa entre comprovantes (limite do Obras e cota da IA) |
+| `GASTOS_ATRASO_TOKEN` | — | Token para disparar de fora do servidor |
+| `GASTOS_ATRASO_DIR` | `dados/atraso` | Onde ficam o zip, o estado e o relatório |
 
 ## Configuração e dados
 

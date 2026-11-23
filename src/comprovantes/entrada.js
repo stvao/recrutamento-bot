@@ -38,6 +38,7 @@ import {
   PERGUNTAS_DE_TESTE, LISTAR, CANCELAR_TUDO, respostaDeTeste, listar, descartarTudo, responderTexto,
 } from './conversa.js'
 import { OBRAS_RESERVA, processarUmaVez, entregar, timersLegenda } from './processar.js'
+import { remetenteDaResposta } from './atraso.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 
@@ -90,9 +91,21 @@ export async function tratar(msg) {
   }
 
   if (!arquivo && PERGUNTAS_DE_TESTE.test(texto ?? '')) return respostaDeTeste()
-  if (!arquivo && LISTAR.test(texto ?? '')) return listar(de)
+  /*
+    Os comprovantes do grupo antigo não foram mandados por quem está
+    respondendo — ficam guardados num nome próprio (ver atraso.js). Aqui se
+    descobre se esta mensagem é resposta a um deles. Quem tem comprovante
+    próprio esperando continua sendo atendido pelo dele, como sempre.
+
+    "cancelar tudo" fica de fora de propósito: mandar de uma vez para a caixa
+    dezenas de comprovantes que outra rotina está tratando não é coisa para
+    duas palavras num grupo.
+  */
+  const quem = arquivo ? de : remetenteDaResposta(msg)
+
+  if (!arquivo && LISTAR.test(texto ?? '')) return listar(quem)
   if (!arquivo && CANCELAR_TUDO.test(texto ?? '')) return descartarTudo(de)
-  if (!arquivo) return responderTexto(de, texto, msg.respondendoA, msg.enviarResposta)
+  if (!arquivo) return responderTexto(quem, texto, msg.respondendoA, msg.enviarResposta)
 
   // ── Chegou um comprovante ────────────────────────────────────────────────
   if (pendentes.doRemetente(de).length >= MAX_ESPERANDO) {

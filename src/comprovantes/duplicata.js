@@ -156,6 +156,64 @@ export function parecido({ obra, valor, documento, datas, idMensagem }, fontes =
   return porObra ? { ...porObra, motivo: 'obra-valor' } : null
 }
 
+/** O dia do lançamento: a data do gasto, ou o dia em que o robô o lançou. */
+function diaDe(item) {
+  if (item.data) return String(item.data).slice(0, 10)
+  if (item.quando) return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(item.quando))
+  return null
+}
+
+/** Até quantos dias de distância um igual ainda levanta dúvida. */
+const DIAS_DE_DUVIDA = 30
+
+/**
+ * A régua do ATRASO — os comprovantes antigos do grupo, lidos de uma vez.
+ *
+ * Mais graduada que `parecido`, porque ali não há ninguém do outro lado
+ * respondendo na hora: cada pergunta entra numa fila, e o que se pergunta à
+ * toa atrasa o que precisa mesmo de resposta. Devolve o lançamento que bateu
+ * com um `grau`, ou null:
+ *
+ *  - 'ja-lancado': mesmo nº de documento e mesmo valor. Não se pergunta — é
+ *    o que o dono já digitou à mão, e é para isso que serve o documento.
+ *    (Mesmo ARQUIVO é visto antes, por `mesmoArquivo`.)
+ *  - 'provavel': mesma obra, mesmo valor, data a até 3 dias. Pergunta.
+ *  - 'duvida': mesma obra e valor com data mais longe (até 30 dias), ou
+ *    mesmo valor em OUTRA obra com data perto. Pergunta, dizendo o que viu.
+ *
+ * Como em `parecido`: se os dois têm nº de documento e os números são
+ * diferentes, são dois pagamentos, e não há o que perguntar.
+ */
+export function classificar({ obra, valor, documento, datas, idMensagem }, fontes = {}) {
+  if (valor == null) return null
+
+  const todos = candidatos(fontes, idMensagem)
+  const meuDoc = documentoComparavel(documento)
+
+  if (meuDoc) {
+    const porDocumento = todos.find(l => documentoComparavel(l.documento) === meuDoc && mesmoValor(l.valor, valor))
+    if (porDocumento) return { ...porDocumento, grau: 'ja-lancado', motivo: 'documento' }
+  }
+
+  const alvo = obra ? norm(obra) : null
+  const distancia = (l) => Math.min(...(datas ?? []).filter(Boolean).map(d => diasEntre(d, diaDe(l))), Infinity)
+
+  let duvida = null
+  for (const l of todos) {
+    if (!mesmoValor(l.valor, valor)) continue
+    if (meuDoc && documentoComparavel(l.documento)) continue
+
+    const dias = distancia(l)
+    const mesmaObra = alvo !== null && norm(l.obra ?? '') === alvo
+
+    if (mesmaObra && dias <= DIAS_PERTO) return { ...l, grau: 'provavel', motivo: 'obra-valor' }
+    if (duvida) continue
+    if (mesmaObra && dias <= DIAS_DE_DUVIDA) duvida = { ...l, grau: 'duvida', motivo: 'data-distante' }
+    else if (!mesmaObra && dias <= DIAS_PERTO) duvida = { ...l, grau: 'duvida', motivo: 'outra-obra' }
+  }
+  return duvida
+}
+
 /** "hoje às 14h05" / "em 3/11" — quando o lançamento parecido entrou. */
 function quandoFoi(item) {
   // Da memória do robô: o instante em que ele lançou.
@@ -192,10 +250,23 @@ export function avisoDeMesmoArquivo(item) {
   ].join('\n')
 }
 
+/** O que dizer quando o documento e o valor batem, no atraso — sem pergunta. */
+export function avisoDeJaLancado(item) {
+  return [
+    `ℹ️ Já está lançado — mesmo nº de documento (${String(item.documento).trim()}) e mesmo valor, ${quandoFoi(item)}:`,
+    `   ${linhaDe(item)}`,
+    'Não lancei de novo.',
+  ].join('\n')
+}
+
 /** A pergunta "é outro pagamento, ou é o mesmo comprovante?". */
 export function perguntaDeRepetido(item) {
   const cabeca = item.motivo === 'documento'
     ? `⚠ Já existe um lançamento com o mesmo nº de documento (${String(item.documento).trim()}) e o mesmo valor, ${quandoFoi(item)}:`
+    : item.motivo === 'outra-obra'
+      ? `⚠ Há um lançamento do mesmo valor em OUTRA obra, ${quandoFoi(item)}:`
+    : item.motivo === 'data-distante'
+      ? `⚠ Há um lançamento igual nesta obra, mas de outra data — ${quandoFoi(item)}:`
     : item.fonte === 'sistema'
       // Não foi o robô que lançou — alguém digitou no sistema. Dizer "já
       // lancei" faria a pessoa procurar uma foto que ela nunca mandou.
