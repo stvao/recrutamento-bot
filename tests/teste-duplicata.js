@@ -56,6 +56,8 @@ let lancadosNoSistema = []
 let recusaCamposNovos = false
 /** O /lancar responde que reconheceu um reenvio. */
 let respondeReenvio = false
+/** O /lancados avisa que cortou a lista (mais de 2.000 itens). */
+let sistemaCortou = false
 
 const srv = createServer((req, res) => {
   let corpo = ''
@@ -79,7 +81,7 @@ const srv = createServer((req, res) => {
 
     if (req.url.includes('/comprovantes/lancados')) {
       if (lancadosNoSistema === null) return json(404, { message: 'Cannot GET' })
-      return json(200, { lancados: lancadosNoSistema })
+      return json(200, { lancados: lancadosNoSistema, truncado: sistemaCortou })
     }
 
     if (req.url.endsWith('/comprovantes/lancar')) {
@@ -408,6 +410,25 @@ const campoDe = (corpo, n) => new RegExp(`name="${n}"\r?\n\r?\n([^\r]*)`).exec(c
   await p.foto('tsuya areia 90', cupom('400003'))
   ok('descoberto isso, o seguinte já vai sem os campos', lancs().length === 3 && campoDe(lancs()[2].corpo, 'documento') === null)
 }
+// Lista CORTADA pelo sistema: no dia a dia continua servindo (o que importa
+// ali é recente), mas vai marcada — quem compara meses precisa saber.
+{
+  const p = pessoa('5511900000140')
+  sistemaCortou = true
+  lancadosNoSistema = [
+    { origem: 'gasto', obra: 'EE/ETEC AGUIA DE HAIA', valor: 320, data: diasAtras(1), descricao: 'areia', documento: null, arquivoHash: null, status: 'APROVADO' },
+    { origem: 'gasto', obra: 'EE/ETEC AGUIA DE HAIA', valor: 5, data: diasAtras(20), status: 'APROVADO' },
+    { origem: 'conta', obra: 'EE/ETEC AGUIA DE HAIA', valor: 6, data: diasAtras(8), status: 'PENDENTE' },
+  ]
+  const lista = await lancadosDoSistema(diasAtras(30))
+  ok('lista cortada vem marcada', lista?.truncado === true)
+  ok('e diz de quando para cá está completa (a origem que alcança menos longe, mais um dia)', lista?.cobreDesde === diasAtras(7))
+  await p.foto('haia areia 320', cupom('900001'))
+  await espera(20)
+  ok('no dia a dia a lista cortada continua valendo para o que é recente', perguntou(p) && lancs().length === 0)
+  sistemaCortou = false
+}
+
 // A consulta nunca lança, venha o que vier.
 {
   pessoa('5511900000122')

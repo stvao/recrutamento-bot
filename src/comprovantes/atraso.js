@@ -45,7 +45,7 @@ import { comprovantesDaConversa, tipoReal } from './exportacao.js'
 import { processar, processarUmaVez } from './processar.js'
 import { dataDoGasto, diaDoEnvio } from './saida.js'
 import { gastosAtivo, origemAceita } from './autorizacao.js'
-import { obrasConfigurado } from './obras-client.js'
+import { obrasConfigurado, lancadosDoSistema } from './obras-client.js'
 import { visaoDisponivel } from './ia-visao.js'
 import { enviarMensagem } from '../connectors.js'
 import { moeda } from './formato.js'
@@ -268,8 +268,40 @@ function fichaDe(c, { arquivo, tipo, hash }, trabalho) {
   }
 }
 
+/**
+ * Sem saber o que já está lançado, o atraso não anda.
+ *
+ * No dia a dia, se o sistema não responde, o robô compara só com a própria
+ * memória e segue — o pior que acontece é uma pergunta a menos. Aqui é o
+ * contrário: a razão de ser desta leitura é NÃO lançar de novo o que o dono
+ * já digitou à mão, e isso só o sistema sabe. Sem a lista, ou com ela
+ * cortada, cada "não achei igual" seria um chute — e o resultado seriam
+ * dezenas de gastos em dobro, com cara de trabalho bem feito.
+ *
+ * Então para, e diz por quê. É conferido antes de CADA comprovante, porque
+ * a lista é buscada de novo de tempos em tempos.
+ */
+async function exigirSistema(trabalho) {
+  const lista = await lancadosDoSistema(trabalho.desdeConsulta)
+  let motivo = null
+  if (lista === null) {
+    motivo = 'Não consegui consultar no sistema de obras o que já está lançado (sistema fora do ar, ou versão sem essa consulta). '
+      + 'Sem isso eu lançaria de novo o que já foi digitado à mão — então parei. Nada foi lançado depois deste ponto; é só mandar o zip de novo quando o sistema responder.'
+  } else if (lista.truncado) {
+    motivo = `O sistema de obras tem mais lançamentos de ${diaCurto(trabalho.desdeConsulta)} para cá do que devolve de uma vez (${lista.length}), e só mandou os mais recentes`
+      + `${lista.cobreDesde ? ` — completos só de ${diaCurto(lista.cobreDesde)} em diante` : ''}. `
+      + 'Comparar com uma lista incompleta faria passar por novo o que já está lançado — então parei. '
+      + `Dá para rodar com um corte mais recente (?desde=${lista.cobreDesde ?? 'AAAA-MM-DD'}), ou o sistema precisa permitir consultar por período.`
+  }
+  if (!motivo) return
+  const erro = new Error(motivo)
+  erro.parada = true
+  throw erro
+}
+
 /** O que se decidiria, SEM escrever nada. `simulados` = o que os anteriores do mesmo ensaio lançariam. */
 async function avaliar(c, aberto, trabalho, simulados = []) {
+  await exigirSistema(trabalho)
   const e = lerEstado()
   const falso = { ...fichaDe(c, aberto, trabalho), id: `ensaio-${aberto.hash.slice(0, 16)}`, simulados }
   const guardada = e.leituras[aberto.hash]
@@ -392,6 +424,7 @@ async function ensaiar({ zip, comprovantes, ignorados }, trabalho) {
       salvarEstado()
       if (leuAgora) await pausa()
     } catch (e) {
+      if (e.parada) throw e
       console.error('[atraso] ensaio: erro num comprovante:', e.message)
       linhas.push({ ...linhaDoRelatorio(c, { pergunta: 'erro ao avaliar' }, null), destino: 'erro', detalhe: e.message })
     }
@@ -573,6 +606,7 @@ async function executar({ zip, comprovantes, ignorados }, trabalho) {
         const { escreveu, leuAgora } = await tratarUm(c, aberto, trabalho)
         if (escreveu || leuAgora) await pausa()
       } catch (erro) {
+        if (erro.parada) throw erro
         const r = e.itens[aberto.hash] ?? (e.itens[aberto.hash] = { tentativas: 0 })
         r.tentativas = (r.tentativas ?? 0) + 1
         r.estado = r.tentativas >= MAX_TENTATIVAS ? 'falhou' : 'erro'
@@ -629,6 +663,16 @@ function rodar(trabalho) {
       else await executar(lido, trabalho)
     } catch (erro) {
       trabalho.erro = erro.message
+      // Parada de propósito (não dá para comparar com o sistema): o motivo
+      // vira o resumo, e — ligado — é dito UMA vez no grupo de conversa,
+      // para ninguém ficar esperando perguntas que não vão chegar.
+      if (erro.parada) {
+        trabalho.resumo = `⚠ Leitura do grupo antigo PARADA.\n${erro.message}`
+        if (trabalho.modo === 'on' && !trabalho.paradaAvisadaEm) {
+          trabalho.paradaAvisadaEm = Date.now()
+          try { await enviar(trabalho.grupo, trabalho.resumo) } catch { /* o estado já diz */ }
+        }
+      }
       salvarEstado()
       console.error('[atraso] parou com erro:', erro.message)
     } finally {

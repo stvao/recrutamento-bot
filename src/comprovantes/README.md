@@ -174,6 +174,16 @@ As rotas só atendem de dentro do próprio servidor, ou com
 | Falta obra ou valor, ou o valor veio de leitura insegura da imagem | Pergunta |
 | Tem obra e valor e não parece repetido | Lança pendente, pago pela empresa, com a data da mensagem original (ou a do comprovante, pelas regras de data acima) |
 
+A leitura **para** — sem lançar mais nada, e dizendo por quê no estado, no
+resumo e (ligada) uma vez no grupo de conversa — quando não consegue saber o
+que já está lançado: sistema de obras fora do ar ou sem a consulta de
+lançados, ou lista cortada (o sistema devolve no máximo 2.000 lançamentos,
+dos mais recentes para os mais antigos, e não deixa pedir os que faltaram).
+Nesse último caso a mensagem diz a partir de que data a lista está completa,
+e dá para rodar com esse corte (`?desde=`). Corrigido o problema, é mandar o
+mesmo zip de novo. No dia a dia a lista cortada continua sendo usada, com
+aviso no log: ali o que interessa é recente.
+
 Ficam de fora, e são contados no relatório: figurinha, áudio, vídeo, mídia
 omitida, o que é de antes do corte, arquivo citado na conversa que não veio
 no zip, arquivo que não é imagem nem PDF de verdade (confere-se o conteúdo,

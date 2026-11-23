@@ -85,6 +85,8 @@ const foto = (leitura = {}) => Buffer.concat([JPEG, Buffer.from(JSON.stringify({
 // ── O sistema de obras e a IA, de mentira ─────────────────────────────────
 const chamadas = []
 let lancadosNoSistema = []
+/** Para trocar a resposta inteira do /lancados: um objeto, ou 404. */
+let respostaDosLancados = null
 let leiturasDaIA = 0
 const srv = createServer((req, res) => {
   let corpo = ''
@@ -108,7 +110,10 @@ const srv = createServer((req, res) => {
     chamadas.push({ url: req.url, metodo: req.method, corpo, chave: req.headers['idempotency-key'] ?? null })
     const campo = (n) => new RegExp(`name="${n}"\r?\n\r?\n([^\r]*)`).exec(corpo)?.[1] ?? null
     if (req.url.endsWith('/comprovantes/obras')) return json(200, { obras: OBRAS, pagadores: ['Ana', 'Beto'] })
-    if (req.url.includes('/comprovantes/lancados')) return json(200, { lancados: lancadosNoSistema })
+    if (req.url.includes('/comprovantes/lancados')) {
+      if (respostaDosLancados === 404) return json(404, { message: 'Cannot GET' })
+      return json(200, respostaDosLancados ?? { lancados: lancadosNoSistema })
+    }
     if (req.url.endsWith('/comprovantes/lancar')) {
       const obra = campo('obra')
       return json(201, { ok: true, id: 'g1', obra, obras: [obra], pagoPor: campo('pagoPor'), mensagem: `Lançado em ${obra}, aguardando sua aprovação.` })
@@ -533,6 +538,51 @@ let zipOn
   await atraso._aguardar()
   ok('citando a pergunta do atraso, a resposta vai para ele',
     lancs().length === antes + 2 && campoDe(lancs().at(-1).corpo, 'valor') === '71' && campoDe(lancs().at(-1).corpo, 'empresaPagou') === 'true')
+}
+
+// ── Sem saber o que já está lançado, o atraso PARA ────────────────────────
+// No dia a dia, sem a lista do sistema o robô compara com a memória e segue.
+// Aqui não: lançaria em dobro tudo que foi digitado à mão.
+{
+  const zip = gravarZip('parada.zip', [
+    { nome: '_chat.txt', dados: Buffer.from(`[${br(D3)}, 16:00:00] Maria: haia vidro 444 ‎<anexado: 00000201-PHOTO.jpg>`) },
+    { nome: '00000201-PHOTO.jpg', dados: foto() },
+  ])
+  const nLancs = lancs().length
+  const nEnvios = envios.length
+
+  // A lista veio CORTADA (mais de 2.000 lançamentos no período).
+  atraso._reiniciar()
+  _limparCacheObras()
+  respostaDosLancados = { truncado: true, lancados: [
+    { origem: 'gasto', obra: OBRAS[1], valor: 1, data: diasAtras(3), status: 'APROVADO' },
+    { origem: 'gasto', obra: OBRAS[1], valor: 2, data: diasAtras(9), status: 'APROVADO' },
+    { origem: 'conta', obra: OBRAS[1], valor: 3, data: diasAtras(5), status: 'PENDENTE' },
+  ] }
+  await atraso.iniciarAtraso({ zip, desde: CORTE })
+  await atraso._aguardar()
+  let s = situacaoDoAtraso()
+  ok('lista cortada: a leitura PARA, sem lançar', lancs().length === nLancs && /incompleta/.test(s.trabalho.erro ?? ''))
+  ok('diz a partir de quando a lista está completa', (s.trabalho.erro ?? '').includes(`?desde=${diasAtras(4)}`))
+  ok('o motivo vira o resumo', /PARADA/.test(s.resumo ?? ''))
+  ok('e é dito UMA vez no grupo de conversa', envios.length === nEnvios + 1 && /PARADA/.test(envios.at(-1).texto) && envios.at(-1).para === GRUPO)
+
+  // O sistema não tem a consulta (versão anterior).
+  atraso._reiniciar()
+  _limparCacheObras()
+  respostaDosLancados = 404
+  await atraso.iniciarAtraso({ zip, desde: CORTE })
+  await atraso._aguardar()
+  s = situacaoDoAtraso()
+  ok('sem a consulta de lançados: também para, sem lançar', lancs().length === nLancs && /Não consegui consultar/.test(s.trabalho.erro ?? ''))
+
+  // Voltou: o mesmo zip de novo segue de onde parou.
+  atraso._reiniciar()
+  _limparCacheObras()
+  respostaDosLancados = null
+  await atraso.iniciarAtraso({ zip, desde: CORTE })
+  await atraso._aguardar()
+  ok('com o sistema respondendo de novo, o mesmo zip é lançado', lancs().length === nLancs + 1 && campoDe(lancs().at(-1).corpo, 'valor') === '444')
 }
 
 // ── Sem grupo aceito, não liga ────────────────────────────────────────────

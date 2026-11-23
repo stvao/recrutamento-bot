@@ -387,11 +387,51 @@ export async function lancadosDoSistema(desde) {
 
     const j = await r.json()
     if (!Array.isArray(j?.lancados)) return guardar(null)
-    return guardar(j.lancados.filter(l => l && typeof l === 'object'))
+    const lista = j.lancados.filter(l => l && typeof l === 'object')
+
+    /*
+      O sistema devolve no máximo 2.000 itens, do mais recente para o mais
+      antigo, e avisa quando cortou. Cortada, a lista NÃO é o período
+      inteiro: faltam justamente os mais antigos — e não há como pedi-los,
+      porque a consulta só aceita "de quando para cá" (um `desde` mais
+      recente devolve os mesmos itens, não os que faltaram).
+
+      Então a lista vai MARCADA, com a data a partir da qual está completa.
+      Quem compara decide o que fazer: no dia a dia ela continua servindo (o
+      que interessa ali é recente); no atraso, que compara meses, a leitura
+      para em vez de tratar "não veio" como "não existe".
+    */
+    if (j.truncado === true) {
+      lista.truncado = true
+      lista.cobreDesde = completaDesde(lista)
+      console.warn(`[obras] ⚠ a lista de lançados veio CORTADA em ${lista.length} itens — só está completa de ${lista.cobreDesde ?? '?'} para cá. O que for mais antigo não entra na comparação de repetido.`)
+    }
+    return guardar(lista)
   } catch (e) {
     console.warn('[obras] falha ao consultar os lançados:', e.message)
     return null
   }
+}
+
+/**
+ * A partir de que dia uma lista cortada está completa.
+ *
+ * Gastos e contas são cortados cada um por conta própria, do mais recente
+ * para o mais antigo. Não se sabe qual dos dois estourou — então vale o mais
+ * prudente: o dia SEGUINTE ao mais antigo que veio, na origem que alcança
+ * menos longe. Daí para cá, nada faltou.
+ */
+function completaDesde(lista) {
+  const maisAntigoPorOrigem = new Map()
+  for (const l of lista) {
+    const dia = String(l.data ?? '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) continue
+    const origem = l.origem ?? '?'
+    if (!maisAntigoPorOrigem.has(origem) || dia < maisAntigoPorOrigem.get(origem)) maisAntigoPorOrigem.set(origem, dia)
+  }
+  if (!maisAntigoPorOrigem.size) return null
+  const limite = [...maisAntigoPorOrigem.values()].sort().at(-1)
+  return new Date(Date.parse(`${limite}T12:00:00Z`) + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 }
 
 /** Só para teste: esquece as obras guardadas (e os lançados consultados). */
