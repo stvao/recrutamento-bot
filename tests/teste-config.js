@@ -11,7 +11,8 @@
  * recusava tudo e a única pista era uma linha dizendo que as variáveis não
  * estavam configuradas — com o arquivo cheio delas do lado.
  */
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parse } from '../src/config.js'
 
@@ -60,9 +61,7 @@ CHAVE-INVALIDA=x
 // ── Acha o arquivo do PROJETO, venha de onde vier ─────────────────────────
 // É o defeito que motivou o módulo: o pm2 inicia de outro diretório.
 {
-  const pasta = join(process.cwd(), 'dados', 'teste-config')
-  rmSync(pasta, { recursive: true, force: true })
-  mkdirSync(pasta, { recursive: true })
+  const pasta = mkdtempSync(join(tmpdir(), 'teste-config-'))
   const arquivo = join(pasta, '.env-de-teste')
   writeFileSync(arquivo, 'VAR_DO_ARQUIVO=veio-do-arquivo\nVAR_JA_NO_AMBIENTE=do-arquivo\n', 'utf8')
 
@@ -87,7 +86,7 @@ CHAVE-INVALIDA=x
 
 // ── Arquivo ausente é dito em voz alta, não engolido ──────────────────────
 {
-  process.env.ENV_FILE = join(process.cwd(), 'dados', 'nao-existe', '.env')
+  process.env.ENV_FILE = join(tmpdir(), 'nao-existe', '.env')
   const { carregar } = await import(`../src/config.js?t=${Date.now()}b`)
   const r = carregar()
   ok('diz que não achou', r.achou === false)

@@ -12,10 +12,15 @@
  * perdido não.
  */
 import { createServer } from 'node:http'
-import { rmSync } from 'node:fs'
+import { rmSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-const PASTA = './dados/teste-pendentes-pagador'
+// Fora de dados/: é ali que mora o que o robô de verdade guarda, e teste
+// não escreve onde a produção lê.
+const PASTA = mkdtempSync(join(tmpdir(), 'teste-pendentes-pagador-'))
 process.env.GASTOS_PENDENTES_DIR = PASTA
+process.env.GASTOS_MEMORIA = join(PASTA, 'memoria-gastos.json')
 process.env.GEMINI_API_KEY = ''
 process.env.GASTOS_AUTORIZADOS = '*'
 process.env.GASTOS_GRUPOS = '123@g.us'

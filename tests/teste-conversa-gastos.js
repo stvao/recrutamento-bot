@@ -10,10 +10,15 @@
  * imagem.
  */
 import { createServer } from 'node:http'
-import { rmSync } from 'node:fs'
+import { rmSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-const PASTA = './dados/teste-pendentes'
+// Fora de dados/: é ali que mora o que o robô de verdade guarda, e teste
+// não escreve onde a produção lê.
+const PASTA = mkdtempSync(join(tmpdir(), 'teste-pendentes-'))
 process.env.GASTOS_PENDENTES_DIR = PASTA
+process.env.GASTOS_MEMORIA = join(PASTA, 'memoria-gastos.json')
 process.env.GEMINI_API_KEY = ''            // sem leitura de imagem, de propósito
 process.env.GASTOS_AUTORIZADOS = '*'
 // Pelo IDENTIFICADOR, e não pelo nome: com o coringa '*', quem está no
@@ -509,6 +514,22 @@ const enviados = () => lancados() + naCaixa()
   ok('o número escolhe o comprovante', /Certo, é o/i.test(r ?? ''))
   await p.diz('haia cimento 50'); await espera(20)
   ok('e a resposta seguinte vai para ele, sem voltar a lista', lancados() === 1)
+}
+
+// ── O número respondido CITANDO também põe o comprovante em foco ──────────
+// Quem citava uma mensagem para mandar o número era atendido por outro
+// trecho, que escolhia sem guardar o foco: a resposta seguinte, sem citação,
+// fazia a lista voltar.
+{
+  const p = pessoa('5511900000090')
+  await p.foto('nota P', 'fp2'); await espera(15)
+  await p.foto('nota Q', 'fq2'); await espera(15)
+  const lista = await p.diz('haia cimento 50')
+  ok('sem citação, lista os comprovantes (de novo)', /qual/i.test(lista ?? ''))
+  const r = await p.diz('2', p.ultimoId())
+  ok('o número citando escolhe o comprovante', /Certo, é o/i.test(r ?? ''))
+  await p.diz('haia cimento 50'); await espera(20)
+  ok('e a resposta seguinte vai para ele, sem voltar a lista (citando)', lancados() === 1)
 }
 
 // ── Respondendo o VALOR com um número pequeno ─────────────────────────────

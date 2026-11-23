@@ -5,9 +5,17 @@
  * simplesmente não chegava do outro lado. Teste que os prenda é a única
  * forma de não voltarem na próxima refatoração.
  */
-import { _corpoDaCandidatura } from '../src/rh-client.js'
-import { _envelhecer, _expirar, setEstado, getEstado, _limparTudo, metricas } from '../src/store.js'
-import { atender } from '../src/atendimento.js'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+// Antes de carregar o store: sem isto ele gravava em dados/conversas.json,
+// que é onde o robô de verdade guarda as conversas.
+process.env.ESTADO_ARQUIVO = join(mkdtempSync(join(tmpdir(), 'ficha-costura-')), 'conversas.json')
+
+const { _corpoDaCandidatura } = await import('../src/rh-client.js')
+const { _envelhecer, _expirar, setEstado, getEstado, _limparTudo, metricas } = await import('../src/store.js')
+const { atender } = await import('../src/atendimento.js')
 
 let falhas = 0
 function ok(desc, cond) {

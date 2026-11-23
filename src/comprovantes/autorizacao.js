@@ -60,10 +60,7 @@ export const GRUPOS = new Set(
  * "120363044...@g.us", mas todo mundo sabe que ele se chama "Comprovantes".
  * Aceitar o nome tira um passo de configuração que só existia por limitação
  * nossa.
- */
-const GRUPOS_NORM = new Set([...GRUPOS].map(g => norm(g)))
-
-/**
+ *
  * Perigo do nome: qualquer um pode criar um grupo chamado "Comprovantes",
  * botar o robô dentro e mandar comprovante.
  *
@@ -76,7 +73,7 @@ const GRUPOS_NORM = new Set([...GRUPOS].map(g => norm(g)))
  * virava a chave inteira. O coringa passou a exigir que o grupo tenha casado
  * pelo IDENTIFICADOR, que o WhatsApp atribui e ninguém escolhe.
  */
-
+const GRUPOS_NORM = new Set([...GRUPOS].map(g => norm(g)))
 
 export function coringaInvalido() {
   return QUALQUER_UM_DO_GRUPO && GRUPOS.size === 0

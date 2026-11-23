@@ -51,17 +51,8 @@ export function responderTexto(de, texto, respondendoA, enviar) {
     const so = texto.trim().replace(/[).\s]+$/, '')
     const comLista = perguntados.find(p => p.opcoesPendentes?.length)
     if (/^\d{1,2}$/.test(so) && comLista) {
-      const escolhido = pendentes.porId(comLista.opcoesPendentes[Number(so) - 1])
-      for (const id of comLista.opcoesPendentes) {
-        const outro = pendentes.porId(id)
-        if (outro) { delete outro.opcoesPendentes; pendentes.atualizar(outro) }
-      }
-      if (escolhido) {
-        escolhido.focoAte = Date.now() + 15 * 60 * 1000
-        pendentes.atualizar(escolhido)
-        return `Certo, é o "${apelidoDoItem(escolhido)}". Agora me responde: ` +
-          `${escolhido.ultimaPergunta ?? 'o que falta nele?'}`
-      }
+      const dito = escolherPeloNumero(comLista.opcoesPendentes, so)
+      if (dito) return dito
     }
     const emFoco = perguntados.find(p => p.focoAte > Date.now())
 
@@ -96,6 +87,26 @@ export function responderTexto(de, texto, respondendoA, enviar) {
 
   if (enviar) alvo.enviar = enviar
   return aplicarResposta(alvo, texto)
+}
+
+/**
+ * A pessoa mandou o número de um comprovante da lista ("Esta é de qual?").
+ *
+ * Desfaz a numeração em todos, e deixa o escolhido em FOCO por alguns
+ * minutos: é o que faz a resposta seguinte, sem citação, ir para ele em vez
+ * de a lista voltar. Devolve o que dizer, ou null se o número não existe.
+ */
+function escolherPeloNumero(opcoes, so) {
+  const escolhido = pendentes.porId(opcoes[Number(so) - 1])
+  for (const id of opcoes) {
+    const outro = pendentes.porId(id)
+    if (outro) { delete outro.opcoesPendentes; pendentes.atualizar(outro) }
+  }
+  if (!escolhido) return null
+  escolhido.focoAte = Date.now() + 15 * 60 * 1000
+  pendentes.atualizar(escolhido)
+  return `Certo, é o "${apelidoDoItem(escolhido)}". Agora me responde: ` +
+    `${escolhido.ultimaPergunta ?? 'o que falta nele?'}`
 }
 
 /** Aplica o que a pessoa respondeu ao comprovante certo. */
@@ -138,16 +149,14 @@ function aplicarResposta(p, texto) {
   const so = texto.trim().replace(/[).\s]+$/, '')
 
   // Escolheu um COMPROVANTE pelo número, quando havia vários sem citação.
+  //
+  // Chega aqui quem respondeu o número CITANDO uma mensagem. Antes este
+  // caminho escolhia sem pôr o comprovante em foco, e a resposta seguinte
+  // sem citação fazia a lista voltar — o mesmo defeito já corrigido no
+  // caminho sem citação.
   if (/^\d{1,2}$/.test(so) && p.opcoesPendentes?.length) {
-    const escolhido = pendentes.porId(p.opcoesPendentes[Number(so) - 1])
-    for (const id of p.opcoesPendentes) {
-      const outro = pendentes.porId(id)
-      if (outro) { delete outro.opcoesPendentes; pendentes.atualizar(outro) }
-    }
-    if (escolhido) {
-      return `Certo, é o "${apelidoDoItem(escolhido)}". Agora me responde: ` +
-        `${escolhido.ultimaPergunta ?? 'o que falta nele?'}`
-    }
+    const dito = escolherPeloNumero(p.opcoesPendentes, so)
+    if (dito) return dito
   }
 
   /*

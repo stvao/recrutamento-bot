@@ -41,15 +41,6 @@ import { OBRAS_RESERVA, processarUmaVez, entregar, timersLegenda } from './proce
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 
-/**
- * Quanto esperar por uma descrição que vem em mensagem separada.
- *
- * Muita gente manda a foto e escreve o "o que é" logo em seguida, em outra
- * mensagem. Enviar na hora perderia essa descrição — e é ela que diz de qual
- * obra é o gasto, que o comprovante não informa.
- */
-const ESPERA_DESCRICAO_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 60000)
-
 /** Diagnóstico, para o /metricas. */
 export function situacao() {
   return {
@@ -79,7 +70,8 @@ const MAX_ESPERANDO = Number(process.env.GASTOS_MAX_AGUARDANDO || 50)
  * Quanto esperar por uma legenda que vem em mensagem separada.
  *
  * Muita gente manda a foto e escreve o "o que é" logo em seguida. Perguntar
- * antes disso seria perguntar o que a pessoa já ia dizer.
+ * antes disso seria perguntar o que a pessoa já ia dizer — e é essa descrição
+ * que diz de qual obra é o gasto, que o comprovante não informa.
  */
 const ESPERA_LEGENDA_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 60000)
 

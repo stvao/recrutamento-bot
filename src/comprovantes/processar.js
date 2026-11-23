@@ -151,7 +151,7 @@ export function entregar(p, texto) {
  * Devolve `{ perguntando, texto }`. Quem chama precisa saber a diferença:
  * uma pergunta trava a fila esperando resposta; o resto segue adiante.
  */
-async function processar(pendente, { acabouOTempo = false } = {}) {
+async function processar(pendente) {
   const obras = await obrasConhecidas()
 
   /*
@@ -209,7 +209,7 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
   if (!dados.obra) falta.push('obra')
   if (dados.valor == null) falta.push('valor')
 
-  if (falta.length && !acabouOTempo && !pendente.jaPerguntou) {
+  if (falta.length && !pendente.jaPerguntou) {
     return { perguntando: true, texto: perguntar(pendente, falta, obras) }
   }
   if (falta.length) {
@@ -230,7 +230,7 @@ async function processar(pendente, { acabouOTempo = false } = {}) {
     um mau negócio: o campo se completa na aprovação, o gasto perdido não.
   */
   const socios = pagadoresConhecidos()
-  if (!dados.pagoPor && socios.length && !pendente.pagadorPerguntado && !acabouOTempo) {
+  if (!dados.pagoPor && socios.length && !pendente.pagadorPerguntado) {
     pendente.pagadorPerguntado = true
     pendente.esperandoPagador = true
     pendente.jaPerguntou = true
