@@ -350,6 +350,57 @@ async function postarLancamento({ arquivo, nomeArquivo, tipo, obra, valor, descr
 }
 
 /**
+ * Corrige um gasto que ainda está PENDENTE: `campos` é um subconjunto de
+ * valor, obra, descricao, categoria e data.
+ *
+ * Devolve `{ ok, gasto }` com o gasto como ficou, ou `{ ok: false, status }`:
+ * 409 = já foi aprovado ou rejeitado (ou é rateio e pediu-se trocar a obra);
+ * 422 = não reconheceu a obra, e vem a lista em `obras`; 404 = o token não
+ * pode ver esse gasto, ou o servidor ainda não tem a rota. Nunca lança.
+ */
+export async function corrigirLancado(id, campos) {
+  return mexerNoLancado('PATCH', id, campos)
+}
+
+/** Cancela um gasto PENDENTE (fica como rejeitado, com rastro). Mesmas respostas de `corrigirLancado`. */
+export async function cancelarLancado(id) {
+  return mexerNoLancado('DELETE', id, null)
+}
+
+async function mexerNoLancado(metodo, id, campos) {
+  if (!OBRAS_API_TOKEN) return { ok: false, motivo: 'nao-configurado' }
+  if (!id) return { ok: false, status: 404, motivo: 'sem-id' }
+  try {
+    const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancados/${encodeURIComponent(String(id))}`, {
+      method: metodo,
+      headers: {
+        Authorization: `Bearer ${OBRAS_API_TOKEN}`,
+        ...(campos ? { 'Content-Type': 'application/json' } : {}),
+      },
+      body: campos ? JSON.stringify(campos) : undefined,
+      signal: AbortSignal.timeout(15000),
+    })
+    const cru = await r.text()
+    let j = {}
+    try { j = cru ? JSON.parse(cru) : {} } catch { j = {} }
+
+    if (r.ok) return { ok: true, gasto: j.gasto ?? j }
+    if (r.status !== 409 && r.status !== 422 && r.status !== 404) {
+      console.error(`[obras] ${metodo} /lancados recusou ${r.status}: ${cru.slice(0, 300)}`)
+    }
+    return {
+      ok: false,
+      status: r.status,
+      motivo: j.mensagem || (typeof j.message === 'string' ? j.message : null) || `HTTP ${r.status}`,
+      obras: j.obras ?? j.message?.obras ?? null,
+    }
+  } catch (e) {
+    console.error(`[obras] ${metodo} /lancados falhou:`, e.message)
+    return { ok: false, motivo: e.message }
+  }
+}
+
+/**
  * O que já está lançado no sistema, de uma data para cá.
  *
  * É o que deixa o robô desconfiar de repetido olhando o SISTEMA, e não só a

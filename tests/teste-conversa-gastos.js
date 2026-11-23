@@ -137,9 +137,11 @@ function pessoa(de) {
   const ditos = []
   let n = 0
 
+  const enviadas = []
   const enviarResposta = async (t) => {
     ditos.push(t)
-    return { id: `bot-${de}-${++n}` }   // o id que ela vai citar
+    enviadas.push({ id: `bot-${de}-${++n}`, texto: t })
+    return { id: `bot-${de}-${n}` }   // o id que ela vai citar
   }
 
   const guardar = (r) => { if (typeof r === 'string') ditos.push(r); return r }
@@ -147,6 +149,9 @@ function pessoa(de) {
   return {
     ditos,
     ultimoId: () => `bot-${de}-${n}`,
+    // O id da PRIMEIRA mensagem do robô que casa — a pergunta, e não o
+    // lembrete que a ronda pode mandar no meio quando o teste roda devagar.
+    idDe: (padrao) => enviadas.find(e => padrao.test(e.texto))?.id ?? null,
     foto: async (texto, id) => guardar(await tratar({
       ...base, de, arquivo: outraFoto(), nomeArquivo: 'c.jpg', tipo: 'image/jpeg',
       texto, idMensagem: id ?? `foto-${de}-${Math.random().toString(36).slice(2, 8)}`,
@@ -196,9 +201,9 @@ const enviados = () => lancados() + naCaixa()
   const p = pessoa('5511900000003')
 
   await p.foto('nota A', 'foto-A'); await espera(15)
-  const idA = p.ultimoId()
+  const idA = p.idDe(/nota A/)
   await p.foto('nota B', 'foto-B'); await espera(15)
-  const idB = p.ultimoId()
+  const idB = p.idDe(/nota B/)
   await p.foto('nota C', 'foto-C'); await espera(15)
 
   ok('perguntou sobre os três', p.ditos.filter(t => /obra/i.test(t)).length >= 3)

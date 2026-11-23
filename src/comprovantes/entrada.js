@@ -39,6 +39,8 @@ import {
 } from './conversa.js'
 import { OBRAS_RESERVA, processarUmaVez, entregar, timersLegenda } from './processar.js'
 import { remetenteDaResposta } from './atraso.js'
+import { tentarCorrecao } from './correcao.js'
+import { atendimento } from './saida.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 
@@ -93,7 +95,59 @@ function telefoneDeQuemMandou(msg) {
   return /^55\d{10,11}$/.test(numero) ? numero : null
 }
 
+/**
+ * As confirmações "✅ Lançado" que estão para sair.
+ *
+ * Quem manda a resposta é o conector (ele cita a mensagem, cuida do ritmo).
+ * Este módulo só devolve o texto — e por isso não sabe o id da mensagem que
+ * saiu. O conector avisa de volta (`respostaEnviada`), e aqui se guarda,
+ * por pouco tempo, a QUAL comprovante aquela resposta se refere.
+ */
+const confirmacoesASair = new Map()   // id da mensagem recebida → { idComprovante, ate }
+const VALIDADE_CONFIRMACAO_MS = 5 * 60 * 1000
+
 export async function tratar(msg) {
+  const contexto = { lancados: [] }
+  const resposta = await atendimento.run(contexto, () => atender(msg))
+
+  // Um lançamento aconteceu atendendo esta mensagem, e o texto dele está
+  // voltando por aqui: a resposta a ESTA mensagem é a confirmação DAQUELE
+  // comprovante.
+  if (typeof resposta === 'string' && contexto.lancados.length === 1 && msg.idMensagem) {
+    const agora = Date.now()
+    for (const [id, c] of confirmacoesASair) if (c.ate < agora) confirmacoesASair.delete(id)
+    confirmacoesASair.set(String(msg.idMensagem), { idComprovante: contexto.lancados[0], ate: agora + VALIDADE_CONFIRMACAO_MS })
+  }
+  return resposta
+}
+
+/**
+ * O conector avisa: a resposta à mensagem `idRecebida` saiu, com o id
+ * `idResposta`.
+ *
+ * Se era a confirmação de um lançamento, o id fica guardado junto dele — e a
+ * pessoa passa a poder corrigir o gasto citando o "✅ Lançado", que é o que
+ * ela tem na frente, e não só a foto lá em cima.
+ */
+export function respostaEnviada(idRecebida, idResposta) {
+  if (!idRecebida || !idResposta) return false
+  const chave = String(idRecebida)
+  const esperada = confirmacoesASair.get(chave)
+  confirmacoesASair.delete(chave)
+
+  let idComprovante = esperada && esperada.ate >= Date.now() ? esperada.idComprovante : null
+
+  // A foto ficou esperando a legenda e o lançamento saiu atendendo OUTRA
+  // mensagem — mas a confirmação responde à foto. Então a própria mensagem
+  // respondida é o comprovante.
+  if (!idComprovante) {
+    const l = memoria.resultadoDe(chave)
+    if (l?.resultado === 'lancado' && !l.idConfirmacao && Date.now() - l.quando < VALIDADE_CONFIRMACAO_MS) idComprovante = chave
+  }
+  return idComprovante ? memoria.anotarConfirmacao(idComprovante, idResposta) : false
+}
+
+async function atender(msg) {
   const { de, chat, chatNome, arquivo, nomeArquivo, tipo, texto, idMensagem } = msg
 
   if (!origemAceita(chat, chatNome)) return null
@@ -118,6 +172,14 @@ export async function tratar(msg) {
     dezenas de comprovantes que outra rotina está tratando não é coisa para
     duas palavras num grupo.
   */
+  // Citou um gasto JÁ LANÇADO e escreveu uma correção ("valor 1800",
+  // "apagar")? Vem antes de tudo: é o único texto que mexe no que já entrou,
+  // e só vale com citação. `undefined` = não é correção, segue o de sempre.
+  if (!arquivo) {
+    const correcao = await tentarCorrecao(msg)
+    if (correcao !== undefined) return correcao
+  }
+
   const quem = arquivo ? de : remetenteDaResposta(msg)
 
   if (!arquivo && LISTAR.test(texto ?? '')) return listar(quem)

@@ -7,6 +7,7 @@
 import { enviarComprovante, lancarGasto } from './obras-client.js'
 import { perguntar } from './perguntas.js'
 import { moeda, dataCurta } from './formato.js'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 
@@ -60,6 +61,16 @@ export function diaDoEnvio(enviadoEm) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' })
     .format(new Date(enviadoEm ?? Date.now()))
 }
+
+/**
+ * O que aconteceu durante o atendimento de UMA mensagem.
+ *
+ * `entrada.js` abre isto ao receber a mensagem; aqui se anota o comprovante
+ * que foi lançado no caminho. É o que permite, lá no fim, ligar a resposta
+ * "✅ Lançado" — que quem manda é o conector, não este módulo — ao gasto de
+ * que ela fala, para ele poder ser corrigido citando a confirmação.
+ */
+export const atendimento = new AsyncLocalStorage()
 
 /**
  * Até quantos dias antes do envio a data lida no papel ainda vale.
@@ -159,7 +170,9 @@ export async function lancar(pendente, dados) {
       idMensagem: pendente.idMensagem,
       documento: dados.documento, arquivoHash: pendente.arquivoHash,
       data,
+      idGasto: r.id ?? null, rateado: r.rateio?.length > 1, chat: pendente.chat ?? null,
     })
+    atendimento.getStore()?.lancados.push(pendente.idMensagem ?? pendente.id)
     const linhas = [`✅ ${r.mensagem || 'Lançado, aguardando aprovação.'}`]
     linhas.push([
       r.rateio?.length > 1 ? null : r.obra,

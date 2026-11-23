@@ -94,8 +94,15 @@ for (const sinal of ['SIGINT', 'SIGTERM', 'beforeExit', 'exit']) process.on(sina
  * `data` é o dia com que o gasto entrou no sistema (AAAA-MM-DD) — que pode
  * não ser hoje: é a data do comprovante, quando ela é conhecida. `quando`
  * continua sendo o instante em que o robô lançou.
+ *
+ * `idGasto` é o id que o sistema deu ao gasto. É por ele que se corrige ou
+ * cancela depois, pelo grupo — e, com o `idMensagem` do comprovante e o
+ * `idConfirmacao` da mensagem "✅ Lançado" (anotado depois, quando ela sai),
+ * é o que liga uma mensagem CITADA ao gasto de que ela fala. Vale enquanto o
+ * lançamento ficar na memória (30 dias), que é mais do que um gasto fica
+ * pendente.
  */
-export function anotarLancamento({ obra, valor, descricao, categoria, de, resultado, idMensagem, documento, arquivoHash, data }) {
+export function anotarLancamento({ obra, valor, descricao, categoria, de, resultado, idMensagem, documento, arquivoHash, data, idGasto, rateado, chat }) {
   dados.lancamentos.push({
     obra: obra ?? null,
     valor: valor ?? null,
@@ -107,6 +114,10 @@ export function anotarLancamento({ obra, valor, descricao, categoria, de, result
     documento: documento ?? null,
     arquivoHash: arquivoHash ?? null,
     data: data ?? null,
+    idGasto: idGasto ?? null,
+    rateado: Boolean(rateado),
+    chat: chat ?? null,
+    idConfirmacao: null,
     quando: Date.now(),
   })
 
@@ -141,6 +152,54 @@ export function lancadosRecentes() {
 export function resultadoDe(idMensagem) {
   if (!idMensagem) return null
   return dados.lancamentos.filter(l => l.idMensagem === idMensagem).sort((a, b) => b.quando - a.quando)[0] ?? null
+}
+
+/**
+ * O gasto LANÇADO de que uma mensagem citada fala: a citação pode ser do
+ * comprovante, ou da confirmação "✅ Lançado". Devolve null se não é nenhum
+ * dos dois (ou se o lançamento já saiu da memória).
+ */
+export function lancamentoCitado(idCitado) {
+  if (!idCitado) return null
+  return dados.lancamentos
+    .filter(l => l.resultado === 'lancado' && (l.idMensagem === idCitado || l.idConfirmacao === idCitado))
+    .sort((a, b) => b.quando - a.quando)[0] ?? null
+}
+
+/** Anota o id da mensagem de confirmação de um lançamento. */
+export function anotarConfirmacao(idMensagem, idConfirmacao) {
+  const l = resultadoDe(idMensagem)
+  if (!l || l.resultado !== 'lancado' || !idConfirmacao) return false
+  l.idConfirmacao = idConfirmacao
+  sujo = true
+  return true
+}
+
+/**
+ * O lançamento foi corrigido no sistema: a memória acompanha.
+ *
+ * Sem isto a comparação de repetido e o fechamento do dia continuariam com
+ * o valor (ou a obra) de antes — e o robô perguntaria "é o mesmo?" com um
+ * número que não existe mais.
+ */
+export function corrigirLancamento(idMensagem, campos) {
+  const l = resultadoDe(idMensagem)
+  if (!l) return false
+  for (const chave of ['valor', 'obra', 'data', 'categoria', 'descricao']) {
+    if (campos[chave] !== undefined) l[chave] = campos[chave]
+  }
+  sujo = true
+  return true
+}
+
+/** O lançamento foi cancelado no sistema: sai da memória. */
+export function esquecerLancamento(idMensagem) {
+  if (!idMensagem) return false
+  const antes = dados.lancamentos.length
+  dados.lancamentos = dados.lancamentos.filter(l => !(l.idMensagem === idMensagem && l.resultado === 'lancado'))
+  if (dados.lancamentos.length === antes) return false
+  sujo = true
+  return true
 }
 
 /** O que entrou num dia. `dia` é o começo do dia, em ms. */

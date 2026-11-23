@@ -558,7 +558,12 @@ export async function conectar(aoReceber) {
         })
         // Em grupo, responde citando a mensagem: com várias pessoas mandando
         // comprovante junto, confirmação solta não diz de qual foto é.
-        if (resposta) await responder(jid, resposta, { citar: grupo ? msg : null, rapido: grupo })
+        if (resposta) {
+          const enviada = await responder(jid, resposta, { citar: grupo ? msg : null, rapido: grupo })
+          // O módulo de comprovantes guarda o id da confirmação "✅ Lançado":
+          // é citando ela que a pessoa corrige o gasto depois.
+          gastos.respostaEnviada(msg.key.id, enviada?.id ?? null)
+        }
       } catch (e) {
         console.error('[whatsapp] erro ao atender:', e.message)
         if (pessoal && recrutamentoLigado()) await responder(jid, 'Tive um probleminha aqui no sistema. Pode repetir, por favor?')

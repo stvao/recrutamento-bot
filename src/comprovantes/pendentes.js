@@ -164,7 +164,7 @@ export function quantos() {
 export function porCitacao(de, idCitado) {
   if (!idCitado) return null
   return doRemetente(de).find(p =>
-    p.idMensagem === idCitado || p.idPergunta === idCitado) ?? null
+    p.idMensagem === idCitado || p.idPergunta === idCitado || p.idLembrete === idCitado) ?? null
 }
 
 /**

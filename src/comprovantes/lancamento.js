@@ -527,6 +527,18 @@ const CLASSIFICADORES = {
 const TODOS_OS_CLASSIFICADORES = Object.entries(CLASSIFICADORES)
   .flatMap(([cat, ts]) => ts.map(t => ({ termo: t, cat })))
 
+/**
+ * A categoria, quando o texto INTEIRO é a palavra que a diz ("material",
+ * "locação", "mão de obra"). Devolve null para qualquer outra coisa —
+ * inclusive para as pistas ("cimento"), que descrevem a compra e não são um
+ * pedido para trocar o tipo.
+ */
+export function categoriaEscrita(texto) {
+  const alvo = norm(texto ?? '')
+  if (!alvo) return null
+  return TODOS_OS_CLASSIFICADORES.find(t => norm(t.termo) === alvo)?.cat ?? null
+}
+
 /** Sobras de preposição no começo da descrição, depois de tirar uma palavra. */
 function limparBordas(t) {
   return (t || '')

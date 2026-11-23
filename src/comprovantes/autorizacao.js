@@ -138,6 +138,17 @@ export function autorizado(de, deGrupoCadastrado = false) {
 }
 
 /**
+ * Este número está na lista EXPLÍCITA de autorizados?
+ *
+ * Mais estreito que `autorizado()`: o coringa do grupo não conta. Serve para
+ * o que pede mais do que "pode lançar o próprio gasto" — corrigir ou cancelar
+ * o lançamento de outra pessoa, por exemplo.
+ */
+export function numeroNaLista(de) {
+  return AUTORIZADOS.has(String(de ?? '').replace(/\D/g, ''))
+}
+
+/**
  * A pergunta completa: esta mensagem pode lançar gasto?
  *
  * Reúne origem e remetente num lugar só. Antes cada chamador combinava as

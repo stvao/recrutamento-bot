@@ -33,7 +33,7 @@ export const OBRAS_RESERVA = (process.env.GASTOS_OBRAS || '')
  * busca por palavra distintiva já varre — assim "escola do zé", uma vez
  * confirmado por você, passa a achar a obra sozinho, sem caminho novo.
  */
-async function obrasConhecidas() {
+export async function obrasConhecidas() {
   const doSistema = (await obrasDoSistema()) ?? OBRAS_RESERVA
   const aprendidos = memoria.apelidosPorObra(doSistema)
   if (!aprendidos.size) return doSistema

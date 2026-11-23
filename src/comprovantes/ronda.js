@@ -8,6 +8,7 @@ import { processarUmaVez, avisar, emAndamento, timersLegenda } from './processar
 import { paraCaixa } from './saida.js'
 import { apelidoDoItem, faz } from './formato.js'
 import * as pendentes from './pendentes.js'
+import * as memoria from './memoria.js'
 
 /**
  * Quando cobrar, e quando desistir.
@@ -58,7 +59,12 @@ async function ronda() {
     p.esperandoLegendaAte = 0
     const jaRecusadoAntes = !!p.caixaRecusouEm
     const texto = await processarUmaVez(p)
-    if (texto && !(jaRecusadoAntes && p.caixaRecusouEm)) await avisar(p, texto)
+    if (texto && !(jaRecusadoAntes && p.caixaRecusouEm)) {
+      const id = await avisar(p, texto)
+      // A confirmação saiu daqui: guarda o id dela, para poder ser citada
+      // numa correção.
+      if (id && p.desfecho === 'lancado') memoria.anotarConfirmacao(p.idMensagem, id)
+    }
   }
 
   for (const p of pendentes.todos()) {
@@ -84,7 +90,10 @@ async function ronda() {
         p.pagadorPerguntado = true
         pendentes.atualizar(p)
         const texto = await processarUmaVez(p)
-        if (texto) await avisar(p, `⏰ Ninguém disse quem pagou, então lancei sem essa informação.\n${texto}`)
+        if (texto) {
+          const id = await avisar(p, `⏰ Ninguém disse quem pagou, então lancei sem essa informação.\n${texto}`)
+          if (id && p.desfecho === 'lancado') memoria.anotarConfirmacao(p.idMensagem, id)
+        }
         continue
       }
 
@@ -103,11 +112,15 @@ async function ronda() {
     if (parado > COBRAR_APOS_MS && !p.cobradoEm) {
       p.cobradoEm = agora
       pendentes.atualizar(p)
-      await avisar(p,
+      // O lembrete diz "responde citando esta mensagem" — então o id dele
+      // tem de valer como citação. Não valia: quem citava o lembrete caía na
+      // lista "esta é de qual?".
+      const idLembrete = await avisar(p,
         `🔔 Lembrete: este comprovante ainda está esperando desde ${faz(parado)}.\n`
         + `${apelidoDoItem(p)}\n`
         + `${p.ultimaPergunta ?? 'Falta a obra ou o valor.'}\n`
         + '_(responde citando esta mensagem, ou escreve *cancelar tudo*)_')
+      if (idLembrete) { p.idLembrete = idLembrete; pendentes.atualizar(p) }
     }
   }
 }
