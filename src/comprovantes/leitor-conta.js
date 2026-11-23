@@ -260,7 +260,24 @@ export class LeitorDeGrupo {
 
       if (!iguais.length) {
         this.aguardando = []
-        throw new Error(`Não achei nenhum grupo chamado "${this.grupoNome}" nesta conta. Confira o nome exato (como aparece no WhatsApp).`)
+        /*
+          Não achou com esse nome. Mostra os PARECIDOS — os que têm alguma
+          palavra do nome pedido, ou que estão contidos nele (ou ele neles).
+
+          Só os parecidos, e nunca a lista inteira: os grupos de uma pessoa
+          dizem muito sobre ela, e a ferramenta não tem por que pôr na tela
+          o que não tem a ver com o que foi pedido.
+        */
+        const palavras = alvo.split(' ').filter(p => p.length >= 4)
+        const parecidos = this.grupoIdPedido ? [] : grupos.filter((g) => {
+          const nome = norm(g.subject ?? '')
+          if (!nome) return false
+          return nome.includes(alvo) || alvo.includes(nome) || palavras.some(p => nome.split(' ').includes(p))
+        }).slice(0, 8)
+        const lista = parecidos.length
+          ? `\nParecidos nesta conta:\n${parecidos.map(g => `  - "${g.subject}"`).join('\n')}\nRode de novo com o nome como aparece acima.`
+          : '\nNão há nenhum de nome parecido. Confira o nome como aparece no WhatsApp.'
+        throw new Error(`Não achei nenhum grupo chamado "${this.grupoNome}" nesta conta.${lista}`)
       }
       if (iguais.length > 1) {
         this.aguardando = []

@@ -13,7 +13,7 @@
  *
  * Uso (nesta pasta):
  *
- *   node scripts/ler-grupo-pela-conta.js ler --grupo "Nome do grupo" --numero 5511999998888
+ *   node scripts/ler-grupo-pela-conta.js ler --grupo "Comprovantes Pgto obras" --numero 5511999998888
  *       Conecta (na primeira vez mostra o código de 8 letras para digitar em
  *       WhatsApp → Aparelhos conectados → Conectar aparelho → Conectar com
  *       número de telefone), lê o grupo e gera o zip. Rodar de novo continua

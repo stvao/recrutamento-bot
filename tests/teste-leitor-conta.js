@@ -318,6 +318,35 @@ function novoLeitor(pasta, conta, { baixar, nome = 'comprovantes obras', grupoId
 
   ok('grupo que não existe: para, dizendo', /Não achei nenhum grupo chamado "Obras Antigas"/.test(await tentar({ nome: 'Obras Antigas' }) ?? ''))
 
+  // O nome não precisa vir igualzinho: maiúsculas, espaços a mais, acento e pontuação não contam.
+  for (const escrito of ['  COMPROVANTES   pgto  Obras ', 'comprovantes pgto. obras', 'Comprovantes Pgto Obras']) {
+    const c = contaDeMentira({ historico: historiaDoGrupo(CORTE_DIAS + 2), grupos: [{ id: GRUPO, subject: 'Comprovantes Pgto obras' }, GRUPOS[1]], recentes: 200 })
+    const l = novoLeitor(mkdtempSync(join(tmpdir(), 'teste-leitor-6n-')), c, { nome: escrito }).leitor
+    setTimeout(() => c.sincronizar(), 5)
+    let e = null
+    try { await l.rodar() } catch (x) { e = x.message }
+    ok(`o grupo "Comprovantes Pgto obras" é achado escrevendo "${escrito}"`, e === null && l.grupoId === GRUPO)
+  }
+
+  // Não achou: lista os PARECIDOS — e só eles.
+  const variosGrupos = [
+    { id: '120363000000000011@g.us', subject: 'Comprovantes Pgto obras' },
+    { id: '120363000000000012@g.us', subject: 'Comprovantes RH' },
+    { id: '120363000000000013@g.us', subject: 'Obras - diário' },
+    { id: '120363000000000014@g.us', subject: 'Família Silva' },
+    { id: '120363000000000015@g.us', subject: 'Futebol de quinta' },
+  ]
+  const erroParecidos = await (async () => {
+    const c = contaDeMentira({ historico: [], grupos: variosGrupos })
+    try { await novoLeitor(mkdtempSync(join(tmpdir(), 'teste-leitor-6p-')), c, { nome: 'Comprovantes pagamento obras' }).leitor.rodar(); return '' } catch (x) { return x.message }
+  })()
+  ok('nome que não bate: lista os parecidos', /Parecidos nesta conta/.test(erroParecidos)
+    && erroParecidos.includes('"Comprovantes Pgto obras"') && erroParecidos.includes('"Comprovantes RH"') && erroParecidos.includes('"Obras - diário"'))
+  ok('e NÃO põe na tela os grupos que não têm a ver', !erroParecidos.includes('Família') && !erroParecidos.includes('Futebol'))
+  ok('sem mostrar o endereço de nenhum', !erroParecidos.includes('@g.us'))
+  const erroSemParecido = await tentar({ nome: 'Xyzw Qwert' })
+  ok('sem nenhum parecido, diz isso', /Não há nenhum de nome parecido/.test(erroSemParecido ?? '') && !erroSemParecido.includes('Família'))
+
   const duplicados = contaDeMentira({ historico: [], grupos: [...GRUPOS, { id: '120363000000000009@g.us', subject: 'COMPROVANTES OBRAS', size: 3 }] })
   const { leitor } = novoLeitor(pasta, duplicados)
   let erro = null

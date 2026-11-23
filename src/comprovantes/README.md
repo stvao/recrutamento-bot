@@ -333,8 +333,12 @@ Passo a passo, na pasta do robô:
 1. **Conectar e ler** (na primeira vez mostra um código de 8 letras):
 
    ```
-   node scripts/ler-grupo-pela-conta.js ler --grupo "Nome exato do grupo" --numero 55DDDNUMERO
+   node scripts/ler-grupo-pela-conta.js ler --grupo "Comprovantes Pgto obras" --numero 55DDDNUMERO
    ```
+
+   O nome do grupo não precisa vir igualzinho: maiúsculas, espaços a mais,
+   acento e pontuação não contam. Se não achar, a ferramenta lista os grupos
+   de nome parecido (só os parecidos) para escolher.
 
    No celular: WhatsApp → Aparelhos conectados → Conectar aparelho →
    *Conectar com número de telefone*, e digitar o código. (Com `--qr` no
