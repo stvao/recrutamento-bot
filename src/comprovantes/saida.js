@@ -10,6 +10,7 @@ import { moeda, dataCurta } from './formato.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
+import { fornecedorDe } from './habito.js'
 
 /**
  * O resumo que vai no campo `texto` do comprovante.
@@ -173,6 +174,18 @@ export async function lancar(pendente, dados) {
       idGasto: r.id ?? null, rateado: r.rateio?.length > 1, chat: pendente.chat ?? null,
     })
     atendimento.getStore()?.lancados.push(pendente.idMensagem ?? pendente.id)
+
+    // De qual obra foi este fornecedor, para a próxima vez (habito.js). Só
+    // gasto de uma obra só: o rateado não diz de qual delas o fornecedor "é".
+    // A categoria que veio do próprio hábito não é anotada de novo — seria o
+    // hábito se confirmando sozinho.
+    if (!(r.rateio?.length > 1)) {
+      memoria.anotarHabito({
+        fornecedor: fornecedorDe(dados), obra: r.obra,
+        categoria: dados.tipoDoHabito ? null : dados.tipo,
+        idMensagem: pendente.idMensagem ?? pendente.id,
+      })
+    }
     const linhas = [`✅ ${r.mensagem || 'Lançado, aguardando aprovação.'}`]
     linhas.push([
       r.rateio?.length > 1 ? null : r.obra,

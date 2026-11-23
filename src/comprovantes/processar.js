@@ -7,8 +7,9 @@
 import { lerComprovante } from './ia-visao.js'
 import { obrasDoSistema, pagadoresConhecidos, lancadosDoSistema } from './obras-client.js'
 import { enviarMensagem } from '../connectors.js'
-import { interpretar, combinar, acharValor } from './lancamento.js'
-import { perguntar, perguntarPagador, perguntarValorLido } from './perguntas.js'
+import { interpretar, combinar, acharValor, nomesDe } from './lancamento.js'
+import { perguntar, perguntarPagador, perguntarValorLido, perguntarObraDoHabito } from './perguntas.js'
+import { fornecedorDe, habitoDe } from './habito.js'
 import { lancar, paraCaixa, diaDoEnvio, dataDoGasto } from './saida.js'
 import {
   mesmoArquivo, parecido, classificar, avisoDeMesmoArquivo, avisoDeJaLancado, perguntaDeRepetido, documentoComparavel,
@@ -288,11 +289,46 @@ export async function processar(pendente, { ensaio = false } = {}) {
     dados.confianca = 'digitado'
   }
 
+  /*
+    O hábito do fornecedor (ver habito.js): de qual obra e de qual categoria
+    costumam ser os gastos dele.
+
+    A CATEGORIA entra direto quando nem a legenda nem a imagem deram — errar
+    a categoria é barato, quem aprova vê e troca. A OBRA nunca entra direto:
+    vira pergunta, mais abaixo.
+  */
+  const habito = habitoDe(memoria.habitosDe(fornecedorDe(dados)), { obrasAtuais: nomesDe(obras) })
+  if (!dados.tipo && habito?.categoria) {
+    dados.tipo = habito.categoria
+    dados.tipoDoHabito = true
+  }
+
   pendente.dados = dados
 
   const falta = []
   if (!dados.obra) falta.push('obra')
   if (dados.valor == null) falta.push('valor')
+
+  /*
+    Falta a obra, e este fornecedor é quase sempre da mesma: pergunta "é da
+    <obra>, como das outras vezes?" em vez de mostrar a lista inteira.
+
+    Uma vez só por comprovante. Se a pessoa escreveu algo que serve para mais
+    de uma obra (a cidade), vale a pergunta entre aquelas — ela já disse
+    alguma coisa, e o hábito não deve passar por cima.
+  */
+  if (falta.includes('obra') && habito?.obra && !pendente.habitoPerguntado
+    && !dados.candidatos?.length && (!pendente.jaPerguntou || ensaio)) {
+    pendente.habitoPerguntado = true
+    pendente.esperandoHabito = habito.obra
+    pendente.jaPerguntou = true
+    return {
+      perguntando: true,
+      texto: perguntarObraDoHabito(pendente, dados, habito.obra, falta),
+      desfecho: 'pergunta',
+      pergunta: `${falta.join(' e ')} (pelo hábito do fornecedor, seria ${habito.obra})`,
+    }
+  }
 
   if (falta.length && (!pendente.jaPerguntou || ensaio)) {
     return { perguntando: true, texto: perguntar(pendente, falta, obras), desfecho: 'pergunta', pergunta: falta.join(' e ') }

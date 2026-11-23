@@ -26,6 +26,7 @@ sem aprovação humana.
 | `exportacao.js` | Lê a conversa exportada do WhatsApp (Android e iPhone) e acha os comprovantes. |
 | `zip.js` | Leitor de zip mínimo, que trata o arquivo como dado de fora. |
 | `correcao.js` | Corrigir ou cancelar pelo grupo um gasto já lançado, citando o comprovante ou a confirmação. |
+| `habito.js` | De qual obra e categoria costuma ser cada fornecedor. Só sugere — nunca lança. Funções puras. |
 | `saida.js` | Lança o gasto pendente no Obras, ou manda para a caixa de comprovantes. |
 | `ronda.js` | O lembrete (uma vez, 3 h) e o prazo (24 h → caixa). Liga no arranque. |
 | `formato.js` | Como valor, data e item aparecem nas mensagens. |
@@ -37,7 +38,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Comprovante repetido
@@ -119,6 +120,38 @@ e para a comparação de repetido.
 Medida não é data: "tubo 3/4" e "joelho 1/2" são ignorados. Sem ano, a data
 só vale com o mês em dois dígitos ("05/09") ou com "dia", "data", "em" ou
 "de" antes ("dia 3/8"), e até 120 dias para trás; com ano, até um ano.
+
+## Hábito do fornecedor
+
+O robô guarda, por fornecedor, de qual obra e de qual categoria foram os
+gastos **lançados** (o que foi para a caixa não conta). O fornecedor é
+reconhecido pelo CNPJ, quando a IA leu um inteiro; sem ele, pelo nome
+(sem ligar para maiúsculas, acento e "Ltda"). Mesmo nome com outro CNPJ é
+outra loja.
+
+Quando **falta a obra** e o fornecedor tem pelo menos 3 lançamentos nos
+últimos 90 dias, com 80% ou mais numa obra só, a pergunta deixa de ser a
+lista e vira:
+
+> É da *<obra>*, como das outras vezes? Responde *sim* ou diz a obra.
+
+- **O robô nunca lança por hábito.** Obra errada é o pior erro do módulo, e
+  ninguém percebe. A pessoa sempre confirma.
+- *sim* confirma; *sim, 250* confirma e traz o valor que faltava; outra obra
+  escrita vale no lugar; *não* faz voltar a pergunta de sempre, com a lista.
+- Quem escreveu a obra não é perguntado. Obra encerrada (fora da lista do
+  sistema) não é sugerida.
+- **Categoria:** quando nem a legenda nem a imagem deram, entra a do hábito
+  (mesma régua). Essa não pergunta — errar a categoria é barato, quem aprova
+  vê e troca.
+- Corrigir a obra ou cancelar o gasto pelo grupo corrige também o hábito.
+- No grupo antigo vale igual, sempre como pergunta.
+
+| Variável | Padrão | Para quê |
+|---|---|---|
+| `GASTOS_HABITO_MINIMO` | `3` | Lançamentos do fornecedor para haver hábito |
+| `GASTOS_HABITO_DIAS` | `90` | Por quantos dias um lançamento conta |
+| `GASTOS_HABITO_PROPORCAO` | `80` | % mínima numa obra só |
 
 ## Corrigir pelo grupo
 

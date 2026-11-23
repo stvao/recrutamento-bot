@@ -160,6 +160,35 @@ function aplicarResposta(p, texto) {
   }
 
   /*
+    Resposta a "É da <obra>, como das outras vezes?".
+
+    "sim" confirma a obra sugerida — e é a pessoa confirmando, não o robô
+    decidindo. "sim, 250" confirma e traz o valor que faltava. Qualquer outra
+    coisa é resposta comum: se ela escreveu outra obra, é essa que vale, e se
+    não der para entender volta a pergunta de sempre, com a lista.
+  */
+  if (p.esperandoHabito) {
+    const sugerida = p.esperandoHabito
+    p.esperandoHabito = null
+    const comMais = /^\s*(sim|isso|isso mesmo|é sim|e sim|ok|certo)\b[\s,.;!-]+(\S.*)$/i.exec(texto)
+    if (CONFIRMA_VALOR.test(texto)) {
+      p.obraEscolhida = sugerida
+    } else if (comMais) {
+      p.obraEscolhida = sugerida
+      p.respostas.push(comMais[2].trim())
+    } else if (NEGA_VALOR.test(texto)) {
+      // "não", sozinho, não diz qual é a obra — e guardado junto da legenda
+      // seria lido como parte dela. Volta a pergunta de sempre, com a lista.
+    } else {
+      p.respostas.push(texto.trim())
+    }
+    p.jaPerguntou = false
+    p.perguntadoEm = null
+    pendentes.atualizar(p)
+    return processarUmaVez(p)
+  }
+
+  /*
     Resposta a "Li R$ X no comprovante. Confirma?".
 
     Tratada ANTES da lista de obras: a resposta aqui é um número, e "3" tem

@@ -100,11 +100,12 @@ const ESQUEMA = {
     estabelecimento: { type: 'string', description: 'Nome de quem RECEBEU o pagamento (posto, loja, pessoa). Vazio se nao conseguir ler.' },
     categoria: { type: 'string', enum: CATEGORIAS, description: 'A categoria do gasto.' },
     documento: { type: 'string', description: 'Numero do cupom, nota ou id da transacao, se aparecer. Vazio se nao.' },
+    cnpj: { type: 'string', description: 'CNPJ de quem RECEBEU o pagamento, so os 14 digitos, se aparecer inteiro e legivel. Vazio se nao aparecer, se estiver cortado ou se for CPF.' },
     formaPagamento: { type: 'string', description: 'Pix, cartao, dinheiro, boleto — como aparece no comprovante. Vazio se nao aparecer.' },
     confianca: { type: 'string', enum: ['alta', 'media', 'baixa'], description: 'Quao seguro voce esta do VALOR e da DATA. "baixa" se a foto esta ruim, cortada ou ilegivel.' },
     observacao: { type: 'string', description: 'So se algo estiver estranho (foto cortada, dois valores possiveis, ilegivel). Vazio se estiver tudo claro.' },
   },
-  required: ['valor', 'data', 'estabelecimento', 'categoria', 'documento', 'formaPagamento', 'confianca', 'observacao'],
+  required: ['valor', 'data', 'estabelecimento', 'categoria', 'documento', 'cnpj', 'formaPagamento', 'confianca', 'observacao'],
 }
 
 const INSTRUCOES = `Você lê comprovantes de pagamento de uma construtora que reforma escolas
@@ -265,6 +266,9 @@ export function conferir(bruto) {
     estabelecimento: texto(bruto.estabelecimento),
     categoria,
     documento: texto(bruto.documento),
+    // Só um CNPJ inteiro vale: 14 dígitos. Com um a menos já é outro número,
+    // e é por ele que se reconhece o fornecedor da vez seguinte.
+    cnpj: typeof bruto.cnpj === 'string' && bruto.cnpj.replace(/\D/g, '').length === 14 ? bruto.cnpj.replace(/\D/g, '') : null,
     formaPagamento: texto(bruto.formaPagamento),
     // Sem valor legível não existe leitura de confiança alta, mesmo que o
     // modelo diga que sim.

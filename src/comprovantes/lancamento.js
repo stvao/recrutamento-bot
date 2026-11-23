@@ -787,6 +787,8 @@ export function combinar(escrito, lido) {
     confiancaLeitura: lido?.confianca ?? null,
     estabelecimento: lido?.estabelecimento ?? null,
     documento: lido?.documento ?? null,
+    // De quem é o comprovante, para reconhecer o fornecedor de novo (habito.js).
+    cnpj: lido?.cnpj ?? null,
     formaPagamento: lido?.formaPagamento ?? null,
     confianca: escrito?.valor != null && !incerto ? 'digitado' : (lido?.confianca ?? 'baixa'),
   }

@@ -25,6 +25,7 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { norm } from '../texto.js'
+import { HABITO_DIAS, mesmoFornecedor } from './habito.js'
 
 const ARQUIVO = process.env.GASTOS_MEMORIA
   || join(process.cwd(), 'dados', 'memoria-gastos.json')
@@ -40,7 +41,7 @@ const ARQUIVO = process.env.GASTOS_MEMORIA
  */
 export const DIAS_DE_COMPARACAO = Number(process.env.GASTOS_DIAS_DUPLICATA || 30)
 
-let dados = { lancamentos: [], apelidos: {}, grupo: null }
+let dados = { lancamentos: [], apelidos: {}, grupo: null, habitos: [] }
 let sujo = false
 
 function carregar() {
@@ -51,6 +52,8 @@ function carregar() {
       lancamentos: Array.isArray(lido.lancamentos) ? lido.lancamentos : [],
       apelidos: lido.apelidos ?? {},
       grupo: lido.grupo ?? null,
+      // Entrou depois. Arquivo de antes não tem, e começa sem hábito nenhum.
+      habitos: Array.isArray(lido.habitos) ? lido.habitos : [],
     }
   } catch (e) {
     // Arquivo corrompido não pode derrubar o serviço: melhor começar sem
@@ -188,6 +191,13 @@ export function corrigirLancamento(idMensagem, campos) {
   for (const chave of ['valor', 'obra', 'data', 'categoria', 'descricao']) {
     if (campos[chave] !== undefined) l[chave] = campos[chave]
   }
+  // O hábito acompanha: se a obra estava errada, o fornecedor NÃO é daquela
+  // obra, e aprender com o erro o repetiria na pergunta seguinte.
+  for (const h of dados.habitos) {
+    if (h.idMensagem !== idMensagem) continue
+    if (campos.obra !== undefined) h.obra = campos.obra
+    if (campos.categoria !== undefined) h.categoria = campos.categoria
+  }
   sujo = true
   return true
 }
@@ -197,9 +207,41 @@ export function esquecerLancamento(idMensagem) {
   if (!idMensagem) return false
   const antes = dados.lancamentos.length
   dados.lancamentos = dados.lancamentos.filter(l => !(l.idMensagem === idMensagem && l.resultado === 'lancado'))
+  // Gasto cancelado não conta para o hábito do fornecedor.
+  dados.habitos = dados.habitos.filter(h => h.idMensagem !== idMensagem)
   if (dados.lancamentos.length === antes) return false
   sujo = true
   return true
+}
+
+// ─── 1b. De qual obra costuma ser cada fornecedor ──────────────────────────
+
+/**
+ * Anota de qual obra (e categoria) foi um gasto LANÇADO deste fornecedor.
+ *
+ * Guardado à parte dos lançamentos, e por mais tempo: a comparação de
+ * repetido olha 30 dias, e o hábito precisa de três meses para existir.
+ * Só o que virou gasto — o que foi para a caixa não diz de qual obra era.
+ */
+export function anotarHabito({ fornecedor, obra, categoria, idMensagem }) {
+  if (!fornecedor || !obra) return
+  dados.habitos.push({
+    cnpj: fornecedor.cnpj ?? null,
+    nome: fornecedor.nome ?? null,
+    obra,
+    categoria: categoria ?? null,
+    idMensagem: idMensagem ?? null,
+    quando: Date.now(),
+  })
+  const corte = Date.now() - HABITO_DIAS * 24 * 60 * 60 * 1000
+  dados.habitos = dados.habitos.filter(h => h.quando >= corte)
+  sujo = true
+}
+
+/** Os lançamentos guardados de um fornecedor. Quem decide se há hábito é `habito.js`. */
+export function habitosDe(fornecedor) {
+  if (!fornecedor) return []
+  return dados.habitos.filter(h => mesmoFornecedor(fornecedor, h))
 }
 
 /** O que entrou num dia. `dia` é o começo do dia, em ms. */
@@ -292,5 +334,10 @@ export function grupoLembrado() {
 
 /** Só para teste: esquece tudo, sem tocar no disco. */
 export function _limpar() {
-  dados = { lancamentos: [], apelidos: {}, grupo: null }
+  dados = { lancamentos: [], apelidos: {}, grupo: null, habitos: [] }
+}
+
+/** Só para teste: um lançamento de fornecedor com a data que se quiser. */
+export function _anotarHabitoEm(h) {
+  dados.habitos.push({ cnpj: null, nome: null, categoria: null, idMensagem: null, ...h })
 }
