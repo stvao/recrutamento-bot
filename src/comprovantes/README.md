@@ -142,11 +142,26 @@ As travas:
 
 - **Sem citação, nada disto dispara.** "valor 1800" solto continua sendo o que
   sempre foi (resposta a uma pergunta, ou nada).
-- **Quem pode:** quem mandou o comprovante, ou alguém de `GASTOS_AUTORIZADOS`
-  **por número**. O coringa `*` do grupo não basta para mexer no gasto de
-  outra pessoa.
-- **Só pendente.** Já aprovado: "Esse já foi aprovado — agora só pelo sistema."
+- **Quem pode — duas barreiras, e passa quem passa nas duas.**
+  A do robô: quem mandou o comprovante, ou alguém de `GASTOS_AUTORIZADOS`
+  **por número** (o coringa `*` do grupo não basta para mexer no gasto de
+  outra pessoa). A do sistema: o robô manda em `enviadoPor` o telefone de
+  **quem pediu** a correção (no corpo do `PATCH`, na consulta do `DELETE`),
+  e o Obras decide pela pessoa — sócio/administrador mexe em qualquer gasto;
+  outro usuário, só no que está no nome dele; telefone desconhecido, só nos
+  que ficaram no nome do dono do token. A barreira do robô continua
+  existindo para quando o sistema não tem como saber quem pediu: telefone
+  escondido atrás de um `@lid` (aí não se manda nada no lugar) ou servidor
+  de versão anterior.
+- **Só pendente.** Já aprovado: "Esse já foi aprovado — agora só pelo
+  sistema." Já rejeitado ou cancelado: diz isso, e não "aprovado".
 - Gasto dividido entre obras: o valor corrige; a obra, só pelo sistema.
+- Muitas correções no mesmo gasto: o sistema passa a recusar, e o robô manda
+  o próximo ajuste para o sistema.
+- O que o sistema não deixa mexer por aqui (lançado antes de existir a
+  correção pelo grupo, no nome de outra pessoa, ou servidor sem a rota)
+  recebe uma resposta só, sem cara de erro: "Esse lançamento só dá para
+  corrigir pelo sistema."
 - Número solto só vale como valor com cara de dinheiro (`1.800,00`, `R$ 1800`);
   `1800` puro pede `valor` ou `era` na frente. Citar e escrever outra coisa
   ("obrigado") não faz nada.

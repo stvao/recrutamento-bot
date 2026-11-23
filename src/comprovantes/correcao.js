@@ -26,6 +26,15 @@
  * por número. O coringa do grupo ("qualquer um do grupo lança") não basta:
  * lançar o próprio gasto é uma coisa, mexer no de outra pessoa é outra.
  *
+ * Essa é a barreira DO ROBÔ, e é só a primeira. O sistema tem a dele, pela
+ * regra da pessoa: o robô diz o telefone de quem pediu, e o sistema deixa
+ * sócio mexer em qualquer gasto e os demais só no que é deles. As duas se
+ * somam — passa quem passa nas duas. A do robô continua existindo porque há
+ * casos em que o sistema não tem como saber quem pediu (telefone escondido
+ * atrás de um "@lid", ou servidor de versão anterior): aí vale o token, que
+ * enxerga tudo, e sem a barreira daqui qualquer um do grupo corrigiria o
+ * gasto de qualquer outro.
+ *
  * Só enquanto o gasto está PENDENTE. Depois de aprovado é despesa, e despesa
  * não se muda por mensagem — o sistema recusa, e o robô diz isso.
  *
@@ -39,7 +48,7 @@
 import { acharValor, acharData, acharObra, categoriaEscrita, nomesDe } from './lancamento.js'
 import { corrigirLancado, cancelarLancado, obrasConfigurado } from './obras-client.js'
 import { obrasConhecidas } from './processar.js'
-import { numeroNaLista } from './autorizacao.js'
+import { numeroNaLista, telefoneDeQuemMandou } from './autorizacao.js'
 import { CONFIRMA_VALOR, NEGA_VALOR } from './perguntas.js'
 import { moeda } from './formato.js'
 import { discreto } from '../texto.js'
@@ -167,14 +176,24 @@ function perguntarObra(msg, alvo, opcoes, escrito) {
   return perguntarE(msg, linhas.join('\n'), { tipo: 'obra', idMensagem: alvo.idMensagem, opcoes })
 }
 
-/** O que dizer quando o sistema não deixou. */
-function recusa(r) {
-  if (r.status === 409 && r.codigo === 'RATEADO') return 'Esse gasto está dividido entre obras — a obra só se troca pelo sistema.'
+/** O que dizer quando o sistema não deixou. Texto fixo, um por motivo. */
+function recusa(r, campo) {
+  if (r.status === 409 && r.codigo === 'RATEADO') {
+    return campo === 'obra'
+      ? 'Esse gasto está dividido entre obras — a obra só se troca pelo sistema.'
+      : 'Esse gasto está dividido entre obras e uma das partes mudou no sistema — esse ajuste é só por lá.'
+  }
+  if (r.status === 409 && r.codigo === 'MUITAS_CORRECOES') {
+    return 'Esse gasto já foi corrigido muitas vezes por aqui — o próximo ajuste é pelo sistema.'
+  }
   // Rejeitado inclui o que foi cancelado por aqui mesmo: dizer "aprovado"
   // faria a pessoa procurar na despesa um gasto que não existe mais.
   if (r.status === 409 && /rejeit/i.test(String(r.statusDoGasto ?? ''))) return 'Esse já foi rejeitado ou cancelado — não dá mais para mexer nele por aqui.'
   if (r.status === 409) return 'Esse já foi aprovado — agora só pelo sistema.'
-  if (r.status === 404) return 'Não consegui mexer nesse lançamento por aqui — corrige pelo sistema.'
+  // 404 não é erro: é o sistema dizendo que ESTE lançamento não se mexe por
+  // aqui — foi criado antes de existir a correção pelo grupo, está no nome
+  // de outra pessoa, ou o servidor ainda não tem essa rota.
+  if (r.status === 404) return 'Esse lançamento só dá para corrigir pelo sistema.'
   if (r.status === 401) return '❌ Meu acesso ao sistema de obras foi recusado (token inválido ou revogado). Avisa quem cuida do sistema.'
   if (r.status === 400 || r.status === 422) return 'O sistema não aceitou essa correção — corrige por lá.'
   return '❌ Não consegui falar com o sistema de obras agora. Tenta de novo daqui a pouco.'
@@ -186,13 +205,13 @@ async function aplicar(msg, alvo, campo, valor) {
     return 'Esse gasto está dividido entre obras — a obra só se troca pelo sistema.'
   }
 
-  const r = await corrigirLancado(alvo.idGasto, { [campo]: valor })
+  const r = await corrigirLancado(alvo.idGasto, { [campo]: valor }, telefoneDeQuemMandou(msg))
 
   // O sistema não reconheceu a obra: pergunta com a lista DELE, que é a certa.
   if (!r.ok && r.status === 422 && campo === 'obra' && r.obras?.length) {
     return perguntarObra(msg, alvo, r.obras.slice(0, 12), valor)
   }
-  if (!r.ok) return recusa(r)
+  if (!r.ok) return recusa(r, campo)
 
   // Como ficou — o que o sistema devolveu vale mais que o que foi pedido
   // (ele pode ter trocado o nome da obra pelo oficial, ou redividido).
@@ -224,8 +243,8 @@ async function aplicar(msg, alvo, campo, valor) {
 }
 
 async function cancelar(msg, alvo) {
-  const r = await cancelarLancado(alvo.idGasto)
-  if (!r.ok) return recusa(r)
+  const r = await cancelarLancado(alvo.idGasto, telefoneDeQuemMandou(msg))
+  if (!r.ok) return recusa(r, null)
   // Sai da memória: o fechamento do dia não soma o que não existe mais, e o
   // mesmo arquivo pode ser mandado de novo, agora certo.
   memoria.esquecerLancamento(alvo.idMensagem)
@@ -289,7 +308,7 @@ export async function tentarCorrecao(msg) {
     return 'Só quem mandou esse comprovante (ou alguém da lista de autorizados) pode mexer nele.'
   }
   if (!citado.idGasto) {
-    return 'Esse foi lançado antes de eu saber corrigir por aqui — corrige pelo sistema.'
+    return 'Esse lançamento só dá para corrigir pelo sistema.'
   }
 
   if (correcao.cancelar) {

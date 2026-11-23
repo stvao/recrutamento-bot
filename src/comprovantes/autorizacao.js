@@ -138,6 +138,26 @@ export function autorizado(de, deGrupoCadastrado = false) {
 }
 
 /**
+ * O telefone de quem mandou, quando é telefone DE VERDADE.
+ *
+ * Em grupo o WhatsApp pode entregar o remetente como "@lid" — um
+ * identificador que esconde o número. Quando o robô não consegue traduzi-lo,
+ * `de` traz os dígitos do lid, que têm cara de telefone e não são de
+ * ninguém. Mandar isso ao sistema como "quem enviou" faria o reembolso ir
+ * para um desconhecido, ou — pior — casar por acaso com o número de outra
+ * pessoa. Então só vale quando quem entregou a mensagem afirma que conhece o
+ * telefone, e ele tem forma de número brasileiro (55 + DDD + número).
+ *
+ * É o que o robô diz ao sistema tanto ao LANÇAR (de quem é o reembolso)
+ * quanto ao CORRIGIR (quem pediu a correção).
+ */
+export function telefoneDeQuemMandou(msg) {
+  if (msg?.telefoneConhecido !== true) return null
+  const numero = String(msg.de ?? '').replace(/\D/g, '')
+  return /^55\d{10,11}$/.test(numero) ? numero : null
+}
+
+/**
  * Este número está na lista EXPLÍCITA de autorizados?
  *
  * Mais estreito que `autorizado()`: o coringa do grupo não conta. Serve para

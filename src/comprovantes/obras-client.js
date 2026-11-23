@@ -357,21 +357,36 @@ async function postarLancamento({ arquivo, nomeArquivo, tipo, obra, valor, descr
  * 409 = já foi aprovado ou rejeitado (ou é rateio e pediu-se trocar a obra);
  * 422 = não reconheceu a obra, e vem a lista em `obras`; 404 = o token não
  * pode ver esse gasto, ou o servidor ainda não tem a rota. Nunca lança.
+ *
+ * `quemPediu` é o telefone de quem pediu a correção (`enviadoPor`). O token
+ * do robô é de sócio e enxerga tudo: só por ele, qualquer pessoa do grupo
+ * mexeria no gasto de outra, e o rastro diria que foi o sócio. Com o
+ * telefone, quem decide é o sistema, pela regra da PESSOA — sócio em
+ * qualquer gasto, os demais só no que é deles (nos outros, 404).
  */
-export async function corrigirLancado(id, campos) {
-  return mexerNoLancado('PATCH', id, campos)
+export async function corrigirLancado(id, campos, quemPediu = null) {
+  const r = await mexerNoLancado('PATCH', id, campos, quemPediu)
+  if (r.ok || r.status !== 400 || !quemPediu) return r
+  // 400 mandando `enviadoPor`: servidor de versão anterior, estrito, que
+  // ainda não conhece o campo no PATCH. Vai de novo sem ele — aí vale o
+  // token, e a barreira de quem pode corrigir é só a do robô.
+  console.warn('[obras] PATCH /lancados: 400 com enviadoPor — tentando sem ele.')
+  return mexerNoLancado('PATCH', id, campos, null)
 }
 
 /** Cancela um gasto PENDENTE (fica como rejeitado, com rastro). Mesmas respostas de `corrigirLancado`. */
-export async function cancelarLancado(id) {
-  return mexerNoLancado('DELETE', id, null)
+export async function cancelarLancado(id, quemPediu = null) {
+  return mexerNoLancado('DELETE', id, null, quemPediu)
 }
 
-async function mexerNoLancado(metodo, id, campos) {
+async function mexerNoLancado(metodo, id, campos, quemPediu) {
   if (!OBRAS_API_TOKEN) return { ok: false, motivo: 'nao-configurado' }
   if (!id) return { ok: false, status: 404, motivo: 'sem-id' }
+  // No PATCH vai no corpo; no DELETE, que não tem corpo, na consulta.
+  if (campos && quemPediu) campos = { ...campos, enviadoPor: quemPediu }
+  const consulta = !campos && quemPediu ? `?enviadoPor=${encodeURIComponent(quemPediu)}` : ''
   try {
-    const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancados/${encodeURIComponent(String(id))}`, {
+    const r = await fetch(`${OBRAS_API_URL}/api/comprovantes/lancados/${encodeURIComponent(String(id))}${consulta}`, {
       method: metodo,
       headers: {
         Authorization: `Bearer ${OBRAS_API_TOKEN}`,
@@ -393,9 +408,10 @@ async function mexerNoLancado(metodo, id, campos) {
       status: r.status,
       motivo: j.mensagem || (typeof j.message === 'string' ? j.message : null) || `HTTP ${r.status}`,
       obras: j.obras ?? j.message?.obras ?? null,
-      // No 409 o sistema diz POR QUE não deixou: "RATEADO" (trocar a obra de
-      // um gasto dividido) ou "JA_ANALISADO", com o status em que o gasto
-      // está (aprovado ou rejeitado).
+      // No 409 o sistema diz POR QUE não deixou: "JA_ANALISADO" (com o
+      // status em que o gasto está — aprovado ou rejeitado), "RATEADO" (o
+      // que não se muda num gasto dividido entre obras) ou
+      // "MUITAS_CORRECOES" (o rastro das correções não cabe mais).
       codigo: j.codigo ?? j.message?.codigo ?? null,
       statusDoGasto: j.status ?? j.message?.status ?? null,
     }

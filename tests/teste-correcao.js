@@ -56,6 +56,12 @@ let nGasto = 0
 let semRotasDeCorrecao = false
 /** O sistema recusa uma obra que o robô achou que conhecia. */
 let recusaObra = false
+/** Servidor de versão anterior e estrito: 400 se vier `enviadoPor` no PATCH. */
+let recusaQuemPediu = false
+/** O próximo PATCH/DELETE responde este 409 (com o código dado). */
+let proximo409 = null
+/** Quem o sistema deixa mexer no gasto de outra pessoa (sócios). */
+const SOCIOS = new Set()
 
 const srv = createServer((req, res) => {
   let corpo = ''
@@ -67,18 +73,28 @@ const srv = createServer((req, res) => {
 
     if (req.url.endsWith('/comprovantes/obras')) return json(200, { obras: OBRAS.map(o => o.nome), detalhes: OBRAS })
 
-    const umGasto = /\/comprovantes\/lancados\/([^/?]+)$/.exec(req.url)
+    const umGasto = /\/comprovantes\/lancados\/([^/?]+)(?:\?enviadoPor=(\d+))?$/.exec(req.url)
     if (umGasto && (req.method === 'PATCH' || req.method === 'DELETE')) {
       if (semRotasDeCorrecao) return json(404, { message: 'Cannot PATCH' })
       const g = gastos.get(decodeURIComponent(umGasto[1]))
       if (!g) return json(404, { message: 'não existe' })
       if (g.status !== 'PENDENTE') return json(409, { codigo: 'JA_ANALISADO', status: g.status, message: 'já analisado' })
+      if (proximo409) { const codigo = proximo409; proximo409 = null; return json(409, { codigo, message: codigo }) }
+
+      // Quem pediu: no corpo do PATCH, na consulta do DELETE.
+      const corpoJson = req.method === 'PATCH' ? JSON.parse(corpo || '{}') : {}
+      if (recusaQuemPediu && corpoJson.enviadoPor !== undefined) return json(400, { message: ['property enviadoPor should not exist'] })
+      const quemPediu = corpoJson.enviadoPor ?? umGasto[2] ?? null
+      chamadas.at(-1).quemPediu = quemPediu
+      // A regra da PESSOA: sócio mexe em tudo; os demais, só no que é deles.
+      // Sem telefone, vale o token (que enxerga tudo).
+      if (quemPediu && !SOCIOS.has(quemPediu) && g.autor && g.autor !== quemPediu) return json(404, { message: 'não existe' })
 
       if (req.method === 'DELETE') {
         g.status = 'REJEITADO'
         return json(200, { ok: true, id: g.id, status: g.status })
       }
-      const pedido = JSON.parse(corpo || '{}')
+      const { enviadoPor: _quem, ...pedido } = corpoJson
       if (pedido.obra !== undefined) {
         if (g.rateio.length > 1) return json(409, { codigo: 'RATEADO', message: 'gasto rateado' })
         if (recusaObra || !OBRAS.some(o => o.nome === pedido.obra)) return json(422, { message: 'não achei', obras: OBRAS.map(o => o.nome) })
@@ -97,7 +113,7 @@ const srv = createServer((req, res) => {
       const valor = Number(campo('valor'))
       const id = `g${++nGasto}`
       const rateio = todas.map(o => ({ obra: o, valor: valor / todas.length }))
-      gastos.set(id, { id, obra, valor, data: campo('data'), descricao: campo('descricao'), categoria: campo('categoria'), status: 'PENDENTE', rateio })
+      gastos.set(id, { id, obra, valor, data: campo('data'), descricao: campo('descricao'), categoria: campo('categoria'), status: 'PENDENTE', rateio, autor: campo('enviadoPor') })
       return json(201, { ok: true, id, obra, obras: todas, rateio, mensagem: `Lançado em ${obra}, aguardando sua aprovação.` })
     }
     json(201, { ok: true, id: 'c1', mensagem: 'Comprovante recebido.', pendentes: 1 })
@@ -125,6 +141,9 @@ function zerar() {
   memoria._limpar()
   semRotasDeCorrecao = false
   recusaObra = false
+  recusaQuemPediu = false
+  proximo409 = null
+  SOCIOS.clear()
 }
 
 /**
@@ -132,12 +151,12 @@ function zerar() {
  * um texto, ela o "manda" e avisa o id de volta (`respostaEnviada`) — que é
  * como o robô fica sabendo o id da confirmação "✅ Lançado".
  */
-function pessoa(de) {
+function pessoa(de, { telefoneConhecido = true } = {}) {
   const ditos = []
   const enviadas = []
   const enviarResposta = async (t) => { const id = `bot-${++nResposta}`; ditos.push(t); enviadas.push({ id, texto: t }); return { id } }
   const mandar = async (msg) => {
-    const r = await tratar({ ...base, de, telefoneConhecido: true, enviarResposta, ...msg })
+    const r = await tratar({ ...base, de, telefoneConhecido, enviarResposta, ...msg })
     if (typeof r === 'string') {
       const id = `bot-${++nResposta}`
       ditos.push(r); enviadas.push({ id, texto: r })
@@ -159,7 +178,7 @@ function pessoa(de) {
   }
 }
 
-const pedidos = (metodo) => chamadas.filter(c => c.metodo === metodo && /\/lancados\/[^/?]+$/.test(c.url))
+const pedidos = (metodo) => chamadas.filter(c => c.metodo === metodo && /\/lancados\/[^/?]+(\?|$)/.test(c.url))
 const ultimoGasto = () => gastos.get(`g${nGasto}`)
 
 // ══ 1. Cada correção, citando a CONFIRMAÇÃO ═══════════════════════════════
@@ -176,7 +195,7 @@ const ultimoGasto = () => gastos.get(`g${nGasto}`)
   let r = await p.diz('valor 1800', idConf)
   ok('"valor 1800" corrige o valor no sistema', ultimoGasto().valor === 1800)
   ok('a resposta diz o antes → depois', r === '✏️ Corrigido: R$ 1.500,00 → R$ 1.800,00')
-  ok('foi um PATCH só com o valor', pedidos('PATCH').length === 1 && pedidos('PATCH')[0].corpo === '{"valor":1800}')
+  ok('foi um PATCH com o valor e QUEM PEDIU', pedidos('PATCH').length === 1 && pedidos('PATCH')[0].corpo === '{"valor":1800,"enviadoPor":"5511900000401"}')
   ok('a memória acompanha o valor', memoria.resultadoDe(idFoto)?.valor === 1800)
 
   r = await p.diz('era 1.950,50', idConf)
@@ -311,7 +330,8 @@ const ultimoGasto = () => gastos.get(`g${nGasto}`)
   r = await colega.diz('apagar', idConf)
   ok('nem cancela', pedidos('DELETE').length === 0 && /Só quem mandou/.test(r ?? '') && !colega.ditos.some(t => /^Cancelo/.test(t)))
 
-  // Na lista por NÚMERO: pode.
+  // Na lista por NÚMERO — e sócio no sistema: pode.
+  SOCIOS.add(CHEFE)
   const chefe = pessoa(CHEFE)
   r = await chefe.diz('valor 260', idConf)
   ok('quem está na lista por número corrige o de qualquer um', ultimoGasto().valor === 260 && /R\$ 250,00 → R\$ 260,00/.test(r ?? ''))
@@ -396,11 +416,11 @@ const ultimoGasto = () => gastos.get(`g${nGasto}`)
   const idConf = p.idDe(/aguardando sua aprovação/)
   semRotasDeCorrecao = true
   let r = await p.diz('valor 1800', idConf)
-  ok('servidor sem a rota (404): manda corrigir pelo sistema', /corrige pelo sistema/.test(r ?? ''))
+  ok('servidor sem a rota (404): diz que é pelo sistema, sem cara de erro', r === 'Esse lançamento só dá para corrigir pelo sistema.')
   ok('e a memória fica como estava', memoria.resultadoDe(idFoto)?.valor === 250)
   await p.diz('apagar', idConf)
   r = await p.diz('sim', p.idDe(/^Cancelo/))
-  ok('cancelar sem a rota: mesma resposta, e nada sai da memória', /corrige pelo sistema/.test(r ?? '') && memoria.resultadoDe(idFoto) !== null)
+  ok('cancelar sem a rota: mesma resposta, e nada sai da memória', r === 'Esse lançamento só dá para corrigir pelo sistema.' && memoria.resultadoDe(idFoto) !== null)
 }
 {
   // Lançamento de antes desta versão: a memória não tem o id do gasto.
@@ -408,7 +428,74 @@ const ultimoGasto = () => gastos.get(`g${nGasto}`)
   memoria.anotarLancamento({ obra: HAIA, valor: 80, descricao: 'prego', de: '5511900000416', resultado: 'lancado', idMensagem: 'foto-antiga' })
   const p = pessoa('5511900000416')
   const r = await p.diz('valor 90', 'foto-antiga')
-  ok('lançamento antigo, sem id do gasto: diz que é pelo sistema, sem chamar nada', /corrige pelo sistema/.test(r ?? '') && pedidos('PATCH').length === 0)
+  ok('lançamento antigo, sem id do gasto: diz que é pelo sistema, sem chamar nada', r === 'Esse lançamento só dá para corrigir pelo sistema.' && pedidos('PATCH').length === 0)
+}
+
+// ══ 5b. Quem pediu vai ao sistema, e o sistema tem a palavra final ════════
+{
+  // O cancelamento leva o telefone na consulta.
+  zerar()
+  const p = pessoa('5511900000420')
+  await p.foto('haia cimento 250')
+  const idConf = p.idDe(/aguardando sua aprovação/)
+  await p.diz('apagar', idConf)
+  await p.diz('sim', p.idDe(/^Cancelo/))
+  ok('o DELETE leva quem pediu na consulta', pedidos('DELETE').length === 1 && /\?enviadoPor=5511900000420$/.test(pedidos('DELETE')[0].url))
+}
+{
+  // Telefone escondido atrás de um @lid: não se manda nada no lugar — e a
+  // barreira do robô continua valendo, porque aí o sistema não sabe quem pediu.
+  zerar()
+  const dono = pessoa('5511900000421', { telefoneConhecido: false })
+  await dono.foto('haia cimento 250')
+  const idConf = dono.idDe(/aguardando sua aprovação/)
+  await dono.diz('valor 300', idConf)
+  ok('sem telefone conhecido, o PATCH vai SEM enviadoPor', pedidos('PATCH').length === 1 && pedidos('PATCH')[0].corpo === '{"valor":300}' && ultimoGasto().valor === 300)
+  const colega = pessoa('5511900000422', { telefoneConhecido: false })
+  const r = await colega.diz('valor 9999', idConf)
+  ok('e o colega continua barrado pelo robô', /Só quem mandou/.test(r ?? '') && ultimoGasto().valor === 300)
+}
+{
+  // Está na lista do robô por número, mas para o SISTEMA não é sócio: o gasto
+  // é de outra pessoa, e o sistema responde 404.
+  zerar()
+  const dono = pessoa('5511900000423')
+  const idFoto = await dono.foto('haia cimento 250')
+  const idConf = dono.idDe(/aguardando sua aprovação/)
+  const chefe = pessoa(CHEFE)
+  let r = await chefe.diz('valor 260', idConf)
+  ok('na lista do robô, mas não é sócio no sistema: o sistema não deixa', ultimoGasto().valor === 250 && pedidos('PATCH')[0].quemPediu === CHEFE)
+  ok('e a resposta não parece erro', r === 'Esse lançamento só dá para corrigir pelo sistema.')
+  ok('a memória não muda', memoria.resultadoDe(idFoto)?.valor === 250)
+  SOCIOS.add(CHEFE)
+  r = await chefe.diz('valor 260', idConf)
+  ok('sendo sócio no sistema, corrige o de qualquer um', ultimoGasto().valor === 260 && /R\$ 250,00 → R\$ 260,00/.test(r ?? ''))
+}
+{
+  // Os outros 409.
+  zerar()
+  const p = pessoa('5511900000424')
+  const idFoto = await p.foto('haia cimento 250')
+  const idConf = p.idDe(/aguardando sua aprovação/)
+  proximo409 = 'MUITAS_CORRECOES'
+  let r = await p.diz('valor 300', idConf)
+  ok('MUITAS_CORRECOES: resposta própria', r === 'Esse gasto já foi corrigido muitas vezes por aqui — o próximo ajuste é pelo sistema.')
+  proximo409 = 'RATEADO'
+  r = await p.diz('valor 300', idConf)
+  ok('RATEADO num ajuste de valor: resposta própria', /dividido entre obras e uma das partes mudou/.test(r ?? ''))
+  proximo409 = 'RATEADO'
+  r = await p.diz('obra tsuya', idConf)
+  ok('RATEADO trocando a obra: diz que a obra só se troca pelo sistema', /a obra só se troca pelo sistema/.test(r ?? ''))
+  ok('nenhuma dessas mexeu na memória', memoria.resultadoDe(idFoto)?.valor === 250 && memoria.resultadoDe(idFoto)?.obra === HAIA)
+}
+{
+  // Servidor anterior e estrito: 400 no campo novo → vai de novo sem ele.
+  zerar()
+  const p = pessoa('5511900000425')
+  await p.foto('haia cimento 250')
+  recusaQuemPediu = true
+  const r = await p.diz('valor 300', p.idDe(/aguardando sua aprovação/))
+  ok('servidor que recusa enviadoPor no PATCH: tenta sem ele e corrige', ultimoGasto().valor === 300 && pedidos('PATCH').length === 2 && /→ R\$ 300,00/.test(r ?? ''))
 }
 
 // ══ 6. A memória corrigida vale para o repetido ═══════════════════════════
