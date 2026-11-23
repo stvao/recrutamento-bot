@@ -10,7 +10,8 @@ import { enviarMensagem } from '../connectors.js'
 import { interpretar, combinar, acharValor, nomesDe } from './lancamento.js'
 import { perguntar, perguntarPagador, perguntarValorLido, perguntarObraDoHabito } from './perguntas.js'
 import { fornecedorDe, habitoDe } from './habito.js'
-import { lancar, paraCaixa, diaDoEnvio, dataDoGasto } from './saida.js'
+import { lancar, paraCaixa, diaDoEnvio, dataDoGasto, mandarParaContasAPagar } from './saida.js'
+import { pagoOuAPagar, perguntaDePago } from './a-pagar.js'
 import {
   mesmoArquivo, parecido, classificar, avisoDeMesmoArquivo, avisoDeJaLancado, perguntaDeRepetido, documentoComparavel,
 } from './duplicata.js'
@@ -304,6 +305,46 @@ export async function processar(pendente, { ensaio = false } = {}) {
   }
 
   pendente.dados = dados
+
+  /*
+    É PAGAMENTO FEITO, ou conta a pagar? (ver a-pagar.js)
+
+    Antes de qualquer outra pergunta: não faz sentido pedir a obra de um
+    boleto que nem vai virar gasto.
+
+    Boleto ou orçamento sem prova de pagamento não é lançado. Vai para a
+    caixa, marcado, e o robô avisa — e o comprovante CONTINUA esperando: se
+    já foi pago, a pessoa responde *pago* e ele segue daqui como qualquer
+    outro. No atraso não fica esperando (lá cada espera segura o lote de
+    perguntas): vai para a caixa e pronto.
+  */
+  const pg = pagoOuAPagar({
+    tipoDocumento: dados.tipoDocumento,
+    pagamentoComprovado: dados.pagamentoComprovado,
+    vencimento: dados.vencimento,
+    escrito: escritoTudo,
+    respondeu: pendente.pagamentoConfirmado ? 'pago' : pendente.aPagarConfirmado ? 'a-pagar' : null,
+    hoje: diaDoEnvio(pendente.enviadoEm),
+  })
+
+  if (pg?.decisao === 'a-pagar') {
+    if (ensaio) return { perguntando: false, texto: null, desfecho: 'a-pagar', aPagar: pg }
+    const saida = await mandarParaContasAPagar(pendente, pg)
+    if (!saida.ok) return { perguntando: false, texto: saida.texto, caixaRecusou: true, desfecho: 'caixa-recusou' }
+    if (pendente.atraso) return { perguntando: false, texto: saida.texto, desfecho: 'a-pagar', aPagar: pg }
+    pendente.naCaixaAPagar = true
+    pendente.jaPerguntou = true
+    pendente.ultimaPergunta = 'Se já foi pago, responde *pago*.'
+    return { perguntando: true, texto: saida.texto, desfecho: 'a-pagar', aPagar: pg }
+  }
+
+  if (pg?.decisao === 'perguntar') {
+    pendente.esperandoPago = true
+    pendente.jaPerguntou = true
+    const pergunta = perguntaDePago(pg)
+    pendente.ultimaPergunta = pergunta
+    return { perguntando: true, texto: pergunta, desfecho: 'pergunta', pergunta: 'se já foi pago' }
+  }
 
   const falta = []
   if (!dados.obra) falta.push('obra')

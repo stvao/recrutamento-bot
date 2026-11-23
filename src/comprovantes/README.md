@@ -27,6 +27,7 @@ sem aprovação humana.
 | `zip.js` | Leitor de zip mínimo, que trata o arquivo como dado de fora. |
 | `correcao.js` | Corrigir ou cancelar pelo grupo um gasto já lançado, citando o comprovante ou a confirmação. |
 | `habito.js` | De qual obra e categoria costuma ser cada fornecedor. Só sugere — nunca lança. Funções puras. |
+| `a-pagar.js` | Decide se o documento é pagamento feito ou conta a pagar (boleto, orçamento, nota a prazo). Funções puras. |
 | `saida.js` | Lança o gasto pendente no Obras, ou manda para a caixa de comprovantes. |
 | `ronda.js` | O lembrete (uma vez, 3 h) e o prazo (24 h → caixa). Liga no arranque. |
 | `formato.js` | Como valor, data e item aparecem nas mensagens. |
@@ -38,7 +39,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`, `teste-a-pagar.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Comprovante repetido
@@ -120,6 +121,42 @@ e para a comparação de repetido.
 Medida não é data: "tubo 3/4" e "joelho 1/2" são ignorados. Sem ano, a data
 só vale com o mês em dois dígitos ("05/09") ou com "dia", "data", "em" ou
 "de" antes ("dia 3/8"), e até 120 dias para trás; com ano, até um ano.
+
+## Pago × a pagar
+
+No grupo chega também o boleto que ainda vence, o orçamento, a nota a prazo.
+Gasto é dinheiro que **saiu** — então o robô passou a olhar o que é o
+documento. A leitura da imagem diz o tipo (`comprovante_pagamento`,
+`cupom_fiscal`, `nota_fiscal`, `boleto`, `orcamento_pedido`, `outro`), se
+há **prova de pagamento** na imagem, e o vencimento.
+
+| Documento | O que o robô faz |
+|---|---|
+| Boleto ou orçamento/pedido, **sem** prova de pagamento | Não lança. Manda para a caixa com o texto começando por "A PAGAR — boleto, vence dd/mm" (ou "ORÇAMENTO/PEDIDO — não é pagamento") e avisa no grupo. |
+| Nota fiscal com vencimento no futuro e sem prova de pagamento | Pergunta: "Já foi pago? Responde *pago* ou *a pagar*." |
+| Todo o resto | Como sempre. |
+
+- **`pago`**, *já paguei*, *foi pago* — citando o comprovante ou o aviso —
+  lança normalmente, mesmo depois de ter ido para a caixa. *a pagar* (ou
+  *não*, na pergunta da nota) manda para a caixa com a marca.
+- **O que a pessoa escreveu ganha da imagem:** "pago", "pix feito", "paguei",
+  "pago por Fulano" na legenda, e não há pergunta. "a pagar" na legenda
+  manda para a caixa, seja qual for o tipo.
+- **Na dúvida, o comportamento de antes.** Leitura que falhou, tipo `outro`
+  ou desconhecido, modelo que não afirmou que falta a prova de pagamento:
+  nada disso segura um comprovante.
+- O que foi para a caixa como "a pagar" fica esperando um *pago* pelo prazo
+  de sempre (24 h), sem lembrete; depois sai da espera em silêncio.
+- No grupo antigo vale a mesma regra, mas o documento não fica esperando
+  (não segura o lote de perguntas). No relatório do ensaio há a coluna
+  "Tipo do documento" e o destino "a pagar".
+- Os textos são fixos. O destino do que é "a pagar" está isolado em
+  `mandarParaContasAPagar` (`saida.js`): hoje é a caixa; quando existir o
+  agente de contas a pagar, troca-se só ali.
+
+Limite conhecido: quando um documento vai para a caixa como "a pagar" e
+depois é lançado com *pago*, a cópia que ficou na caixa continua lá — o robô
+não tem como tirar.
 
 ## Hábito do fornecedor
 

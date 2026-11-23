@@ -92,6 +92,8 @@ export const CATEGORIAS = [
   'FERRAMENTAS', 'LOCACAO', 'EPI', 'HOSPEDAGEM', 'MANUTENCAO', 'OUTRO',
 ]
 
+import { TIPOS_DE_DOCUMENTO } from './a-pagar.js'
+
 const ESQUEMA = {
   type: 'object',
   properties: {
@@ -102,10 +104,13 @@ const ESQUEMA = {
     documento: { type: 'string', description: 'Numero do cupom, nota ou id da transacao, se aparecer. Vazio se nao.' },
     cnpj: { type: 'string', description: 'CNPJ de quem RECEBEU o pagamento, so os 14 digitos, se aparecer inteiro e legivel. Vazio se nao aparecer, se estiver cortado ou se for CPF.' },
     formaPagamento: { type: 'string', description: 'Pix, cartao, dinheiro, boleto — como aparece no comprovante. Vazio se nao aparecer.' },
+    tipoDocumento: { type: 'string', enum: TIPOS_DE_DOCUMENTO, description: 'O que e o documento: comprovante_pagamento (Pix, transferencia, recibo, comprovante de cartao), cupom_fiscal (cupom de loja, posto, mercado), nota_fiscal (NF-e, DANFE, nota de servico), boleto (boleto bancario ou fatura a pagar), orcamento_pedido (orcamento, cotacao, pedido de compra), outro.' },
+    pagamentoComprovado: { type: 'boolean', description: 'true se a imagem PROVA que o pagamento foi feito (comprovante de Pix ou transferencia, autenticacao bancaria, carimbo ou recibo de pago, cupom fiscal ja com a forma de pagamento). false se e so a cobranca: boleto sem autenticacao, orcamento, pedido, nota fiscal a prazo.' },
+    vencimento: { type: 'string', description: 'Data de VENCIMENTO, AAAA-MM-DD, quando houver (boleto, fatura, nota a prazo). Vazio se nao houver.' },
     confianca: { type: 'string', enum: ['alta', 'media', 'baixa'], description: 'Quao seguro voce esta do VALOR e da DATA. "baixa" se a foto esta ruim, cortada ou ilegivel.' },
     observacao: { type: 'string', description: 'So se algo estiver estranho (foto cortada, dois valores possiveis, ilegivel). Vazio se estiver tudo claro.' },
   },
-  required: ['valor', 'data', 'estabelecimento', 'categoria', 'documento', 'cnpj', 'formaPagamento', 'confianca', 'observacao'],
+  required: ['valor', 'data', 'estabelecimento', 'categoria', 'documento', 'cnpj', 'formaPagamento', 'tipoDocumento', 'pagamentoComprovado', 'vencimento', 'confianca', 'observacao'],
 }
 
 const INSTRUCOES = `Você lê comprovantes de pagamento de uma construtora que reforma escolas
@@ -125,9 +130,15 @@ REGRAS QUE VOCÊ NÃO QUEBRA
 - A data é a do PAGAMENTO, não a de emissão do documento nem a de vencimento.
 - Data sempre em AAAA-MM-DD. Cupom brasileiro escreve DD/MM/AAAA: 03/08/2026
   é 2026-08-03, e não 2026-03-08.
-- Se a imagem não for um comprovante de pagamento (foto de obra, print de
-  conversa, selfie), ponha 0 no valor, confianca "baixa" e diga o que é na
-  observacao.
+- Se a imagem não for um documento de compra ou pagamento (foto de obra,
+  print de conversa, selfie), ponha 0 no valor, confianca "baixa" e diga o
+  que é na observacao.
+- BOLETO, ORÇAMENTO, PEDIDO e NOTA FISCAL também chegam aqui, e não são
+  comprovante de pagamento. Leia o valor normalmente, diga o que é em
+  tipoDocumento e seja honesto em pagamentoComprovado: só é true quando a
+  própria imagem prova que foi pago. Boleto sem autenticação bancária é
+  false, por mais que pareça provável que tenha sido pago.
+- O vencimento vai em vencimento, e NUNCA em data: data é a do pagamento.
 
 CATEGORIA, pelo que foi comprado:
 - COMBUSTIVEL: posto, gasolina, diesel, etanol, arla
@@ -230,6 +241,15 @@ async function umaTentativa({ arquivo, tipo, descricao, modelo }) {
   }
 }
 
+/** Uma data AAAA-MM-DD que existe e não é absurda (nem de antes de 2020, nem daqui a mais de 5 anos). */
+function dataPlausivel(valor) {
+  if (typeof valor !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(valor)) return null
+  const d = new Date(`${valor}T12:00:00Z`)
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== valor) return null
+  const ano = d.getUTCFullYear()
+  return ano >= 2020 && ano <= new Date().getUTCFullYear() + 5 ? valor : null
+}
+
 /**
  * Confere o que o modelo devolveu antes de qualquer coisa valer.
  *
@@ -270,6 +290,15 @@ export function conferir(bruto) {
     // e é por ele que se reconhece o fornecedor da vez seguinte.
     cnpj: typeof bruto.cnpj === 'string' && bruto.cnpj.replace(/\D/g, '').length === 14 ? bruto.cnpj.replace(/\D/g, '') : null,
     formaPagamento: texto(bruto.formaPagamento),
+    // O que é o documento. Tipo que não está na lista vira null — e null
+    // não bloqueia nada: na dúvida, o comportamento de sempre.
+    tipoDocumento: TIPOS_DE_DOCUMENTO.includes(bruto.tipoDocumento) ? bruto.tipoDocumento : null,
+    // Só `true` ou `false` DITOS pelo modelo valem. Qualquer outra coisa é
+    // "não sei", e "não sei" não segura um comprovante.
+    pagamentoComprovado: typeof bruto.pagamentoComprovado === 'boolean' ? bruto.pagamentoComprovado : null,
+    // O vencimento pode ser no futuro — é para isso que serve. Só se confere
+    // que é uma data de verdade, e deste tempo.
+    vencimento: dataPlausivel(bruto.vencimento),
     // Sem valor legível não existe leitura de confiança alta, mesmo que o
     // modelo diga que sim.
     confianca: valor && ['alta', 'media', 'baixa'].includes(bruto.confianca) ? bruto.confianca : 'baixa',

@@ -789,6 +789,11 @@ export function combinar(escrito, lido) {
     documento: lido?.documento ?? null,
     // De quem é o comprovante, para reconhecer o fornecedor de novo (habito.js).
     cnpj: lido?.cnpj ?? null,
+    // O que é o documento, se a imagem prova o pagamento, e quando vence —
+    // para não lançar como gasto o boleto que ainda não foi pago (a-pagar.js).
+    tipoDocumento: lido?.tipoDocumento ?? null,
+    pagamentoComprovado: lido?.pagamentoComprovado ?? null,
+    vencimento: lido?.vencimento ?? null,
     formaPagamento: lido?.formaPagamento ?? null,
     confianca: escrito?.valor != null && !incerto ? 'digitado' : (lido?.confianca ?? 'baixa'),
   }

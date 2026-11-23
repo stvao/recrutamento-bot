@@ -8,6 +8,7 @@ import { visaoDisponivel } from './ia-visao.js'
 import { obrasConfigurado } from './obras-client.js'
 import { ehVocabularioConhecido } from './lancamento.js'
 import { lerRespostaDePagador, CONFIRMA_VALOR, NEGA_VALOR } from './perguntas.js'
+import { RESPOSTA_PAGO, RESPOSTA_A_PAGAR } from './a-pagar.js'
 import { processarUmaVez, entregar, timersLegenda } from './processar.js'
 import { paraCaixa } from './saida.js'
 import { apelidoDoItem, faz } from './formato.js'
@@ -111,6 +112,49 @@ function escolherPeloNumero(opcoes, so) {
 
 /** Aplica o que a pessoa respondeu ao comprovante certo. */
 function aplicarResposta(p, texto) {
+  /*
+    O documento foi para a caixa como "a pagar" e ficou esperando só uma
+    coisa: alguém dizer que JÁ FOI PAGO. Aí ele é lançado como qualquer
+    outro. Qualquer outra resposta não muda nada — ele já está onde devia.
+  */
+  if (p.naCaixaAPagar) {
+    if (!RESPOSTA_PAGO.test(texto)) return Promise.resolve(null)
+    p.naCaixaAPagar = false
+    p.pagamentoConfirmado = true
+    delete p.marcaDaCaixa
+    p.jaPerguntou = false
+    p.perguntadoEm = null
+    pendentes.atualizar(p)
+    return processarUmaVez(p)
+  }
+
+  /*
+    Resposta a "Já foi pago? Responde *pago* ou *a pagar*".
+
+    Antes da desistência de sempre: aqui "não" quer dizer "não foi pago", e
+    não "deixa pra lá".
+  */
+  if (p.esperandoPago) {
+    if (RESPOSTA_PAGO.test(texto)) {
+      p.esperandoPago = false
+      p.pagamentoConfirmado = true
+    } else if (RESPOSTA_A_PAGAR.test(texto)) {
+      p.esperandoPago = false
+      p.aPagarConfirmado = true
+    } else if (!DESISTENCIA.test(texto)) {
+      // Não respondeu à pergunta: ela volta, do mesmo jeito.
+      p.perguntadoEm = null
+      pendentes.atualizar(p)
+      return processarUmaVez(p)
+    }
+    if (!p.esperandoPago) {
+      p.jaPerguntou = false
+      p.perguntadoEm = null
+      pendentes.atualizar(p)
+      return processarUmaVez(p)
+    }
+  }
+
   if (DESISTENCIA.test(texto)) {
     return paraCaixa(p).then(({ ok, texto }) => {
       if (ok) pendentes.remover(p.id)

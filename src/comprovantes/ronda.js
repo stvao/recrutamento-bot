@@ -71,6 +71,14 @@ async function ronda() {
     if (!p.perguntadoEm) continue
     const parado = agora - p.perguntadoEm
 
+    // Já está na caixa, como "a pagar": ficou esperando só para o caso de
+    // alguém dizer que foi pago. Não há o que lembrar nem o que mandar de
+    // novo — passado o prazo, sai da espera em silêncio.
+    if (p.naCaixaAPagar) {
+      if (parado > DESISTIR_APOS_MS) pendentes.remover(p.id)
+      continue
+    }
+
     if (parado > DESISTIR_APOS_MS) {
       /*
         Esperando SÓ o nome do sócio? Então lança, sem ele.

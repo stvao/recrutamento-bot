@@ -83,7 +83,7 @@ const MAX_ARQUIVO = 20 * 1024 * 1024
 const MAX_TENTATIVAS = 3
 
 /** Estados em que não há mais nada a fazer com o arquivo. */
-const TERMINAIS = new Set(['lancado', 'ja-lancado', 'caixa', 'resolvido', 'falhou'])
+const TERMINAIS = new Set(['lancado', 'ja-lancado', 'caixa', 'a-pagar', 'resolvido', 'falhou'])
 
 const EXTENSAO = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'application/pdf': 'pdf' }
 
@@ -343,6 +343,7 @@ function linhaDoRelatorio(c, r, falso) {
   let detalhe = ''
 
   if (r.desfecho === 'lancaria') destino = 'lançaria'
+  else if (r.desfecho === 'a-pagar') { destino = 'a pagar'; detalhe = r.aPagar?.marca ?? '' }
   else if (r.desfecho === 'mesmo-arquivo') { destino = 'já lançado'; detalhe = `mesmo arquivo — ${descreverItem(r.item)}` }
   else if (r.desfecho === 'ja-lancado') { destino = 'já lançado'; detalhe = `mesmo documento e valor — ${descreverItem(r.item)}` }
   else if (r.pergunta === 'provável repetido') { destino = 'provável repetido'; detalhe = descreverItem(r.item) }
@@ -363,13 +364,14 @@ function linhaDoRelatorio(c, r, falso) {
     dataUsada: falso?.dados ? dataDoGasto(falso, d) : '',
     destino,
     detalhe,
+    tipoDoDocumento: d.tipoDocumento ? d.tipoDocumento.replace(/_/g, ' ') : '',
   }
 }
 
 const COLUNAS = [
   ['data', 'Data'], ['hora', 'Hora'], ['remetente', 'Remetente'], ['arquivo', 'Arquivo'], ['legenda', 'Legenda'],
   ['obra', 'Obra'], ['valor', 'Valor'], ['origemDoValor', 'De onde veio o valor'], ['dataUsada', 'Data que seria usada'],
-  ['destino', 'Destino'], ['detalhe', 'Detalhe'],
+  ['destino', 'Destino'], ['detalhe', 'Detalhe'], ['tipoDoDocumento', 'Tipo do documento'],
 ]
 
 /** CSV com ponto e vírgula e BOM: é o que o Excel em português abre certo com dois cliques. */
@@ -440,6 +442,7 @@ async function ensaiar({ zip, comprovantes, ignorados }, trabalho) {
     `  ${conta('já lançado').length} já estão lançados`,
     `  ${conta('provável repetido').length} parecem repetidos (seriam perguntados)`,
     `  ${conta('perguntaria').length} seriam perguntados (falta obra ou valor, valor inseguro, ou dúvida)`,
+    conta('a pagar').length ? `  ${conta('a pagar').length} não são pagamento ainda (boleto, orçamento) — iriam para a caixa, sem lançar` : null,
     conta('erro').length ? `  ${conta('erro').length} deram erro ao avaliar` : null,
     '',
     textoDosIgnorados(ignorados),
@@ -529,6 +532,8 @@ async function tratarUm(c, aberto, trabalho) {
   } else if (p.desfecho === 'lancado') {
     reg.estado = 'lancado'
     reg.valor = p.dados?.valor ?? null
+  } else if (p.desfecho === 'a-pagar') {
+    reg.estado = 'a-pagar'
   } else if (p.desfecho === 'caixa') {
     reg.estado = 'caixa'
   } else {
@@ -549,6 +554,7 @@ function contagem() {
     esperando: conta('perguntando', 'adiado').length,
     perguntando: conta('perguntando').length,
     naCaixa: conta('caixa').length,
+    aPagar: conta('a-pagar').length,
     comErro: conta('erro', 'falhou').length,
   }
 }
@@ -561,6 +567,7 @@ function textoDoResumo(trabalho) {
     `ℹ️ ${n.jaLancados} já estavam no sistema`,
     `❓ ${n.esperando} esperando resposta${n.esperando ? ` — pergunto aqui, de ${LOTE} em ${LOTE}` : ''}`,
     `📥 ${n.naCaixa} na caixa de comprovantes`,
+    n.aPagar ? `🧾 ${n.aPagar} não são pagamento ainda (boleto, orçamento) — na caixa, sem lançar` : null,
     n.comErro ? `⚠ ${n.comErro} não consegui tratar` : null,
     textoDosIgnorados(trabalho.ignorados ?? {}) || null,
   ].filter(Boolean).join('\n')

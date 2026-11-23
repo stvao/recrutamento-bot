@@ -11,6 +11,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 import { fornecedorDe } from './habito.js'
+import { avisoDeAPagar } from './a-pagar.js'
 
 /**
  * O resumo que vai no campo `texto` do comprovante.
@@ -270,6 +271,27 @@ export async function lancar(pendente, dados) {
 }
 
 /**
+ * Para onde vai o que NÃO é gasto ainda: boleto a vencer, orçamento, nota a
+ * prazo.
+ *
+ * É O ÚNICO LUGAR QUE SABE ESSE DESTINO. Hoje é a caixa de comprovantes, com
+ * uma marca no começo do texto ("A PAGAR — boleto, vence 05/12"), porque o
+ * agente de contas a pagar ainda não existe. No dia em que existir, troca-se
+ * o corpo desta função — quem decide que é "a pagar" (a-pagar.js) e quem
+ * chama (processar.js) não mudam.
+ *
+ * Devolve `{ ok, texto }`: o que dizer no grupo, ou o motivo de a caixa ter
+ * recusado.
+ */
+export async function mandarParaContasAPagar(pendente, situacao) {
+  pendente.marcaDaCaixa = situacao.marca
+  const cx = await paraCaixa(pendente)
+  if (!cx.ok) return { ok: false, texto: cx.texto }
+  console.log(`[gastos] ${pendente.de} → A PAGAR (${situacao.tipo ?? 'dito pela pessoa'}), não lançado`)
+  return { ok: true, texto: avisoDeAPagar(situacao) }
+}
+
+/**
  * Manda para a caixa — o caminho de quando não dá para lançar.
  *
  * Devolve { ok, texto }. Quem chama só tira o comprovante da espera com
@@ -288,7 +310,9 @@ async function textoDaCaixa(pendente) {
     arquivo: pendentes.arquivoDe(pendente),
     nomeArquivo: pendente.nomeArquivo,
     tipo: pendente.tipo,
-    texto: montarTexto(dados, pendente.lido?.observacao),
+    // A marca ("A PAGAR — boleto, vence 05/12") abre o texto: é a primeira
+    // coisa que quem olha a caixa tem de ver.
+    texto: [pendente.marcaDaCaixa, montarTexto(dados, pendente.lido?.observacao)].filter(Boolean).join('\n'),
     idMensagem: pendente.idMensagem ?? pendente.id,
     extras: {
       obra: dados.obra,
