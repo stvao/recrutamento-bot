@@ -254,7 +254,12 @@ async function cancelar(msg, alvo) {
 
 /** Quem pode mexer neste lançamento: quem mandou, ou alguém da lista de números. */
 function podeCorrigir(msg, alvo) {
-  return (alvo.de && msg.de === alvo.de) || numeroNaLista(msg.de)
+  if ((alvo.de && msg.de === alvo.de) || numeroNaLista(msg.de)) return true
+  // Comprovante que veio de outro lugar (grupo só de leitura): quem "mandou"
+  // não está nesta conversa. Foi nesta conversa que o robô perguntou e
+  // confirmou, e é quem está aqui que responde por ele — a regra da pessoa
+  // fica com o sistema, que recebe o telefone de quem pediu.
+  return String(alvo.de ?? '').startsWith('atraso:') && Boolean(alvo.chat) && alvo.chat === msg.chat
 }
 
 /**

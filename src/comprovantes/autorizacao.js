@@ -75,6 +75,32 @@ export const GRUPOS = new Set(
  */
 const GRUPOS_NORM = new Set([...GRUPOS].map(g => norm(g)))
 
+/**
+ * Grupos SÓ DE LEITURA (ver leitura.js): o robô lê os comprovantes que
+ * chegam ali, e não fala ali — pergunta e confirma em outro lugar.
+ *
+ *   GASTOS_GRUPOS_LEITURA=120363000000000000@g.us
+ *
+ * São origens como as de GASTOS_GRUPOS, e valem as mesmas regras: com o
+ * coringa "*" o grupo tem de estar pelo IDENTIFICADOR. O nome serve só para
+ * quem tem lista de números — e, quando não serve, o robô diz no log qual é
+ * o identificador do grupo com aquele nome, para ser copiado.
+ */
+const GRUPOS_LEITURA = new Set(
+  (process.env.GASTOS_GRUPOS_LEITURA || '').split(',').map(g => g.trim()).filter(Boolean),
+)
+const GRUPOS_LEITURA_NORM = new Set([...GRUPOS_LEITURA].map(g => norm(g)))
+
+/** Esta conversa é um grupo só de leitura? Pelo identificador, ou pelo nome. */
+export function ehGrupoDeLeitura(chat, chatNome) {
+  if (!GRUPOS_LEITURA.size) return false
+  if (GRUPOS_LEITURA.has(String(chat ?? ''))) return true
+  return Boolean(chatNome && GRUPOS_LEITURA_NORM.has(norm(chatNome)))
+}
+
+/** Os grupos de leitura cujo identificador já foi dito no log (uma vez por grupo). */
+const identificadorDito = new Set()
+
 export function coringaInvalido() {
   return QUALQUER_UM_DO_GRUPO && GRUPOS.size === 0
 }
@@ -176,6 +202,14 @@ export function numeroNaLista(de) {
  */
 export function podeLancarGasto({ de, chat, chatNome, ehGrupo }) {
   const como = comoCasouAOrigem(chat, chatNome)
+
+  // Grupo de leitura cadastrado pelo NOME, com o coringa: não vale (o nome é
+  // escolhido por quem cria o grupo). Em vez de ficar calado sem explicar,
+  // diz qual é o identificador — é só copiar para o .env.
+  if (como === 'nome' && ehGrupo && QUALQUER_UM_DO_GRUPO && ehGrupoDeLeitura(chat, chatNome) && !identificadorDito.has(chat)) {
+    identificadorDito.add(chat)
+    console.warn(`[gastos] o grupo de leitura "${chatNome}" está cadastrado pelo nome, e com GASTOS_AUTORIZADOS="*" isso não basta. O identificador dele é ${chat} — ponha esse valor em GASTOS_GRUPOS_LEITURA.`)
+  }
   if (como === null) return false
   // Só o casamento por identificador credencia o coringa.
   return autorizado(de, Boolean(ehGrupo) && como === 'id')
@@ -202,7 +236,7 @@ export function origemAceita(chat, chatNome) {
  */
 export function comoCasouAOrigem(chat, chatNome) {
   if (GRUPOS.size === 0) return 'sem_restricao'
-  if (GRUPOS.has(String(chat ?? ''))) return 'id'
-  if (chatNome && GRUPOS_NORM.has(norm(chatNome))) return 'nome'
+  if (GRUPOS.has(String(chat ?? '')) || GRUPOS_LEITURA.has(String(chat ?? ''))) return 'id'
+  if (chatNome && (GRUPOS_NORM.has(norm(chatNome)) || GRUPOS_LEITURA_NORM.has(norm(chatNome)))) return 'nome'
   return null
 }

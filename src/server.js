@@ -362,7 +362,10 @@ async function rotear(msg) {
   // casado pelo NOME, que o atacante escolhe.
   const podeLancar = gastos.podeLancarGasto(msg)
 
-  if (podeLancar && (msg.arquivo || msg.ehGrupo)) {
+  // No privado, texto só é assunto de comprovante quando o robô perguntou
+  // algo ali (as dúvidas de um grupo só de leitura podem ir para o privado
+  // do dono). Fora isso, texto no privado segue para o recrutamento.
+  if ((podeLancar && (msg.arquivo || msg.ehGrupo)) || gastos.esperaRespostaDe(msg)) {
     return gastos.tratar(msg)
   }
 

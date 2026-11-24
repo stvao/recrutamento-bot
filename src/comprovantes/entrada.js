@@ -32,7 +32,7 @@ import { visaoDisponivel } from './ia-visao.js'
 import { obrasConfigurado } from './obras-client.js'
 import { discreto } from '../texto.js'
 import {
-  AUTORIZADOS, GRUPOS, QUALQUER_UM_DO_GRUPO, gastosAtivo, origemAceita, podeLancarGasto, telefoneDeQuemMandou,
+  AUTORIZADOS, GRUPOS, QUALQUER_UM_DO_GRUPO, gastosAtivo, origemAceita, podeLancarGasto, telefoneDeQuemMandou, ehGrupoDeLeitura, numeroNaLista,
 } from './autorizacao.js'
 import {
   PERGUNTAS_DE_TESTE, LISTAR, CANCELAR_TUDO, respostaDeTeste, listar, descartarTudo, responderTexto,
@@ -40,6 +40,7 @@ import {
 import { OBRAS_RESERVA, processarUmaVez, entregar, timersLegenda } from './processar.js'
 import { remetenteDaResposta } from './atraso.js'
 import { tentarCorrecao } from './correcao.js'
+import { receberDoGrupoDeLeitura, esperaRespostaEm } from './leitura.js'
 import { atendimento } from './saida.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
@@ -130,14 +131,40 @@ export function respostaEnviada(idRecebida, idResposta) {
   return idComprovante ? memoria.anotarConfirmacao(idComprovante, idResposta) : false
 }
 
+/**
+ * Esta mensagem é resposta a uma pergunta que o robô fez NESTA conversa
+ * sobre um comprovante que veio de outro lugar (grupo de leitura, atraso)?
+ *
+ * No grupo de conversa isso não muda nada — tudo de lá já chega aqui. Serve
+ * para o PRIVADO: texto no privado normalmente vai para o recrutamento, e só
+ * é assunto de comprovante quando há pergunta do robô esperando ali.
+ */
+export function esperaRespostaDe(msg) {
+  // Só no privado, só de quem está na lista POR NÚMERO, e só enquanto há
+  // pergunta do robô ali. O coringa do grupo não vale no privado.
+  return Boolean(msg?.chat) && !msg.ehGrupo && numeroNaLista(msg.de) && esperaRespostaEm(msg.chat)
+}
+
 async function atender(msg) {
   const { de, chat, chatNome, arquivo, nomeArquivo, tipo, texto, idMensagem } = msg
 
-  if (!origemAceita(chat, chatNome)) return null
+  // Grupo SÓ DE LEITURA: o robô lê o comprovante e fala em outro lugar.
+  // Antes de qualquer comando ("ping", "pendentes") — ali nada disso existe.
+  if (msg.ehGrupo && ehGrupoDeLeitura(chat, chatNome)) {
+    return podeLancarGasto(msg) ? receberDoGrupoDeLeitura(msg) : null
+  }
+
+  // No privado, a resposta a uma pergunta que o robô fez ali (o destino das
+  // dúvidas de um grupo de leitura pode ser o privado do dono). A origem não
+  // está em GASTOS_GRUPOS, e não precisa estar: só passa quem está na lista
+  // por número, e só texto.
+  const respostaNoPrivado = !arquivo && esperaRespostaDe(msg)
+
+  if (!respostaNoPrivado && !origemAceita(chat, chatNome)) return null
 
   // O coringa só vale vindo de grupo casado pelo IDENTIFICADOR — no privado
   // nunca, e por nome de grupo também não.
-  if (!podeLancarGasto(msg)) {
+  if (!respostaNoPrivado && !podeLancarGasto(msg)) {
     // Nem responde. Dizer "você não pode" a quem mandou foto num grupo
     // confirma que existe um robô ouvindo e convida a insistir.
     if (arquivo) console.warn(`[gastos] comprovante ignorado: ${discreto(de)} não está em GASTOS_AUTORIZADOS`)

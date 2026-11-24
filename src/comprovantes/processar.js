@@ -10,6 +10,7 @@ import { enviarMensagem } from '../connectors.js'
 import { interpretar, combinar, acharValor, nomesDe } from './lancamento.js'
 import { perguntar, perguntarPagador, perguntarValorLido, perguntarObraDoHabito } from './perguntas.js'
 import { fornecedorDe, habitoDe } from './habito.js'
+import { ehGrupoDeLeitura } from './autorizacao.js'
 import { lancar, paraCaixa, diaDoEnvio, dataDoGasto, mandarParaContasAPagar } from './saida.js'
 import { pagoOuAPagar, perguntaDePago } from './a-pagar.js'
 import {
@@ -67,6 +68,13 @@ export async function avisar(pendente, texto) {
   // se diz sobre ele começa dizendo DE QUAL se está falando — data, quem
   // mandou, o que escreveu. Não há foto ali para a pessoa olhar.
   if (pendente?.prefixo) texto = `${pendente.prefixo}\n${texto}`
+
+  // A última trava do grupo só de leitura: aconteça o que acontecer acima,
+  // nada é dito num grupo onde o robô só lê.
+  if (pendente?.chat && ehGrupoDeLeitura(pendente.chat)) {
+    console.error('[gastos] BLOQUEADO: tentativa de falar num grupo só de leitura. Nada foi enviado.')
+    return null
+  }
 
   try {
     if (typeof pendente?.enviar === 'function') {

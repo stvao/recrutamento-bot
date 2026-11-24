@@ -532,6 +532,9 @@ export async function conectar(aoReceber) {
           // se conseguiu traduzir? O módulo de comprovantes só diz ao sistema
           // "quem mandou" quando é telefone.
           telefoneConhecido,
+          // O nome de exibição de quem mandou. Para o grupo só de leitura:
+          // a pergunta sai em outra conversa, e precisa dizer de quem é.
+          nomeRemetente: msg.pushName ?? null,
           chat: grupo ? jid : de,
           // O endereço ORIGINAL desta conversa. Em @lid sem telefone conhecido,
           // `de` são os dígitos do LID — um número que não existe. É por este

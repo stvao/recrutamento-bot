@@ -8,7 +8,7 @@ export {
   coringaInvalido, coringaSoComNome, gastosAtivo, autorizado, podeLancarGasto,
   origemAceita, comoCasouAOrigem,
 } from './autorizacao.js'
-export { tratar, respostaEnviada, situacao, _limparPendentes } from './entrada.js'
+export { tratar, respostaEnviada, esperaRespostaDe, situacao, _limparPendentes } from './entrada.js'
 export { iniciarRonda, encerrar, _rodarRonda } from './ronda.js'
 export { montarTexto, diaDoEnvio } from './saida.js'
 export { agendar as agendarResumo } from './resumo-diario.js'

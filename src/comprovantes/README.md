@@ -29,6 +29,7 @@ sem aprovação humana.
 | `correcao.js` | Corrigir ou cancelar pelo grupo um gasto já lançado, citando o comprovante ou a confirmação. |
 | `habito.js` | De qual obra e categoria costuma ser cada fornecedor. Só sugere — nunca lança. Funções puras. |
 | `a-pagar.js` | Decide se o documento é pagamento feito ou conta a pagar (boleto, orçamento, nota a prazo). Funções puras. |
+| `leitura.js` | O grupo só de leitura: lê os comprovantes de um grupo onde o robô não fala, e pergunta/confirma em outro lugar. |
 | `saida.js` | Lança o gasto pendente no Obras, ou manda para a caixa de comprovantes. |
 | `ronda.js` | O lembrete (uma vez, 3 h) e o prazo (24 h → caixa). Liga no arranque. |
 | `formato.js` | Como valor, data e item aparecem nas mensagens. |
@@ -40,7 +41,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`, `teste-a-pagar.js`, `teste-leitor-conta.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`, `teste-a-pagar.js`, `teste-leitor-conta.js`, `teste-grupo-leitura.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Comprovante repetido
@@ -122,6 +123,58 @@ e para a comparação de repetido.
 Medida não é data: "tubo 3/4" e "joelho 1/2" são ignorados. Sem ano, a data
 só vale com o mês em dois dígitos ("05/09") ou com "dia", "data", "em" ou
 "de" antes ("dia 3/8"), e até 120 dias para trás; com ano, até um ano.
+
+## Grupo só de leitura (o grupo da equipe)
+
+Para o grupo onde a equipe manda comprovante todo dia e o robô **não deve
+falar**. Ele lê cada comprovante que chega ali, lança, e as dúvidas e as
+confirmações saem em **outro lugar**: o grupo de conversa com o robô, ou o
+privado do dono.
+
+Para ligar:
+
+1. **Pôr o número do robô no grupo.** É por ser membro que ele recebe as
+   mensagens. Ele entra e fica calado.
+2. No `.env`:
+
+   ```
+   GASTOS_GRUPOS_LEITURA=<identificador do grupo>@g.us
+   GASTOS_LEITURA_DESTINO=<identificador do grupo de conversa>@g.us   (ou o número do dono, só dígitos)
+   ```
+
+   Com `GASTOS_AUTORIZADOS=*` o grupo de leitura tem de ir pelo
+   **identificador** (o nome qualquer um escolhe). Se puser o nome
+   ("Comprovantes Pgto obras"), na primeira mensagem de lá o robô escreve no
+   log qual é o identificador — é só copiar para o `.env`.
+3. Reiniciar o robô.
+
+O que acontece:
+
+- **Nada é dito no grupo de leitura** — nem pergunta, nem confirmação, nem
+  resposta a "ping". Há uma trava na saída que bloqueia qualquer mensagem
+  para ele.
+- Tem obra e valor → **lança** pendente, como pago pela empresa (se a legenda
+  disser "pago por Fulano", vale a legenda), com o telefone de quem mandou.
+  A confirmação "✅ Lançado" sai no destino.
+- Falta algo (obra, valor, valor lido com dúvida, parece repetido, boleto) →
+  **pergunta no destino**. Toda mensagem lá começa dizendo de onde veio:
+
+  > 📎 Do grupo "Comprovantes Pgto obras" — 24/11 às 14:03, de João Pedreiro
+  > "cimento 80"
+
+- **Quem responde** é quem está no destino, **citando** a pergunta (sem citar,
+  quando é a única no ar). No privado, só o dono (ou quem estiver em
+  `GASTOS_AUTORIZADOS` por número).
+- Foto sem legenda: espera a mensagem seguinte **da mesma pessoa** como
+  descrição, como no dia a dia.
+- Corrigir pelo grupo (citando a confirmação, no destino) funciona igual.
+
+| Variável | Padrão | Para quê |
+|---|---|---|
+| `GASTOS_GRUPOS_LEITURA` | — | Os grupos onde o robô só lê |
+| `GASTOS_LEITURA_DESTINO` | `GASTOS_ATRASO_GRUPO`, ou o grupo dos comprovantes | Onde perguntar e confirmar: grupo ou número |
+| `GASTOS_LEITURA_PAGADOR` | `empresa` | `perguntar` faz perguntar "quem pagou?" no destino |
+| `GASTOS_LEITURA_CONFIRMA` | `on` | `off` lança calado (só as dúvidas saem) |
 
 ## Pago × a pagar
 
