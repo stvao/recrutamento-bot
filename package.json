@@ -61,7 +61,7 @@
     "test:leitor-conta": "node tests/teste-leitor-conta.js",
     "test:grupo-leitura": "node tests/teste-grupo-leitura.js",
     "test:legendas-reais": "node tests/teste-legendas-reais.js",
-    "test:conversa-real": "node tests/teste-conversa-real.js"
+    "test:conversa-real": "node tests/teste-conversa-real.js && node tests/teste-inteligencia.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc14",

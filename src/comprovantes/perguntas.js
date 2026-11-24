@@ -93,6 +93,25 @@ export function perguntarObraDoHabito(pendente, dados, obra, falta) {
   return linhas.join('\n')
 }
 
+/**
+ * "É da <obra>? No RH, o Rogério está nessa obra." — quando a legenda fala de
+ * um funcionário e o RH sabe onde ele trabalha. Resposta igual à do hábito:
+ * *sim* confirma, qualquer outra coisa segue o caminho de sempre.
+ */
+export function perguntarObraDoRh(pendente, dados, doRh, falta) {
+  const linhas = []
+  const sabido = [
+    dados.descricao, dados.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null, moeda(dados.valor),
+  ].filter(Boolean)
+  if (sabido.length) linhas.push(`Anotei: ${sabido.join(' · ')}`)
+  const pergunta = `É da *${doRh.obra}*? No RH, ${doRh.nome} está nessa obra. Responde *sim* ou diz a obra.`
+  pendente.ultimaPergunta = pergunta
+  pendente.opcoes = null
+  linhas.push(pergunta)
+  if (falta.includes('valor')) linhas.push('E qual foi o *valor*?')
+  return linhas.join('\n')
+}
+
 /** "é isso mesmo" — as formas de confirmar o valor lido. */
 export const CONFIRMA_VALOR = /^\s*(sim|s|isso|isso mesmo|[eé] isso|[eé] isso mesmo|confirma|confirmo|confirmado|ok|okay|certo|correto|t[aá] certo|est[aá] certo|exato|exatamente|👍)\s*[!.]*\s*$/i
 

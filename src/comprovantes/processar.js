@@ -7,9 +7,12 @@
 import { lerComprovante } from './ia-visao.js'
 import { obrasDoSistema, pagadoresConhecidos, lancadosDoSistema } from './obras-client.js'
 import { enviarMensagem } from '../connectors.js'
-import { interpretar, combinar, acharValor, nomesDe } from './lancamento.js'
-import { perguntar, perguntarPagador, perguntarValorLido, perguntarObraDoHabito, EMPRESA_NO_TEXTO } from './perguntas.js'
-import { fornecedorDe, habitoDe } from './habito.js'
+import { interpretar, combinar, acharValor, nomesDe, acharObra, temNomeDePessoa, nomesDePessoaNoTexto } from './lancamento.js'
+import { quemE } from '../rh-client.js'
+import { entenderFrase, iaFraseLigada, CORRIGINDO } from './ia-frase.js'
+import { norm } from '../texto.js'
+import { perguntar, perguntarPagador, perguntarValorLido, perguntarObraDoHabito, perguntarObraDoRh, EMPRESA_NO_TEXTO } from './perguntas.js'
+import { fornecedorDe, habitoDe, eventosDoFornecedor, habitoAutomatico, HABITO_DIAS } from './habito.js'
 import { ehGrupoDeLeitura } from './autorizacao.js'
 import { lancar, paraCaixa, diaDoEnvio, dataDoGasto, mandarParaContasAPagar } from './saida.js'
 import { pagoOuAPagar, perguntaDePago } from './a-pagar.js'
@@ -105,6 +108,31 @@ export async function avisar(pendente, texto) {
   return null
 }
 
+/**
+ * A obra do funcionário citado, pelo RH. Devolve { nome, obra } ou null.
+ *
+ * Os nomes vêm da legenda (e das respostas) e, num Pix, de quem recebeu
+ * (lido da imagem). Tenta o nome mais completo e depois só o primeiro nome.
+ * Só vale resposta de FUNCIONÁRIO com obra, e a obra tem de ser uma das que
+ * estão abertas no sistema de obras.
+ */
+async function obraPeloRh(pendente, dados, obras) {
+  const escrito = [pendente.descricao, ...(pendente.respostas ?? [])].filter(Boolean).join(' ')
+  const nomes = [
+    ...(dados.estabelecimento && temNomeDePessoa(dados.estabelecimento) ? [dados.estabelecimento] : []),
+    ...nomesDePessoaNoTexto(escrito),
+  ]
+  const tentativas = [...new Set(nomes.flatMap(n => [n, n.split(' ')[0]]))].slice(0, 4)
+  const lista = nomesDe(obras)
+  for (const nome of tentativas) {
+    const ficha = await quemE({ nome }).catch(() => null)
+    if (ficha?.tipo !== 'funcionario' || !ficha.obra) continue
+    const obra = lista.find(o => norm(o) === norm(ficha.obra)) ?? acharObra(String(ficha.obra), obras).achado
+    if (obra) return { nome: ficha.primeiroNome || nome.split(' ')[0], obra }
+  }
+  return null
+}
+
 /** Timers da espera pela legenda, por comprovante. Fora da ficha: não vão para o disco. */
 export const timersLegenda = new Map()
 /** Comprovantes sendo processados agora (a leitura da foto leva até ~100 s). */
@@ -129,6 +157,19 @@ async function resolveDireto(p) {
   // Como terminou, para quem está acompanhando de fora (o atraso). Fica no
   // objeto, que continua na mão de quem chamou mesmo depois de sair do disco.
   p.desfecho = r.desfecho ?? null
+
+  // Para o relatório da semana: o que aconteceu com este comprovante.
+  if (r.perguntando && r.desfecho === 'pergunta') {
+    p.perguntas = (p.perguntas ?? 0) + 1
+    memoria.contar('pergunta')
+  }
+  if (r.desfecho === 'mesmo-arquivo' || r.desfecho === 'ja-lancado') memoria.contar('repetidoBarrado')
+  if (r.desfecho === 'lancado') {
+    memoria.contar('lancado')
+    if (!p.perguntas) memoria.contar('semPergunta')
+    if (p.dados?.obraDoHabito) memoria.contar('habitoDireto')
+    if (p.dados?.obraDaIa || p.iaFrase?.r) memoria.contar('ia')
+  }
 
   if (!r.perguntando) {
     // A caixa recusou: o comprovante CONTINUA esperando, e a ronda tenta de
@@ -235,13 +276,19 @@ export async function processar(pendente, { ensaio = false } = {}) {
 
   // Comprovante do atraso é de semanas atrás: a comparação com o sistema
   // tem de começar antes dele, e não nos últimos 30 dias.
-  const desde = pendente.atraso?.desde
-    ?? diaDoEnvio(Date.now() - memoria.DIAS_DE_COMPARACAO * 24 * 60 * 60 * 1000)
+  //
+  // Fora do atraso, a lista vem dos últimos 90 dias: é dela que sai também o
+  // HÁBITO do fornecedor (ver habito.js). Para comparar repetido, só os
+  // últimos 30 contam — como sempre foi.
+  const DIA = 24 * 60 * 60 * 1000
+  const desde = pendente.atraso?.desde ?? diaDoEnvio(Date.now() - HABITO_DIAS * DIA)
+  const listaDoSistema = await lancadosDoSistema(desde)
+  const corteRepetido = pendente.atraso?.desde ?? diaDoEnvio(Date.now() - memoria.DIAS_DE_COMPARACAO * DIA)
   const jaLancados = {
     // `simulados`: num ensaio, o que os comprovantes anteriores DO MESMO
     // ensaio lançariam — senão dois iguais no mesmo zip passariam os dois.
     locais: [...memoria.lancadosRecentes(), ...(pendente.simulados ?? [])],
-    doSistema: await lancadosDoSistema(desde),
+    doSistema: listaDoSistema ? listaDoSistema.filter(l => !l.data || String(l.data).slice(0, 10) >= corteRepetido) : null,
   }
 
   const identico = mesmoArquivo(
@@ -339,10 +386,76 @@ export async function processar(pendente, { ensaio = false } = {}) {
     a categoria é barato, quem aprova vê e troca. A OBRA nunca entra direto:
     vira pergunta, mais abaixo.
   */
-  const habito = habitoDe(memoria.habitosDe(fornecedorDe(dados)), { obrasAtuais: nomesDe(obras) })
+  /*
+    A IA lendo a FRASE, quando as regras não dão conta (ver ia-frase.js).
+
+    Só quando vale a pena: faltou obra ou valor, ou a pessoa está
+    corrigindo ("não é haia, é tsuya"). Corrigindo, o que a IA entendeu
+    vale mais que as regras — elas não entendem negação. Sem correção, a IA
+    só preenche o que faltou. O resultado fica guardado: a mesma frase não é
+    perguntada de novo.
+  */
+  const trechos = [pendente.descricao, ...(pendente.respostas ?? [])].filter(Boolean)
+  const ultimo = trechos.at(-1) ?? ''
+  const corrigindo = CORRIGINDO.test(ultimo)
+  const faltaAlgo = !dados.obra || dados.valor == null
+  if (iaFraseLigada() && trechos.length && (corrigindo || (faltaAlgo && escritoTudo.split(/\s+/).length >= 3))) {
+    if (pendente.iaFrase?.chave !== escritoTudo) {
+      pendente.iaFrase = { chave: escritoTudo, r: await entenderFrase({ trechos, obras, socios: pagadoresConhecidos() }) }
+    }
+    const ia = pendente.iaFrase.r
+    if (ia) {
+      if (ia.obras && !pendente.obraEscolhida && (corrigindo || !dados.obra)) {
+        dados.obra = ia.obras[0]
+        dados.rateio = ia.obras.slice(1)
+        dados.candidatos = null
+        dados.obraDaIa = true
+      }
+      if (ia.valor != null && (corrigindo || (dados.valor == null && !dados.valorAmbiguo?.length))) {
+        dados.valor = ia.valor
+        dados.valorAmbiguo = null
+        dados.valorDigitado = true
+        dados.valorDaImagem = false
+        dados.confianca = 'digitado'
+      }
+      if (ia.pagoPor && (corrigindo || !dados.pagoPor)) dados.pagoPor = ia.pagoPor
+      if (ia.empresaPagou && !dados.pagoPor) {
+        pendente.empresaPagou = true
+        pendente.pagadorPerguntado = true
+      }
+      if (ia.categoria && !dados.tipo) dados.tipo = ia.categoria
+    }
+  }
+
+  const fornecedor = fornecedorDe(dados)
+  const { eventos, eventosCategoria } = eventosDoFornecedor(fornecedor, listaDoSistema, memoria.habitosDe(fornecedor))
+  const habito = habitoDe(eventos, { obrasAtuais: nomesDe(obras), eventosCategoria })
   if (!dados.tipo && habito?.categoria) {
     dados.tipo = habito.categoria
     dados.tipoDoHabito = true
+  }
+
+  /*
+    O hábito serve quando falta a obra — ou quando a pessoa escreveu a
+    cidade e a cidade tem duas obras, e o hábito aponta uma delas ("Material
+    Bastos", e esse fornecedor é sempre da Tsuya).
+  */
+  const habitoServe = !dados.obra && habito?.obra
+    && (!dados.candidatos?.length || dados.candidatos.includes(habito.obra))
+
+  /*
+    Hábito FORTE: lança direto, sem perguntar.
+
+    Tantas vezes, e quase sempre na mesma obra, que perguntar de novo só
+    atrapalha (decisão do dono, 24/11/2026). A confirmação diz que a obra
+    veio do hábito e quantas vezes — quem ler e discordar corrige citando
+    ("obra haia"), e a correção corrige o hábito junto. Nunca depois de a
+    pessoa já ter recusado a sugestão neste comprovante.
+  */
+  if (habitoServe && habito.forte && habitoAutomatico() && !pendente.habitoPerguntado) {
+    dados.obra = habito.obra
+    dados.candidatos = null
+    dados.obraDoHabito = { vezes: habito.vezes, total: habito.total }
   }
 
   pendente.dados = dados
@@ -399,8 +512,8 @@ export async function processar(pendente, { ensaio = false } = {}) {
     de uma obra (a cidade), vale a pergunta entre aquelas — ela já disse
     alguma coisa, e o hábito não deve passar por cima.
   */
-  if (falta.includes('obra') && habito?.obra && !pendente.habitoPerguntado
-    && !dados.candidatos?.length && (!pendente.jaPerguntou || ensaio)) {
+  if (falta.includes('obra') && habitoServe && !pendente.habitoPerguntado
+    && (!pendente.jaPerguntou || ensaio)) {
     pendente.habitoPerguntado = true
     pendente.esperandoHabito = habito.obra
     pendente.jaPerguntou = true
@@ -409,6 +522,30 @@ export async function processar(pendente, { ensaio = false } = {}) {
       texto: perguntarObraDoHabito(pendente, dados, habito.obra, falta),
       desfecho: 'pergunta',
       pergunta: `${falta.join(' e ')} (pelo hábito do fornecedor, seria ${habito.obra})`,
+    }
+  }
+
+  /*
+    Falta a obra e a legenda fala de uma PESSOA ("Vale Rogério", "Pgto Yuri
+    Flor"), ou o comprovante é um Pix para uma pessoa: o RH sabe em que obra
+    o funcionário está. Pergunta "É da <obra>? No RH, o Rogério está nela."
+
+    Sugestão, nunca lançamento direto: gente muda de obra, e o mesmo nome
+    pode ser de duas pessoas. Uma vez por comprovante.
+  */
+  if (falta.includes('obra') && !pendente.rhPerguntado && !pendente.habitoPerguntado && (!pendente.jaPerguntou || ensaio)) {
+    const doRh = await obraPeloRh(pendente, dados, obras)
+    if (doRh && (!dados.candidatos?.length || dados.candidatos.includes(doRh.obra))) {
+      pendente.rhPerguntado = true
+      pendente.habitoPerguntado = true
+      pendente.esperandoHabito = doRh.obra
+      pendente.jaPerguntou = true
+      return {
+        perguntando: true,
+        texto: perguntarObraDoRh(pendente, dados, doRh, falta),
+        desfecho: 'pergunta',
+        pergunta: `${falta.join(' e ')} (pelo RH, ${doRh.nome} está em ${doRh.obra})`,
+      }
     }
   }
 

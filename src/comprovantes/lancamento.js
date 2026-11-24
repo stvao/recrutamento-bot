@@ -71,7 +71,8 @@ const TERMOS = {
   MAO_DE_OBRA: ['mao de obra', 'maodeobra', 'diaria', 'diarias', 'empreita', 'empreiteiro', 'pagamento', 'servico', 'prestador',
     'vale', 'pgto', 'pagto', 'salario', 'acerto', 'demissao', 'demitido', 'rescisao', 'bonificacao', 'adiantamento', 'funcionario',
     'func', 'pedreiro', 'servente', 'encarregado', 'encarregada', 'ajudante', 'eletricista', 'pintor', 'carpinteiro', 'armador',
-    'descarregar', 'descarga'],
+    'descarregar', 'descarga', 'serralheiro', 'soldador', 'mestre', 'gesseiro', 'azulejista', 'encanador', 'estagiario', 'estagiaria',
+    'motorista', 'operador', 'vigia', 'zelador'],
   HOSPEDAGEM: ['hospedagem', 'hotel', 'pousada', 'alojamento', 'estadia'],
   MANUTENCAO: ['manutencao', 'oficina', 'peca', 'pneu', 'revisao', 'conserto', 'mecanico'],
   OUTRO: ['outro', 'outros', 'diverso', 'diversos', 'taxa', 'cartorio', 'licenca', 'multa', 'fgts', 'guia', 'inss', 'imposto', 'internet',
@@ -1006,4 +1007,31 @@ export function combinar(escrito, lido) {
 /** A frase tem nome de gente ("Thiago Encarregado", "vale Luiz")? */
 export function temNomeDePessoa(texto) {
   return norm(texto ?? '').split(' ').some(p => NOMES_DE_PESSOA.has(p))
+}
+
+/**
+ * O nome de PESSOA que aparece na legenda ("Vale Rogério" → "Rogério",
+ * "Pgto Yuri Flor" → "Yuri Flor"). Devolve os nomes achados, do mais
+ * completo para o mais curto, ou [] — é o que se pergunta ao RH.
+ *
+ * Um nome começa numa palavra que é nome de gente conhecido e segue pelas
+ * palavras seguintes que são nome de gente, ou que começam com maiúscula
+ * (o sobrenome que não está na lista). No máximo três palavras.
+ */
+export function nomesDePessoaNoTexto(texto) {
+  const palavras = String(texto ?? '').split(/[\s,;.:\-–—/]+/).filter(Boolean)
+  const nomes = []
+  for (let i = 0; i < palavras.length; i++) {
+    if (!NOMES_DE_PESSOA.has(norm(palavras[i]))) continue
+    const nome = [palavras[i]]
+    for (let j = i + 1; j < palavras.length && nome.length < 3; j++) {
+      const p = palavras[j]
+      const ehNome = NOMES_DE_PESSOA.has(norm(p)) || (/^[A-ZÀ-Ú][a-zà-ú]{2,}$/.test(p) && !ehPalavraDeCompra(norm(p)) && !GENERICAS.has(norm(p)))
+      if (!ehNome) break
+      nome.push(p)
+    }
+    nomes.push(nome.join(' '))
+    i += nome.length - 1
+  }
+  return [...new Set(nomes)].sort((a, b) => b.split(' ').length - a.split(' ').length)
 }

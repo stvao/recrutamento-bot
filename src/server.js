@@ -1122,6 +1122,9 @@ gastos.iniciarRonda()
 const { agendarResumo } = gastos
 agendarResumo()
 
+// O relatório da semana: quanto o robô acertou sozinho (comprovantes/relatorio.js).
+gastos.agendarRelatorio()
+
 // A leitura do grupo antigo (comprovantes atrasados). Desligada por padrão
 // (GASTOS_ATRASO=off). Depois de `iniciarRonda`, de propósito: a retomada
 // confere as perguntas que estavam no ar, e para isso os comprovantes que

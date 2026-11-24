@@ -46,6 +46,11 @@ const srv = createServer((req, res) => {
 
     // A IA devolve o que o arquivo de teste traz dentro.
     if (req.url.startsWith('/ia')) {
+      // Pedido de TEXTO (a IA lendo a frase, ia-frase.js), e não de imagem:
+      // responde "não entendi", para o teste seguir só com as regras.
+      if (!JSON.parse(corpo).contents?.[0]?.parts?.[0]?.inline_data) {
+        return json(200, { candidates: [{ content: { parts: [{ text: JSON.stringify({ obras: [], valor: 0, pagoPor: '', empresaPagou: false, categoria: '', descricao: '', confianca: 'baixa' }) }] } }] })
+      }
       const dado = JSON.parse(corpo).contents[0].parts[0].inline_data.data
       const leitura = JSON.parse(Buffer.from(dado, 'base64').toString('utf8')).leitura
       return json(200, { candidates: [{ content: { parts: [{ text: JSON.stringify({

@@ -41,7 +41,7 @@ const ARQUIVO = process.env.GASTOS_MEMORIA
  */
 export const DIAS_DE_COMPARACAO = Number(process.env.GASTOS_DIAS_DUPLICATA || 30)
 
-let dados = { lancamentos: [], apelidos: {}, grupo: null, habitos: [] }
+let dados = { lancamentos: [], apelidos: {}, grupo: null, habitos: [], contagem: {}, relatorioEnviado: null }
 let sujo = false
 
 function carregar() {
@@ -54,6 +54,9 @@ function carregar() {
       grupo: lido.grupo ?? null,
       // Entrou depois. Arquivo de antes não tem, e começa sem hábito nenhum.
       habitos: Array.isArray(lido.habitos) ? lido.habitos : [],
+      // Entraram com o relatório semanal. Arquivo de antes começa do zero.
+      contagem: lido.contagem && typeof lido.contagem === 'object' ? lido.contagem : {},
+      relatorioEnviado: lido.relatorioEnviado ?? null,
     }
   } catch (e) {
     // Arquivo corrompido não pode derrubar o serviço: melhor começar sem
@@ -223,7 +226,7 @@ export function esquecerLancamento(idMensagem) {
  * repetido olha 30 dias, e o hábito precisa de três meses para existir.
  * Só o que virou gasto — o que foi para a caixa não diz de qual obra era.
  */
-export function anotarHabito({ fornecedor, obra, categoria, idMensagem }) {
+export function anotarHabito({ fornecedor, obra, categoria, idMensagem, arquivoHash }) {
   if (!fornecedor || !obra) return
   dados.habitos.push({
     cnpj: fornecedor.cnpj ?? null,
@@ -231,6 +234,8 @@ export function anotarHabito({ fornecedor, obra, categoria, idMensagem }) {
     obra,
     categoria: categoria ?? null,
     idMensagem: idMensagem ?? null,
+    // Para não contar duas vezes o que já aparece na lista do sistema.
+    arquivoHash: arquivoHash ?? null,
     quando: Date.now(),
   })
   const corte = Date.now() - HABITO_DIAS * 24 * 60 * 60 * 1000
@@ -334,10 +339,59 @@ export function grupoLembrado() {
 
 /** Só para teste: esquece tudo, sem tocar no disco. */
 export function _limpar() {
-  dados = { lancamentos: [], apelidos: {}, grupo: null, habitos: [] }
+  dados = { lancamentos: [], apelidos: {}, grupo: null, habitos: [], contagem: {}, relatorioEnviado: null }
 }
 
 /** Só para teste: um lançamento de fornecedor com a data que se quiser. */
 export function _anotarHabitoEm(h) {
   dados.habitos.push({ cnpj: null, nome: null, categoria: null, idMensagem: null, ...h })
 }
+
+// ─── Quanto o robô acertou (para o relatório semanal) ──────────────────────
+
+const diaDeHoje = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
+
+/**
+ * Conta uma coisa que aconteceu hoje: 'lancado', 'semPergunta', 'pergunta',
+ * 'caixa', 'corrigido', 'cancelado', 'habitoDireto', 'sugestaoAceita',
+ * 'sugestaoRecusada', 'ia', 'repetidoBarrado'.
+ *
+ * Por dia, e só os últimos 60: é o bastante para o relatório da semana e
+ * para comparar com a anterior.
+ */
+export function contar(evento, quantos = 1) {
+  if (!evento) return
+  const dia = diaDeHoje()
+  const doDia = dados.contagem[dia] ?? (dados.contagem[dia] = {})
+  doDia[evento] = (doDia[evento] ?? 0) + quantos
+  const corte = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(Date.now() - 60 * 24 * 60 * 60 * 1000))
+  for (const d of Object.keys(dados.contagem)) if (d < corte) delete dados.contagem[d]
+  sujo = true
+}
+
+/** A soma do que foi contado entre dois dias (AAAA-MM-DD, os dois inclusive). */
+export function contagemEntre(de, ate) {
+  const soma = {}
+  for (const [dia, eventos] of Object.entries(dados.contagem)) {
+    if (dia < de || dia > ate) continue
+    for (const [evento, n] of Object.entries(eventos)) soma[evento] = (soma[evento] ?? 0) + n
+  }
+  return soma
+}
+
+/** Quantos fornecedores o robô já sabe de que obra costumam ser (pela memória dele). */
+export function fornecedoresConhecidos(minimo = 3) {
+  const porFornecedor = new Map()
+  for (const h of dados.habitos) {
+    const chave = h.cnpj || h.nome
+    if (!chave) continue
+    const obras = porFornecedor.get(chave) ?? new Map()
+    obras.set(h.obra, (obras.get(h.obra) ?? 0) + 1)
+    porFornecedor.set(chave, obras)
+  }
+  return [...porFornecedor.values()].filter(obras => Math.max(...obras.values()) >= minimo).length
+}
+
+/** A semana do último relatório mandado — para não mandar duas vezes. */
+export function relatorioDaSemana() { return dados.relatorioEnviado }
+export function marcarRelatorio(semana) { dados.relatorioEnviado = semana; sujo = true }

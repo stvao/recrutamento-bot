@@ -42,6 +42,7 @@ import { remetenteDaResposta } from './atraso.js'
 import { tentarCorrecao } from './correcao.js'
 import { receberDoGrupoDeLeitura, esperaRespostaEm, conversaDoDestino } from './leitura.js'
 import { atendimento } from './saida.js'
+import { PEDE_RELATORIO, montarRelatorio } from './relatorio.js'
 import { esperarFotosAnteriores, soltarArquivo } from './a-caminho.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
@@ -206,6 +207,10 @@ async function atender(msg) {
 
   if (!arquivo && pedeLista(texto)) return listar(quem)
   if (!arquivo && APROVAR.test(texto ?? '')) return respostaDeAprovar()
+  if (!arquivo && PEDE_RELATORIO.test(texto ?? '')) {
+    const hoje = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date())
+    return montarRelatorio(hoje) ?? 'Ainda não tenho o que contar destes últimos 7 dias.'
+  }
   if (!arquivo && CANCELAR_TUDO.test(texto ?? '')) return descartarTudo(de)
   if (!arquivo) return responderTexto(quem, texto, msg.respondendoA, msg.enviarResposta)
 

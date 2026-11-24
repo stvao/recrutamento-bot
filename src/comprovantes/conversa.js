@@ -278,6 +278,8 @@ function aplicarResposta(p, texto) {
     const sugerida = p.esperandoHabito
     p.esperandoHabito = null
     const comMais = /^\s*(sim|isso|isso mesmo|é sim|e sim|ok|certo)\b[\s,.;!-]+(\S.*)$/i.exec(texto)
+    // Para o relatório: a sugestão (do hábito ou do RH) acertou?
+    memoria.contar(CONFIRMA_VALOR.test(texto) || comMais ? 'sugestaoAceita' : 'sugestaoRecusada')
     if (CONFIRMA_VALOR.test(texto)) {
       p.obraEscolhida = sugerida
     } else if (comMais) {

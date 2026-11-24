@@ -27,7 +27,9 @@ sem aprovação humana.
 | `zip.js` | Leitor de zip mínimo, que trata o arquivo como dado de fora — e o gerador do zip do leitor pela conta. |
 | `leitor-conta.js` | Lê o grupo antigo pela conta do dono (aparelho conectado) e monta um zip igual ao da exportação. Só lê. Usado por `scripts/ler-grupo-pela-conta.js`, fora do robô. |
 | `correcao.js` | Corrigir ou cancelar pelo grupo um gasto já lançado, citando o comprovante ou a confirmação. |
-| `habito.js` | De qual obra e categoria costuma ser cada fornecedor. Só sugere — nunca lança. Funções puras. |
+| `habito.js` | De qual obra e categoria costuma ser cada fornecedor, pelo histórico do sistema e do robô. Sugere; com hábito muito forte, lança direto. Funções puras. |
+| `ia-frase.js` | A IA lendo a frase inteira (correções, rateio, quem pagou). O código confere tudo antes de valer. |
+| `relatorio.js` | O relatório da semana: quanto o robô acertou sozinho. |
 | `a-pagar.js` | Decide se o documento é pagamento feito ou conta a pagar (boleto, orçamento, nota a prazo). Funções puras. |
 | `leitura.js` | O grupo só de leitura: lê os comprovantes de um grupo onde o robô não fala, e pergunta/confirma em outro lugar. |
 | `a-caminho.js` | Anota a foto que ainda está sendo baixada, para a legenda mandada logo depois não chegar antes dela. |
@@ -42,7 +44,7 @@ sem aprovação humana.
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
 Os testes ficam em `tests/`, com os demais: `teste-gastos.js`, `teste-legendas-reais.js`, `teste-conversa-real.js`,
-`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`, `teste-a-pagar.js`, `teste-leitor-conta.js`, `teste-grupo-leitura.js`,
+`teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`, `teste-a-pagar.js`, `teste-leitor-conta.js`, `teste-grupo-leitura.js`, `teste-inteligencia.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
 ## Como ele lê a legenda
@@ -277,35 +279,118 @@ não tem como tirar.
 
 ## Hábito do fornecedor
 
-O robô guarda, por fornecedor, de qual obra e de qual categoria foram os
-gastos **lançados** (o que foi para a caixa não conta). O fornecedor é
-reconhecido pelo CNPJ, quando a IA leu um inteiro; sem ele, pelo nome
-(sem ligar para maiúsculas, acento e "Ltda"). Mesmo nome com outro CNPJ é
-outra loja.
+De qual obra e categoria costuma ser cada fornecedor. O histórico vem de
+dois lugares, somados:
 
-Quando **falta a obra** e o fornecedor tem pelo menos 3 lançamentos nos
-últimos 90 dias, com 80% ou mais numa obra só, a pergunta deixa de ser a
-lista e vira:
+- **o sistema** (`/api/comprovantes/lancados`, últimos 90 dias): todo gasto
+  do Obras, inclusive o **digitado à mão** — o robô já sabe que a madeireira
+  é de Peruíbe no primeiro dia, sem ter lançado nada dela. Gasto rejeitado
+  não conta; gasto rateado também não (não diz de qual obra o fornecedor é);
+- **o que o robô lançou** e a lista ainda não mostra. O mesmo arquivo nos
+  dois lados conta uma vez só.
+
+O fornecedor é reconhecido pelo CNPJ, quando a IA leu um inteiro; sem ele,
+pelo nome (sem ligar para maiúsculas, acento e "Ltda"). Mesmo nome com outro
+CNPJ é outra loja. Sem o sistema no ar, vale só o que o robô lançou.
+
+Quando **falta a obra** e o fornecedor tem pelo menos 3 lançamentos com 80%
+ou mais numa obra só, a pergunta deixa de ser a lista e vira:
 
 > É da *<obra>*, como das outras vezes? Responde *sim* ou diz a obra.
 
-- **O robô nunca lança por hábito.** Obra errada é o pior erro do módulo, e
-  ninguém percebe. A pessoa sempre confirma.
 - *sim* confirma; *sim, 250* confirma e traz o valor que faltava; outra obra
   escrita vale no lugar; *não* faz voltar a pergunta de sempre, com a lista.
-- Quem escreveu a obra não é perguntado. Obra encerrada (fora da lista do
-  sistema) não é sugerida.
+- Quem escreveu a obra não é perguntado — a não ser que o escrito sirva para
+  mais de uma obra ("Material Bastos") e o hábito aponte uma delas: aí a
+  pergunta é pela do hábito. Hábito de outra cidade não passa por cima do
+  que a pessoa escreveu. Obra encerrada não é sugerida.
+- **Hábito muito forte lança direto** (decisão do dono, 24/11/2026): 6 ou
+  mais lançamentos e 95% ou mais numa obra só. A confirmação diz:
+
+  > 📌 Obra pelo hábito: das últimas 7 vezes deste fornecedor, 7 foram nessa
+  > obra. Se não for, cita esta mensagem e escreve *obra* e o nome certo.
+
+  e a observação do gasto avisa quem aprova. O gasto entra **pendente**,
+  como todos. `GASTOS_HABITO_AUTO=off` volta a sempre perguntar.
 - **Categoria:** quando nem a legenda nem a imagem deram, entra a do hábito
   (mesma régua). Essa não pergunta — errar a categoria é barato, quem aprova
   vê e troca.
 - Corrigir a obra ou cancelar o gasto pelo grupo corrige também o hábito.
-- No grupo antigo vale igual, sempre como pergunta.
+- No grupo antigo vale igual.
 
 | Variável | Padrão | Para quê |
 |---|---|---|
 | `GASTOS_HABITO_MINIMO` | `3` | Lançamentos do fornecedor para haver hábito |
 | `GASTOS_HABITO_DIAS` | `90` | Por quantos dias um lançamento conta |
 | `GASTOS_HABITO_PROPORCAO` | `80` | % mínima numa obra só |
+| `GASTOS_HABITO_AUTO` | `on` | `off`: hábito forte também pergunta |
+| `GASTOS_HABITO_AUTO_MINIMO` | `6` | Lançamentos para lançar direto |
+| `GASTOS_HABITO_AUTO_PROPORCAO` | `95` | % numa obra só para lançar direto |
+
+## A pessoa da legenda, pelo RH
+
+"Vale Rogério 150", "Diária Thiago" ou um Pix para o nome de um funcionário:
+quando falta a obra, o robô pergunta ao RH em que obra a pessoa está, e
+sugere:
+
+> É da *<obra>*? No RH, Rogério está nessa obra. Responde *sim* ou diz a obra.
+
+Só sugere — nunca lança por isso. Só vale para **funcionário** (não
+candidato), e só se a obra do RH está aberta no sistema. Usa o mesmo
+`RH_API_URL`/`RH_API_TOKEN` do resto do robô; sem eles, a pergunta é a de
+sempre.
+
+## A IA lendo a frase
+
+As regras leem bem "haia cimento 250", mas não entendem negação nem frases
+longas: "corrigindo, não é haia, é para ratear tsuya e haia, e pagamento
+feito por estevão". Quando a pessoa **está corrigindo** ("corrigindo", "na
+verdade", "não é…") ou quando, depois das regras, ainda falta obra ou valor
+num texto de 3 palavras ou mais, a IA lê tudo o que a pessoa escreveu (a
+legenda e as respostas, em ordem), com a lista de obras e cidades e a de
+sócios.
+
+O que ela devolve **só vale se o código confirmar**:
+
+- a obra tem de estar na lista **e** ter sido citada no texto (nome, apelido
+  ou cidade). Uma obra inventada derruba a resposta inteira;
+- o valor tem de estar escrito no texto;
+- quem pagou tem de ser um sócio da lista;
+- confiança baixa não vale nada.
+
+Na correção, a IA vale mais que as regras; fora dela, só preenche o que
+faltou. A observação do gasto avisa quando a obra veio da IA. A mesma frase
+não vai duas vezes para a IA.
+
+| Variável | Padrão | Para quê |
+|---|---|---|
+| `GASTOS_IA_FRASE` | `on` (com `GEMINI_API_KEY`) | `off` desliga |
+| `IA_FRASE_ENDPOINT` | o do Gemini | Outro endereço (os testes usam um de mentira) |
+| `IA_FRASE_PRAZO_MS` | `20000` | Quanto esperar a IA (ms); passou, segue sem ela |
+
+## O relatório da semana
+
+Toda segunda, a partir das 8h, o robô manda quanto acertou sozinho na semana
+que passou, comparado com a anterior:
+
+> 📈 *Como eu fui na semana* (17/11 a 23/11)
+> ✅ 31 lançado(s) · 22 sem nenhuma pergunta — 71% (semana anterior: 58%)
+> ❓ 12 pergunta(s) feita(s)
+> 📌 4 obra(s) pelo hábito, lançadas direto · sugestões: 6 aceita(s), 1 recusada(s)
+> ✏️ 2 correção(ões) · 0 cancelado(s)
+
+Subir o "sem pergunta" e baixar as correções é ele aprendendo. Vai para
+`GASTOS_RELATORIO_PARA`, ou para o destino do grupo de leitura (o privado do
+dono), ou para o grupo dos comprovantes. Só marca a semana depois de enviar:
+com o WhatsApp caído, tenta de novo. Escrever **relatório** no grupo devolve
+o dos últimos 7 dias na hora. Os números ficam na memória por 60 dias.
+
+| Variável | Padrão | Para quê |
+|---|---|---|
+| `GASTOS_RELATORIO` | `on` | `off` desliga |
+| `GASTOS_RELATORIO_DIA` | `1` (segunda) | Dia da semana, 0 = domingo |
+| `GASTOS_RELATORIO_HORA` | `8` | A partir de que hora |
+| `GASTOS_RELATORIO_PARA` | o destino da leitura | Número ou grupo |
 
 ## Corrigir pelo grupo
 

@@ -84,10 +84,11 @@ function maisFrequente(valores) {
  * é sugerida: o fornecedor de uma obra que acabou não diz nada sobre a
  * próxima, e sugerir uma obra que nem aparece mais na lista só confundiria.
  */
-export function habitoDe(eventos, { obrasAtuais = [], agora = Date.now() } = {}) {
+export function habitoDe(eventos, { obrasAtuais = [], agora = Date.now(), eventosCategoria = null } = {}) {
   const corte = agora - HABITO_DIAS * 24 * 60 * 60 * 1000
   const recentes = (eventos ?? []).filter(e => e && e.quando >= corte)
-  if (recentes.length < HABITO_MINIMO) return null
+  const recentesCategoria = eventosCategoria ? eventosCategoria.filter(e => e && e.quando >= corte) : recentes
+  if (recentes.length < HABITO_MINIMO && recentesCategoria.length < HABITO_MINIMO) return null
 
   const passa = (m, total) => m && total >= HABITO_MINIMO && m.vezes / total >= HABITO_PROPORCAO
 
@@ -96,7 +97,7 @@ export function habitoDe(eventos, { obrasAtuais = [], agora = Date.now() } = {})
   const atuais = new Set(obrasAtuais)
   const obraVale = passa(obra, comObra.length) && atuais.has(obra.valor)
 
-  const comCategoria = recentes.filter(e => e.categoria)
+  const comCategoria = recentesCategoria.filter(e => e.categoria)
   const categoria = maisFrequente(comCategoria.map(e => e.categoria))
   const categoriaVale = passa(categoria, comCategoria.length)
 
@@ -106,5 +107,59 @@ export function habitoDe(eventos, { obrasAtuais = [], agora = Date.now() } = {})
     categoria: categoriaVale ? categoria.valor : null,
     vezes: obraVale ? obra.vezes : 0,
     total: comObra.length,
+    // FORTE: tantas vezes, quase sempre na mesma obra, que perguntar de novo
+    // seria só atrapalhar. Aí o robô lança direto — e diz que foi pelo
+    // hábito, para quem leu corrigir citando se não for (ver processar.js).
+    forte: Boolean(obraVale && obra.vezes >= HABITO_AUTO_MINIMO && obra.vezes / comObra.length >= HABITO_AUTO_PROPORCAO),
   }
+}
+
+/** Lançar sozinho quando o hábito é forte? Ligado por padrão (decisão do dono, 24/11/2026). */
+export const habitoAutomatico = () => String(process.env.GASTOS_HABITO_AUTO ?? 'on').toLowerCase() !== 'off'
+
+/** Quantas vezes, no mínimo, para lançar sozinho. */
+export const HABITO_AUTO_MINIMO = Number(process.env.GASTOS_HABITO_AUTO_MINIMO || 6)
+
+/** Que parte delas na mesma obra, para lançar sozinho (em %). */
+export const HABITO_AUTO_PROPORCAO = Number(process.env.GASTOS_HABITO_AUTO_PROPORCAO || 95) / 100
+
+/**
+ * Os lançamentos deste fornecedor, para calcular o hábito.
+ *
+ * O que vale é o que está NO SISTEMA (`/lancados`): tem o que o robô lançou,
+ * o que alguém digitou à mão, e — o mais valioso — a obra como ficou DEPOIS
+ * da aprovação, quando quem aprova corrigiu. Com isso o hábito existe desde
+ * o primeiro dia, sem esperar o robô lançar três vezes.
+ *
+ * Sem o sistema (fora do ar, versão antiga), vale a memória do robô, como
+ * antes. Com ele, entra também o que o robô acabou de lançar e a lista ainda
+ * não mostra (ela é guardada por uns minutos) — reconhecido pela impressão
+ * digital do arquivo, para não contar duas vezes. A categoria vem do sistema
+ * quando ele manda; senão, da memória.
+ *
+ * Gasto rateado conta uma vez e não diz de qual obra o fornecedor "é": as
+ * partes (mesmo arquivo, obras diferentes) ficam de fora. Rejeitado não conta.
+ */
+export function eventosDoFornecedor(fornecedor, listaDoSistema, daMemoria = []) {
+  if (!fornecedor) return { eventos: [], eventosCategoria: null }
+  if (!Array.isArray(listaDoSistema)) return { eventos: daMemoria, eventosCategoria: null }
+
+  const porArquivo = new Map()
+  for (const l of listaDoSistema) if (l?.arquivoHash) porArquivo.set(l.arquivoHash, (porArquivo.get(l.arquivoHash) ?? 0) + 1)
+
+  const doSistema = listaDoSistema
+    .filter(l => l && l.obra && !/rejeit|recus|cancel/i.test(String(l.status ?? '')))
+    .filter(l => !(l.arquivoHash && porArquivo.get(l.arquivoHash) > 1))
+    .filter(l => mesmoFornecedor(fornecedor, fornecedorDe({ estabelecimento: l.fornecedor, cnpj: l.fornecedorCnpj })))
+    .map(l => ({ obra: l.obra, categoria: l.categoria ?? null, quando: Date.parse(`${String(l.data ?? '').slice(0, 10)}T12:00:00-03:00`) }))
+    .filter(e => Number.isFinite(e.quando))
+
+  // Do robô, só o que tem impressão digital e ainda não está na lista: o
+  // resto já foi contado pelo sistema (ou é de antes de o robô guardá-la).
+  const noSistema = new Set(listaDoSistema.map(l => l?.arquivoHash).filter(Boolean))
+  const recentesDoRobo = (daMemoria ?? []).filter(e => e.arquivoHash && !noSistema.has(e.arquivoHash))
+
+  const eventos = [...doSistema, ...recentesDoRobo]
+  const sistemaTemCategoria = doSistema.some(e => e.categoria)
+  return { eventos, eventosCategoria: sistemaTemCategoria ? null : daMemoria }
 }

@@ -239,6 +239,7 @@ async function aplicar(msg, alvo, campo, valor) {
     memoria.corrigirLancamento(alvo.idMensagem, { descricao: nova })
   }
   console.log(`[gastos] ${discreto(msg.de)} → corrigiu ${campo} de um lançamento`)
+  memoria.contar('corrigido')
   return texto
 }
 
@@ -249,6 +250,7 @@ async function cancelar(msg, alvo) {
   // mesmo arquivo pode ser mandado de novo, agora certo.
   memoria.esquecerLancamento(alvo.idMensagem)
   console.log(`[gastos] ${discreto(msg.de)} → cancelou um lançamento`)
+  memoria.contar('cancelado')
   return `🗑️ Cancelado: ${[moeda(alvo.valor), alvo.obra && `em ${alvo.obra}`].filter(Boolean).join(' ')}.`
 }
 

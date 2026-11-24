@@ -130,7 +130,13 @@ export async function lancar(pendente, dados) {
     categoria: dados.tipo,
     data,
     fornecedor: dados.estabelecimento,
-    observacao: dados.valorDigitado ? null : 'Valor lido da imagem pelo robô — confira.',
+    // O que quem aprova precisa saber: valor que não foi digitado, e obra
+    // que veio do hábito do fornecedor, não do que a pessoa escreveu.
+    observacao: [
+      dados.valorDigitado ? null : 'Valor lido da imagem pelo robô — confira.',
+      dados.obraDaIa ? 'Obra entendida pelo robô (IA) a partir do que foi escrito — confira.' : null,
+      dados.obraDoHabito ? `Obra escolhida pelo robô pelo hábito do fornecedor (${dados.obraDoHabito.vezes} de ${dados.obraDoHabito.total} vezes nela) — confira.` : null,
+    ].filter(Boolean).join(' ') || null,
     rateio: dados.rateio,
     pagoPor: dados.pagoPor,
     // Vira o Idempotency-Key. Tem de ser ESTÁVEL para este comprovante: com
@@ -185,6 +191,7 @@ export async function lancar(pendente, dados) {
         fornecedor: fornecedorDe(dados), obra: r.obra,
         categoria: dados.tipoDoHabito ? null : dados.tipo,
         idMensagem: pendente.idMensagem ?? pendente.id,
+        arquivoHash: pendente.arquivoHash,
       })
     }
     const linhas = [`✅ ${r.mensagem || 'Lançado, aguardando aprovação.'}`]
@@ -240,6 +247,11 @@ export async function lancar(pendente, dados) {
     }
 
     if (!dados.valorDigitado) linhas.push('⚠ Esse valor eu li da imagem. Confere ao aprovar.')
+
+    // A obra veio do hábito, não do que foi escrito: diz isso, e como corrigir.
+    if (dados.obraDoHabito) {
+      linhas.push(`📌 Obra pelo hábito: das últimas ${dados.obraDoHabito.total} vezes deste fornecedor, ${dados.obraDoHabito.vezes} foram nessa obra. Se não for, cita esta mensagem e escreve *obra* e o nome certo.`)
+    }
 
     // Dizer que aprendeu não é enfeite: é o que faz a pessoa confiar em
     // escrever daquele jeito de novo, em vez de achar que deu sorte.
@@ -301,6 +313,7 @@ export async function mandarParaContasAPagar(pendente, situacao) {
 export async function paraCaixa(pendente) {
   const texto = await textoDaCaixa(pendente)
   const ok = !pendente.caixaRecusouEm
+  if (ok) memoria.contar('caixa')
   return { ok, texto }
 }
 
