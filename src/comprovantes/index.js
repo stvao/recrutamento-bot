@@ -9,6 +9,7 @@ export {
   origemAceita, comoCasouAOrigem,
 } from './autorizacao.js'
 export { tratar, respostaEnviada, esperaRespostaDe, situacao, _limparPendentes } from './entrada.js'
+export { chaveDoRemetente, arquivoACaminho } from './a-caminho.js'
 export { iniciarRonda, encerrar, _rodarRonda } from './ronda.js'
 export { montarTexto, diaDoEnvio } from './saida.js'
 export { agendar as agendarResumo } from './resumo-diario.js'

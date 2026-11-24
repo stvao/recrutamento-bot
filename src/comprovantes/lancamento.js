@@ -731,6 +731,29 @@ export function acharObras(texto, obras, limite = 6) {
   return { obras: achadas, resto, candidatos: null }
 }
 
+/** "ratear entre todas as obras, menos itapevi" — o trecho, para sair da descrição. */
+const TRECHO_DE_RATEIO = /\b(ratear|rateio|rateia|dividir|divide|dividido)\b[^,;\n]*(\b(menos|exceto|tirando|fora|sem)\b[^,;\n]*)?/gi
+
+/**
+ * "Ratear entre todas (as obras)", "dividir com todas", "todas as obras,
+ * menos X". Devolve a lista das obras, já sem as excluídas — ou null se a
+ * frase não pede isso.
+ */
+export function ratearEntreTodas(texto, obras) {
+  const t = norm(texto ?? '')
+  const pede = /\b(ratear|rateio|rateia|dividir|divide|dividido|entre|com)\b.*\b(todas|todos)\b/.test(t) || /\btodas as obras\b/.test(t)
+  if (!pede || !obras?.length) return null
+  const exclusao = /\b(menos|exceto|tirando|fora|sem)\b(.*)$/.exec(t)
+  const excluidas = new Set()
+  if (exclusao) {
+    const achou = acharObras(exclusao[2], obras)
+    for (const o of achou.obras) excluidas.add(o)
+    for (const o of achou.candidatos ?? []) excluidas.add(o)
+  }
+  const lista = nomesDe(obras).filter(n => !excluidas.has(n))
+  return lista.length >= 2 ? lista : null
+}
+
 /**
  * Quais dos sócios conhecidos servem para o nome escrito.
  *
@@ -829,10 +852,26 @@ export function interpretar(texto, obras = [], pagadores = []) {
   const todas = acharObras(resto, obras)
   let obra = todas.obras[0] ?? null
   // As demais viram rateio: o mesmo gasto dividido entre elas.
-  const rateio = todas.obras.slice(1)
+  let rateio = todas.obras.slice(1)
   let sobra = todas.resto
   // Cidade com mais de uma obra: quem chama pergunta entre estas.
-  const candidatos = todas.candidatos ?? null
+  let candidatos = todas.candidatos ?? null
+
+  /*
+    "Ratear entre TODAS as obras" — e "todas, menos Itapevi".
+
+    Caso real (24/11/2026): "Ratear entre todas, menos Itapevi" foi lançado
+    INTEIRO em Itapevi — a única obra que a frase citava pelo nome era a que
+    ela excluía. Aqui "todas" quer dizer todas as obras abertas, e o que vem
+    depois de "menos/exceto/tirando/fora" sai da lista.
+  */
+  const rateioDeTodas = ratearEntreTodas(texto, obras)
+  if (rateioDeTodas) {
+    obra = rateioDeTodas[0]
+    rateio = rateioDeTodas.slice(1)
+    candidatos = null
+    sobra = sobra.replace(TRECHO_DE_RATEIO, ' ').replace(/\s+/g, ' ').trim()
+  }
 
   // 2) O TIPO, quando a pessoa o ESCREVEU ("material", "locação").
   //
@@ -867,6 +906,16 @@ export function interpretar(texto, obras = [], pagadores = []) {
   // 5) Última tentativa para o tipo: pelo que a descrição diz ("tijolos e
   //    areia" → MATERIAL). É palpite, e por isso só depois de tudo falhar.
   if (!tipo) tipo = acharTipo(descricao ?? '')
+
+  // Com rateio, as palavras do pedido ("ratear", "entre", "todas", "menos")
+  // não são descrição do gasto — sobravam como "ratear e", "menos".
+  if (rateio.length && descricao) {
+    descricao = limparBordas(descricao
+      .replace(/\b(ratear|rateio|rateia|dividir|divide|dividido|entre|todas|todos|as obras|obras|menos|exceto|tirando)\b/gi, ' ')
+      .replace(/\s+/g, ' ').trim()
+      .replace(/^(e|com)\s+|\s+(e|com)$/gi, '')
+      .replace(/^(e|com)$/i, '')) || null
+  }
 
   return {
     obra, rateio: rateio.length ? rateio : null,
@@ -952,4 +1001,9 @@ export function combinar(escrito, lido) {
     formaPagamento: lido?.formaPagamento ?? null,
     confianca: escrito?.valor != null && !incerto ? 'digitado' : (lido?.confianca ?? 'baixa'),
   }
+}
+
+/** A frase tem nome de gente ("Thiago Encarregado", "vale Luiz")? */
+export function temNomeDePessoa(texto) {
+  return norm(texto ?? '').split(' ').some(p => NOMES_DE_PESSOA.has(p))
 }

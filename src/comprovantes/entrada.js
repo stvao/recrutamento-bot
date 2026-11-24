@@ -35,13 +35,14 @@ import {
   AUTORIZADOS, GRUPOS, QUALQUER_UM_DO_GRUPO, gastosAtivo, origemAceita, podeLancarGasto, telefoneDeQuemMandou, ehGrupoDeLeitura, numeroNaLista,
 } from './autorizacao.js'
 import {
-  PERGUNTAS_DE_TESTE, LISTAR, CANCELAR_TUDO, respostaDeTeste, listar, descartarTudo, responderTexto,
+  PERGUNTAS_DE_TESTE, pedeLista, APROVAR, respostaDeAprovar, CANCELAR_TUDO, respostaDeTeste, listar, descartarTudo, responderTexto,
 } from './conversa.js'
 import { OBRAS_RESERVA, processarUmaVez, entregar, timersLegenda } from './processar.js'
 import { remetenteDaResposta } from './atraso.js'
 import { tentarCorrecao } from './correcao.js'
 import { receberDoGrupoDeLeitura, esperaRespostaEm, conversaDoDestino } from './leitura.js'
 import { atendimento } from './saida.js'
+import { esperarFotosAnteriores, soltarArquivo } from './a-caminho.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
 
@@ -96,6 +97,10 @@ export async function tratar(msg) {
   // o endereço como está no destino — é por ele que os comprovantes esperam.
   const chat = conversaDoDestino(msg?.chat, msg?.ehGrupo)
   if (chat !== msg?.chat) msg = { ...msg, chat }
+
+  // Texto: se há foto desta pessoa, mandada ANTES dele, ainda sendo baixada,
+  // espera ela chegar — este texto pode ser a legenda dela (a-caminho.js).
+  if (!msg?.arquivo && msg?.chaveRemetente) await esperarFotosAnteriores(msg.chaveRemetente, msg.enviadoEm)
 
   const contexto = { lancados: [] }
   const resposta = await atendimento.run(contexto, () => atender(msg))
@@ -199,7 +204,8 @@ async function atender(msg) {
 
   const quem = arquivo ? de : remetenteDaResposta(msg)
 
-  if (!arquivo && LISTAR.test(texto ?? '')) return listar(quem)
+  if (!arquivo && pedeLista(texto)) return listar(quem)
+  if (!arquivo && APROVAR.test(texto ?? '')) return respostaDeAprovar()
   if (!arquivo && CANCELAR_TUDO.test(texto ?? '')) return descartarTudo(de)
   if (!arquivo) return responderTexto(quem, texto, msg.respondendoA, msg.enviarResposta)
 
@@ -228,6 +234,8 @@ async function atender(msg) {
     criadoEm: Date.now(),
   })
   p.enviar = msg.enviarResposta
+  // Guardada: o texto que esperava por ela já pode seguir.
+  soltarArquivo(msg.chaveRemetente, idMensagem)
 
   /*
     CADA COMPROVANTE ESPERA SOZINHO. Não há fila, e não há sequência.

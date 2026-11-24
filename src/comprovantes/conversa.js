@@ -6,10 +6,10 @@
  */
 import { visaoDisponivel } from './ia-visao.js'
 import { obrasConfigurado } from './obras-client.js'
-import { ehVocabularioConhecido } from './lancamento.js'
-import { lerRespostaDePagador, CONFIRMA_VALOR, NEGA_VALOR } from './perguntas.js'
+import { ehVocabularioConhecido, temNomeDePessoa, acharObras, acharValor, pagadoresQueServem } from './lancamento.js'
+import { lerRespostaDePagador, CONFIRMA_VALOR, NEGA_VALOR, EMPRESA_NO_TEXTO } from './perguntas.js'
 import { RESPOSTA_PAGO, RESPOSTA_A_PAGAR } from './a-pagar.js'
-import { processarUmaVez, entregar, timersLegenda } from './processar.js'
+import { processarUmaVez, entregar, timersLegenda, obrasConhecidas } from './processar.js'
 import { paraCaixa } from './saida.js'
 import { apelidoDoItem, faz } from './formato.js'
 import * as pendentes from './pendentes.js'
@@ -31,12 +31,30 @@ export const PERGUNTAS_DE_TESTE = /^\s*(ping|teste|testando|robo|robô|status|vo
  * A CITAÇÃO manda. Com três comprovantes esperando, é ela que diz a qual a
  * resposta pertence — e é isso que libera responder fora de ordem.
  */
-export function responderTexto(de, texto, respondendoA, enviar) {
+export async function responderTexto(de, texto, respondendoA, enviar) {
   const meus = pendentes.doRemetente(de)
   if (!meus.length || !texto?.trim()) return null
 
   // 1) Citou alguma coisa: vale o que foi citado.
   let alvo = pendentes.porCitacao(de, respondendoA)
+
+  // 1b) Não citou, e há uma foto RECÉM-CHEGADA sem legenda: este texto é a
+  //     legenda dela — antes de ser resposta a um comprovante antigo. Era
+  //     assim que "125,42 pedágios…", legenda da foto nova, ia parar no
+  //     comprovante anterior.
+  if (!alvo) {
+    const semLegenda = meus.filter(p => !p.descricao && p.esperandoLegendaAte > Date.now())
+    const recente = semLegenda[semLegenda.length - 1]
+    if (recente) {
+      recente.descricao = texto.trim()
+      recente.esperandoLegendaAte = 0
+      clearTimeout(timersLegenda.get(recente.id))
+      timersLegenda.delete(recente.id)
+      pendentes.atualizar(recente)
+      if (enviar) recente.enviar = enviar
+      return processarUmaVez(recente).then(t => entregar(recente, t))
+    }
+  }
 
   // 2) Não citou. Se só um está esperando resposta, é ele — não há dúvida.
   if (!alvo) {
@@ -57,15 +75,55 @@ export function responderTexto(de, texto, respondendoA, enviar) {
     }
     const emFoco = perguntados.find(p => p.focoAte > Date.now())
 
+    // "1 praia grande", depois de "Esta é de qual?": o número escolhe o
+    // comprovante, e o resto é a resposta para ele. Antes só o número puro
+    // valia, e "1 praia grande" trazia a mesma lista de volta.
+    const numeroEResto = /^(\d{1,2})\s*[),.;:–-]?\s+(\S.*)$/.exec(texto.trim())
+    if (numeroEResto && comLista) {
+      const escolhido = pendentes.porId(comLista.opcoesPendentes[Number(numeroEResto[1]) - 1])
+      if (escolhido) {
+        for (const id of comLista.opcoesPendentes) {
+          const outro = pendentes.porId(id)
+          if (outro) { delete outro.opcoesPendentes; pendentes.atualizar(outro) }
+        }
+        if (enviar) escolhido.enviar = enviar
+        return aplicarResposta(escolhido, numeroEResto[2].trim())
+      }
+    }
+
+    // "todos são de praia grande", "os dois caixa empresa": a mesma
+    // resposta para cada um que está esperando.
+    const paraTodos = perguntados.length > 1 ? PARA_TODOS.exec(texto) : null
+    if (paraTodos) {
+      const resposta = paraTodos[paraTodos.length - 1].trim()
+      const ditos = []
+      for (const p of perguntados) {
+        delete p.opcoesPendentes
+        if (enviar) p.enviar = enviar
+        const dito = await aplicarResposta(p, resposta)
+        if (dito) ditos.push(dito)
+      }
+      return ditos.length ? ditos.join('\n\n') : null
+    }
+
+    const obras = perguntados.length > 1 ? await obrasConhecidas() : []
+    const servem = perguntados.length > 1 ? perguntados.filter(p => aceita(p, texto, obras)) : []
+
     if (emFoco) alvo = emFoco
     else if (perguntados.length === 1) alvo = perguntados[0]
+    // Só UM deles espera esse tipo de resposta ("caixa empresa" com um
+    // esperando "quem pagou?" e outro esperando a obra): é ele.
+    else if (servem.length === 1) alvo = servem[0]
     else if (perguntados.length > 1) {
       // Vários esperando e nenhuma citação: adivinhar aqui é o que faz
       // resposta cair no comprovante errado, que é pior que perguntar.
       const linhas = [`Tenho ${perguntados.length} comprovantes esperando resposta. Esta é de qual?`]
-      perguntados.forEach((p, i) => linhas.push(`${i + 1}) ${apelidoDoItem(p)}`))
+      perguntados.forEach((p, i) => {
+        const falta = oQueFalta(p)
+        linhas.push(`${i + 1}) ${apelidoDoItem(p)}${falta ? ` — falta ${falta}` : ''}`)
+      })
       linhas.push('')
-      linhas.push('Responde *citando* a mensagem daquele comprovante — ou manda o número dele.')
+      linhas.push('Responde *citando* a mensagem dele, ou com o número na frente ("1 praia grande"). Se vale para todos, escreve "todos" na frente.')
       // Guarda a numeração para "1" funcionar como escolha.
       for (const p of perguntados) { p.opcoesPendentes = perguntados.map(x => x.id); pendentes.atualizar(p) }
       return linhas.join('\n')
@@ -85,6 +143,11 @@ export function responderTexto(de, texto, respondendoA, enviar) {
     if (enviar) alvo.enviar = enviar
     return processarUmaVez(alvo).then(t => entregar(alvo, t))
   }
+
+  // Uma PERGUNTA que não é resposta ao que ele espera ("algum ficou sem
+  // lançar?"): mostra o que está esperando, em vez de tomar como resposta e
+  // mandar o comprovante para a caixa.
+  if (/\?\s*$/.test(texto.trim()) && !aceita(alvo, texto, await obrasConhecidas())) return listar(de)
 
   if (enviar) alvo.enviar = enviar
   return aplicarResposta(alvo, texto)
@@ -310,6 +373,28 @@ function aplicarResposta(p, texto) {
     na tela. Lido como texto corrido, "2 150" virava dois números sem obra,
     e a mesma pergunta voltava.
   */
+  /*
+    MAIS DE UMA obra da lista: "1 e 2", "1, 2 e 3", "as duas", "ambos",
+    "todas" — é rateio entre elas.
+
+    Caso real: "1 e 2, ratear quem pagou foi o Estevão", respondendo a
+    "É qual delas? 1) Tsuya 2) Haia", virou um gasto de R$ 2,00 com a
+    descrição "00, 1 e, ratear". O que vier depois ("quem pagou foi o
+    Estevão") segue como resposta comum.
+  */
+  if (p.opcoes?.length > 1) {
+    const varias = lerVariasDaLista(texto, p.opcoes)
+    if (varias) {
+      p.obraEscolhida = varias.obras[0]
+      p.rateioEscolhido = varias.obras.slice(1)
+      if (varias.resto) p.respostas.push(varias.resto)
+      p.jaPerguntou = false
+      p.perguntadoEm = null
+      pendentes.atualizar(p)
+      return processarUmaVez(p)
+    }
+  }
+
   const numeroEResto = /^(\d{1,2})\s*[),.;:–-]?\s+(\S.*)$/.exec(texto.trim())
   if (numeroEResto && p.opcoes?.length) {
     const i = Number(numeroEResto[1]) - 1
@@ -338,7 +423,12 @@ function aplicarResposta(p, texto) {
         guardar "areia" como apelido de uma obra para toda compra de areia ir
         parar lá.
       */
-      if (!p.dados?.obra) {
+      //
+      // NÃO aprende quando a pergunta era entre as obras de uma CIDADE ("É
+      // qual delas? 1) Tsuya 2) Haia"): a cidade já disse quase tudo, e o
+      // resto da legenda é a pessoa e a compra. Foi assim que o robô anotou
+      // que "Thiago Encarregado Bastos" era a Haia.
+      if (!p.dados?.obra && !p.dados?.candidatos?.length) {
         /*
           O que sobrou depois de tirar valor, tipo e obra e a DESCRICAO — e e
           dentro dela que esta o nome que ele nao reconheceu, misturado com o
@@ -363,6 +453,9 @@ function aplicarResposta(p, texto) {
           // "areia", "cimento", "material" descrevem a compra. Guardar um
           // deles como apelido faria toda compra de areia cair nesta obra.
           if (ehVocabularioConhecido(candidato)) continue
+          // Nome de gente também não: "Thiago Encarregado" é uma pessoa, e
+          // a pessoa muda de obra.
+          if (temNomeDePessoa(candidato)) continue
 
           if (memoria.aprenderApelido(candidato, p.obraEscolhida)) {
             p.apelidoAprendido = candidato
@@ -455,14 +548,98 @@ export function respostaDeTeste() {
  * a pergunta foi "é outro ou é o mesmo?", e ninguém repete a palavra da
  * pergunta.
  */
-const OUTRO_PAGAMENTO = /^\s*(outro|outro pagamento|e outro|é outro|nao e o mesmo|não é o mesmo|de novo|comprei de novo|sim,? e outro|pode lancar|pode lançar|lanca|lança)\s*[!.]*\s*$/i
+const OUTRO_PAGAMENTO = /^\s*(outro|outro pagamento|e outro|é outro|nao e o mesmo|não é o mesmo|de novo|comprei de novo|sim,? e outro|sim,?\s+(é|e)\s+outro(\s+pagamento)?|(é|e)\s+outro\s+pagamento|pode lancar|pode lançar|lanca|lança)\s*[!.]*\s*$/i
 
 /** "É o mesmo comprovante" — descarta sem lançar. */
 const MESMO_PAGAMENTO = /^\s*(mesmo|o mesmo|e o mesmo|é o mesmo|duplicado|duplicata|repetido|ja lancou|já lançou|ja mandei|já mandei|descarta|ignora)\s*[!.]*\s*$/i
 
 /** Quem desiste de responder. */
-const DESISTENCIA = /^\s*(cancelar|cancela|deixa|deixa pra la|deixa pra lá|esquece|nao sei|não sei|depois)\s*[!.]*\s*$/i
+//
+// "Pode manda para o sistema" (caso real, 24/11/2026) é como se pede para
+// largar na caixa: virava resposta, e a mesma pergunta voltava.
+const DESISTENCIA = /^\s*(cancelar|cancela|deixa|deixa pra la|deixa pra lá|esquece|nao sei|não sei|depois|(pode\s+)?(manda|mandar|joga|jogar|envia|enviar|lan[cç]a|lan[cç]ar)\s+(pro|pra|para\s+o|para\s+a|no|na)\s+(sistema|caixa))\s*[!.]*\s*$/i
 
 /** Comandos de texto que o robô entende no grupo. */
 export const LISTAR = /^\s*(pendentes|pendente|faltando|o que falta|lista|listar|fila)\s*[?!.]*\s*$/i
 export const CANCELAR_TUDO = /^\s*(cancelar tudo|cancela tudo|limpar tudo|manda tudo pra caixa|manda tudo para a caixa)\s*[!.]*\s*$/i
+
+// ─── Entender a resposta sem citação ───────────────────────────────────────
+
+/**
+ * Várias obras da lista numa resposta só: "1 e 2", "1, 2 e 3", "as duas",
+ * "ambos", "todas". Devolve { obras, resto } ou null.
+ */
+export function lerVariasDaLista(texto, opcoes) {
+  const t = String(texto ?? '').trim()
+  const numeros = /^\s*(\d{1,2}(?:\s*(?:,|\be\b|\+|\/)\s*\d{1,2})+)\s*[,.;:–-]?\s*(.*)$/i.exec(t)
+  if (numeros) {
+    const idx = [...new Set(numeros[1].match(/\d{1,2}/g).map(Number))]
+    if (idx.length > 1 && idx.every(i => i >= 1 && i <= opcoes.length)) {
+      return { obras: idx.map(i => opcoes[i - 1]), resto: numeros[2].trim() }
+    }
+  }
+  const todas = /^\s*(as duas|os dois|ambas|ambos|as tr[eê]s|os tr[eê]s|todas|todos)\b[\s,.;:–-]*(.*)$/i.exec(t)
+  if (todas) return { obras: [...opcoes], resto: todas[2].trim() }
+  return null
+}
+
+/** "todos são de praia grande", "os dois: haia", "ambos caixa empresa" — a mesma resposta para todos. */
+const PARA_TODOS = /^\s*(todos|todas|os dois|as duas|ambos|ambas|os tr[eê]s|as tr[eê]s)\b(\s+(s[aã]o|eles|elas|é|e|foram|da|do|de|na|no|pra|para|pela|pelo))*[\s,.;:–-]*(\S.*)$/i
+
+/**
+ * Este comprovante está esperando o tipo de coisa que a pessoa escreveu?
+ *
+ * Com dois esperando e nenhuma citação, o robô perguntava "Esta é de qual?"
+ * mesmo quando só UM deles podia receber aquela resposta — "caixa empresa"
+ * com um esperando "quem pagou?" e outro esperando a obra. Caso real
+ * (24/11/2026): cinco vezes seguidas a mesma pergunta.
+ */
+function aceita(p, texto, obras) {
+  const t = texto.trim()
+  if (p.esperandoPagador) {
+    if (EMPRESA_NO_TEXTO.test(t)) return true
+    const r = lerRespostaDePagador(t, p.opcoesPagador ?? [])
+    return Boolean(r.nome || r.empresa || r.pulou || r.ambiguo?.length)
+  }
+  if (p.esperandoValor) return CONFIRMA_VALOR.test(t) || NEGA_VALOR.test(t) || acharValor(t).valor != null
+  if (p.esperandoDuplicata) return MESMO_PAGAMENTO.test(t) || OUTRO_PAGAMENTO.test(t)
+  if (p.esperandoPago || p.naCaixaAPagar) return RESPOSTA_PAGO.test(t) || RESPOSTA_A_PAGAR.test(t)
+  if (p.esperandoHabito && CONFIRMA_VALOR.test(t)) return true
+  if (!p.dados?.obra) {
+    const achou = acharObras(t, obras)
+    if (achou.obras.length || achou.candidatos?.length) return true
+    if (p.opcoes?.length && /^\s*\d{1,2}\b/.test(t)) return true
+  }
+  if (p.dados?.valor == null && acharValor(t).valor != null) return true
+  return false
+}
+
+/** O que falta neste comprovante, para a lista de "Esta é de qual?". */
+function oQueFalta(p) {
+  if (p.esperandoPagador) return 'quem pagou'
+  if (p.esperandoValor) return 'confirmar o valor'
+  if (p.esperandoDuplicata) return 'se é repetido'
+  if (p.esperandoPago) return 'se já foi pago'
+  const falta = [!p.dados?.obra && 'a obra', p.dados?.valor == null && 'o valor'].filter(Boolean)
+  return falta.length ? falta.join(' e ') : null
+}
+
+/**
+ * É uma pergunta sobre o que está esperando — "quais aguardam lançamento?",
+ * "algum ficou sem lançar?"? Caso real: "algum ficou sem lançar?" foi lido
+ * como RESPOSTA a um comprovante, que foi parar na caixa.
+ */
+export function pedeLista(texto) {
+  const t = String(texto ?? '').trim()
+  if (LISTAR.test(t)) return true
+  const n = t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return /\b(quais|qual|quantos|quantas|algum|alguma|tem|ha|existe)\b.*\b(aguard\w*|esper\w*|falt\w*|pendent\w*|sem lancar|lancad\w*|lancar|lancamento)\b/.test(n)
+    && (/\?\s*$/.test(t) || /^(quais|qual|quantos|quantas|algum|alguma)\b/.test(n))
+}
+
+/** "aprovar gasto" — o robô não aprova, e diz onde se aprova. */
+export const APROVAR = /^\s*(aprovar|aprova|aprove|aprovado|aprovem)(\s+(os|o|esses|esse|todos|tudo))?(\s+(gastos?|lan[cç]amentos?|comprovantes?))?\s*[?!.]*\s*$/i
+
+export function respostaDeAprovar() {
+  return 'Quem aprova é gente: abre *Aprovar gastos* no sistema de obras. Eu só lanço, e todo gasto que lanço fica lá esperando a sua confirmação.'
+}

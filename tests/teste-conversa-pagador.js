@@ -206,7 +206,7 @@ const pagadorEnviado = () => {
   const p = pessoa('5511900000114')
   await p.foto('haia bomba de concreto 1400')
   await espera(20)
-  ok('a pergunta oferece "empresa"', p.ditos.some(t => /\*empresa\*/i.test(t)))
+  ok('a pergunta oferece "caixa da empresa"', p.ditos.some(t => /\*caixa da empresa\*/i.test(t)))
   await p.diz('a empresa')
   await espera(30)
   ok('"empresa" lança', p.ditos.some(t => /aguardando sua aprova/i.test(t)))

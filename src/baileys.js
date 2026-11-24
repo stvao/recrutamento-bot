@@ -381,6 +381,22 @@ export async function conectar(aoReceber) {
       const { atender, foraDoAr } = deveAtender(msg, type)
       if (!atender) continue
 
+      /*
+        Foto ou PDF: anota que está A CAMINHO, antes de qualquer espera.
+
+        Ela ainda vai ser baixada, e o texto que a pessoa manda logo depois
+        (a legenda em mensagem separada) não precisa baixar nada — chegava
+        primeiro, e ia para o comprovante errado ou para lugar nenhum. Com a
+        anotação, o texto espera a foto (ver comprovantes/a-caminho.js).
+      */
+      const chaveRemetente = gastos.chaveDoRemetente(msg.key?.remoteJid, msg.key?.participant)
+      const soltarArquivo = !msg.key?.fromMe && anexoDaMensagem(msg)
+        ? gastos.arquivoACaminho(chaveRemetente, msg.key.id, msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now())
+        : () => {}
+      // Toda saída deste laço solta a anotação; a que guarda o comprovante
+      // solta antes, lá dentro do módulo.
+      setTimeout(soltarArquivo, 60000).unref?.()
+
       // Olha ANTES de qualquer filtro: as respostas do dono, digitadas no
       // celular, chegam como mensagens "minhas", e o filtro abaixo as
       // descarta. São justamente elas que ensinam como responder.
@@ -558,6 +574,9 @@ export async function conectar(aoReceber) {
           enviarResposta: (t) => responder(jid, t, { citar: grupo ? msg : null, rapido: grupo }),
           // A qual mensagem esta responde — a foto, ou a pergunta do robô.
           respondendoA: citada(msg),
+          // Quem mandou, do jeito cru — para o texto esperar a foto que
+          // ainda está sendo baixada (ver a anotação no começo do laço).
+          chaveRemetente,
         })
         // Em grupo, responde citando a mensagem: com várias pessoas mandando
         // comprovante junto, confirmação solta não diz de qual foto é.
@@ -570,6 +589,8 @@ export async function conectar(aoReceber) {
       } catch (e) {
         console.error('[whatsapp] erro ao atender:', e.message)
         if (pessoal && recrutamentoLigado()) await responder(jid, 'Tive um probleminha aqui no sistema. Pode repetir, por favor?')
+      } finally {
+        soltarArquivo()
       }
     }
   })

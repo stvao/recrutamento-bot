@@ -30,6 +30,7 @@ sem aprovação humana.
 | `habito.js` | De qual obra e categoria costuma ser cada fornecedor. Só sugere — nunca lança. Funções puras. |
 | `a-pagar.js` | Decide se o documento é pagamento feito ou conta a pagar (boleto, orçamento, nota a prazo). Funções puras. |
 | `leitura.js` | O grupo só de leitura: lê os comprovantes de um grupo onde o robô não fala, e pergunta/confirma em outro lugar. |
+| `a-caminho.js` | Anota a foto que ainda está sendo baixada, para a legenda mandada logo depois não chegar antes dela. |
 | `saida.js` | Lança o gasto pendente no Obras, ou manda para a caixa de comprovantes. |
 | `ronda.js` | O lembrete (uma vez, 3 h) e o prazo (24 h → caixa). Liga no arranque. |
 | `formato.js` | Como valor, data e item aparecem nas mensagens. |
@@ -40,7 +41,7 @@ sem aprovação humana.
 | `pendentes.js` | Comprovantes esperando resposta, em disco (`dados/pendentes/`). Calcula a impressão digital (sha256) de cada arquivo. |
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
-Os testes ficam em `tests/`, com os demais: `teste-gastos.js`, `teste-legendas-reais.js`,
+Os testes ficam em `tests/`, com os demais: `teste-gastos.js`, `teste-legendas-reais.js`, `teste-conversa-real.js`,
 `teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`, `teste-a-pagar.js`, `teste-leitor-conta.js`, `teste-grupo-leitura.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
 
@@ -69,6 +70,35 @@ a **pessoa** ("Vale Rogério") e o **tipo** em poucas palavras.
   entre duas específicas, vale a primeira da frase.
 - **A pergunta da obra** vem numerada e com a cidade de cada uma; dá para
   responder o número ("2"), o número e o valor ("2 150"), a obra ou a cidade.
+
+## Como ele entende as respostas
+
+Revisto em 24/11/2026 com a conversa real do grupo "Comprovantes"
+(`tests/teste-conversa-real.js` reproduz cada caso):
+
+- **"Caixa da empresa"**, "caixa empresa", "pelo caixa", "a empresa pagou" —
+  na resposta a "quem pagou?" ou em qualquer lugar da legenda — é **pago pela
+  empresa**. Antes virava descrição e o gasto entrava como reembolsável.
+- **Ratear:** "ratear entre todas as obras", "todas, menos Itapevi", "ratear
+  tsuya e haia"; na lista "É qual delas?", "1 e 2", "as duas", "ambos".
+- **A legenda em mensagem separada** espera a foto terminar de baixar (antes,
+  chegava primeiro e se perdia, ou ia para o comprovante anterior). Foto nova
+  sem legenda passa na frente de comprovante antigo esperando resposta.
+- **Vários esperando, sem citar:** "todos são de praia grande" vale para
+  todos; "1 praia grande" escolhe o 1; e se só um deles espera aquele tipo de
+  resposta ("caixa empresa" com um esperando "quem pagou?" e outro a obra),
+  vai para ele sem perguntar. A lista "Esta é de qual?" diz o que falta em
+  cada um.
+- **Perguntas não são respostas:** "algum ficou sem lançar?", "quais
+  aguardam lançamento?" mostram o que está esperando. "aprovar gasto" diz
+  onde se aprova.
+- "Pode manda para o sistema" manda para a caixa; "sim é outro pagamento"
+  responde à pergunta de repetido.
+- **A descrição** do gasto vem da legenda (ou do que a IA leu), não das
+  respostas às perguntas.
+- **Não aprende** apelido de obra quando a escolha foi entre as obras de uma
+  cidade, nem frase com nome de gente ("Thiago Encarregado Bastos").
+- A exportação do iPhone com hora em **AM/PM** é lida (grupo antigo).
 
 ## Comprovante repetido
 

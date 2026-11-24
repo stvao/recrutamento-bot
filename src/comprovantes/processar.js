@@ -8,7 +8,7 @@ import { lerComprovante } from './ia-visao.js'
 import { obrasDoSistema, pagadoresConhecidos, lancadosDoSistema } from './obras-client.js'
 import { enviarMensagem } from '../connectors.js'
 import { interpretar, combinar, acharValor, nomesDe } from './lancamento.js'
-import { perguntar, perguntarPagador, perguntarValorLido, perguntarObraDoHabito } from './perguntas.js'
+import { perguntar, perguntarPagador, perguntarValorLido, perguntarObraDoHabito, EMPRESA_NO_TEXTO } from './perguntas.js'
 import { fornecedorDe, habitoDe } from './habito.js'
 import { ehGrupoDeLeitura } from './autorizacao.js'
 import { lancar, paraCaixa, diaDoEnvio, dataDoGasto, mandarParaContasAPagar } from './saida.js'
@@ -45,11 +45,9 @@ export async function obrasConhecidas() {
     const nome = typeof o === 'string' ? o : o.nome
     const apelidos = aprendidos.get(nome)
     if (!apelidos?.length) return o
-    return {
-      nome,
-      endereco: typeof o === 'string' ? '' : (o.endereco ?? ''),
-      apelidos,
-    }
+    // Mantém o resto (o município, sobretudo): sem ele a cidade da obra
+    // sumia justamente das obras que já tinham apelido aprendido.
+    return typeof o === 'string' ? { nome, endereco: '', apelidos } : { ...o, apelidos }
   })
 }
 
@@ -271,6 +269,41 @@ export async function processar(pendente, { ensaio = false } = {}) {
 
   // Idem para o sócio apontado na resposta à pergunta "quem pagou?".
   if (pendente.pagadorEscolhido) dados.pagoPor = pendente.pagadorEscolhido
+
+  // As outras obras apontadas na resposta ("1 e 2", "as duas"): rateio.
+  if (pendente.rateioEscolhido?.length) {
+    dados.rateio = pendente.rateioEscolhido.filter(o => o !== dados.obra)
+  }
+
+  /*
+    "Caixa da empresa", "pago pela empresa", escrito na legenda ou numa
+    resposta: quem pagou foi a empresa. Não há o que perguntar.
+
+    Sem isto a frase virava descrição e o gasto entrava como reembolsável —
+    caso real, 23/11/2026: "Marmita Caixa da empresa", com o aviso de que o
+    reembolso tinha ficado no nome de quem aprova.
+  */
+  if (!dados.pagoPor && EMPRESA_NO_TEXTO.test(escritoTudo)) {
+    pendente.empresaPagou = true
+    pendente.pagadorPerguntado = true
+  }
+
+  /*
+    A DESCRIÇÃO vem da legenda — não das respostas.
+
+    Tudo que se escreve é lido junto para achar obra, valor e quem pagou. Mas
+    a descrição montada desse jeito juntava as respostas às perguntas: "Pode
+    manda para o sistema, Ratear entre todas, menos", "corrigindo, não é é
+    para ratear e e pagamento feito por estevão". É essa linha que quem
+    aprova lê.
+
+    Então: a descrição da legenda; sem legenda, o que a IA leu (quem
+    recebeu); e só se não houver nenhum dos dois, a das respostas.
+  */
+  if (pendente.respostas?.length) {
+    const daLegenda = pendente.descricao ? interpretar(pendente.descricao, obras, pagadoresConhecidos()).descricao : null
+    dados.descricao = daLegenda || pendente.lido?.estabelecimento || dados.descricao
+  }
 
   /*
     O nº do documento, numa forma só — aqui, antes de mandar, guardar ou

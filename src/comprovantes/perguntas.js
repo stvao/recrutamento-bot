@@ -32,7 +32,7 @@ export function perguntarPagador(pendente, dados, socios) {
   linhas.push(pergunta)
 
   socios.forEach((nome, i) => linhas.push(`${i + 1}) ${nome}`))
-  linhas.push('_(responde o número, o nome, *empresa* se a empresa pagou direto, ou *pular* se não sabe)_')
+  linhas.push('_(responde o número, o nome, *caixa da empresa* se a empresa pagou direto, ou *pular* se não sabe)_')
 
   pendente.opcoesPagador = socios
   return linhas.join('\n')
@@ -116,7 +116,22 @@ const PULAR_PAGADOR = /^\s*(pular|pula|nenhum|ningu[eé]m|n[aã]o sei|nao sei|se
  * dono do token. Uma dívida com quem não gastou nada, e o custo arriscando
  * sair duas vezes: para o fornecedor e como "reembolso".
  */
-const EMPRESA_PAGOU = /^\s*(a\s+)?(empresa|firma)(\s+pagou)?\s*[?!.]*\s*$|^\s*(foi\s+a\s+empresa|pela\s+empresa|pago\s+pela\s+empresa)\s*[?!.]*\s*$/i
+//
+// "Caixa da empresa" e "Caixa empresa" — é como o dono responde de verdade
+// (grupo "Comprovantes", 23 e 24/11/2026). Nenhum dos dois era reconhecido:
+// a resposta virava descrição ("Marmita Caixa da empresa") e o gasto entrava
+// como REEMBOLSÁVEL, com o aviso de que o reembolso tinha ficado no nome de
+// quem aprova. O oposto do que foi dito.
+const EMPRESA_PAGOU = /^\s*(sim,?\s+)?(foi\s+(a|o|pela|pelo)\s+)?(pago\s+(pela|pelo|com\s+o)\s+)?(pel[ao]\s+|a\s+|o\s+)?(caixa(\s+d[ao])?(\s+(empresa|firma|construtora|obra))?|empresa|firma|construtora)(\s+pagou)?\s*[?!.]*\s*$/i
+
+/**
+ * "Caixa da empresa" no MEIO de uma legenda ou de uma resposta ("praia
+ * grande, caixa empresa", "Marmita — pago pelo caixa da empresa").
+ *
+ * Quem escreve isso está dizendo quem pagou: não há o que perguntar, e o
+ * gasto nasce como pago pela empresa.
+ */
+export const EMPRESA_NO_TEXTO = /(^|[^a-zà-ú])(caixa\s+(d[ao]\s+)?(empresa|firma|construtora)|pago\s+pel[ao]\s+(empresa|caixa)|(a\s+)?empresa\s+pagou|foi\s+a\s+empresa|pela\s+empresa)([^a-zà-ú]|$)/i
 
 /**
  * Lê a resposta de "quem pagou?": número, nome, ou uma saída.

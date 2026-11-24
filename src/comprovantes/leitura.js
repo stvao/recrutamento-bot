@@ -32,6 +32,7 @@ import { enviarMensagem } from '../connectors.js'
 import { discreto } from '../texto.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
+import { soltarArquivo } from './a-caminho.js'
 
 /** Quanto esperar pela descrição que vem em mensagem separada — o mesmo do dia a dia. */
 const ESPERA_LEGENDA_MS = Number(process.env.GASTOS_ESPERA_DESCRICAO_MS || 60000)
@@ -189,6 +190,7 @@ export async function receberDoGrupoDeLeitura(msg) {
   p.prefixo = prefixoDe(p)
   p.enviar = (t) => enviar(destino, t)
   pendentes.atualizar(p)
+  soltarArquivo(msg.chaveRemetente, idMensagem)
 
   if (!p.descricao) {
     // Sem legenda: espera um pouco, porque a descrição costuma vir na

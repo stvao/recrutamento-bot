@@ -26,8 +26,13 @@
 /** Marcas invisíveis que o WhatsApp põe no texto exportado (direção de escrita, BOM). */
 const INVISIVEIS = /[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g
 
-const CABECA_ANDROID = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),? (\d{1,2}):(\d{2})(?::(\d{2}))? - (.*)$/
-const CABECA_IPHONE = /^\[(\d{1,2})\/(\d{1,2})\/(\d{2,4}),? (\d{1,2}):(\d{2})(?::(\d{2}))?\] (.*)$/
+//
+// A hora pode vir em 12 horas, com AM/PM: "[01/09/2026, 5:40:06 PM]". É o
+// que o iPhone exporta quando o celular está nesse formato — caso real, a
+// conversa do grupo "Comprovantes" exportada em 24/11/2026. Sem isto
+// nenhuma linha casava, e a leitura achava zero comprovantes.
+const CABECA_ANDROID = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4}),? (\d{1,2}):(\d{2})(?::(\d{2}))?(?: ?([AaPp])\.? ?[Mm]\.?)? - (.*)$/
+const CABECA_IPHONE = /^\[(\d{1,2})\/(\d{1,2})\/(\d{2,4}),? (\d{1,2}):(\d{2})(?::(\d{2}))?(?: ?([AaPp])\.? ?[Mm]\.?)?\] (.*)$/
 
 const ANEXO_ANDROID = /^(.+\.[A-Za-z0-9]{2,5}) \((?:arquivo anexado|file attached)\)$/
 const ANEXO_IPHONE = /<(?:anexado|attached): ([^>]+)>/
@@ -72,7 +77,9 @@ export function lerConversa(textoBruto) {
   let atual = null
 
   for (const linhaBruta of String(textoBruto ?? '').split(/\r?\n/)) {
-    const linha = linhaBruta.replace(INVISIVEIS, '')
+    // O espaço antes do AM/PM é o "espaço estreito" (U+202F), e há o "espaço
+    // sem quebra" (U+00A0) em alguns aparelhos: viram espaço comum.
+    const linha = linhaBruta.replace(INVISIVEIS, '').replace(/[\u202f\u00a0]/g, ' ')
     const m = CABECA_ANDROID.exec(linha) ?? CABECA_IPHONE.exec(linha)
 
     if (!m) {
@@ -80,7 +87,11 @@ export function lerConversa(textoBruto) {
       continue
     }
 
-    const [, d, mes, anoTxt, h, min, seg = '00', resto] = m
+    const [, d, mes, anoTxt, h12, min, seg = '00', ampm, resto] = m
+    // 12 horas → 24: "12:30 AM" é 00:30, "5:40 PM" é 17:40, "12:05 PM" é 12:05.
+    let horas = Number(h12)
+    if (ampm) horas = (horas % 12) + (/p/i.test(ampm) ? 12 : 0)
+    const h = String(horas)
     const ano = anoTxt.length === 2 ? 2000 + Number(anoTxt) : Number(anoTxt)
     const dia = `${ano}-${mes.padStart(2, '0')}-${d.padStart(2, '0')}`
     const quando = Date.parse(`${dia}T${h.padStart(2, '0')}:${min}:${seg}-03:00`)
