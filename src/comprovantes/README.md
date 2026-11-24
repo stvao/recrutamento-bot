@@ -139,8 +139,15 @@ Para ligar:
 
    ```
    GASTOS_GRUPOS_LEITURA=<identificador do grupo>@g.us
-   GASTOS_LEITURA_DESTINO=<identificador do grupo de conversa>@g.us   (ou o número do dono, só dígitos)
+   GASTOS_LEITURA_DESTINO=55DDDNUMERODODONO
    ```
+
+   O dono escolheu (24/11/2026) receber as dúvidas **no privado dele**: o
+   destino é o número dele, só dígitos, com 55. Para usar o grupo de
+   conversa, ponha ali o identificador do grupo (`…@g.us`). O número do dono
+   tem de estar também em `GASTOS_AUTORIZADOS` — é o que o deixa responder
+   pelo privado. Com ou sem o nono dígito, tanto faz: o WhatsApp entrega dos
+   dois jeitos e o robô casa os dois.
 
    Com `GASTOS_AUTORIZADOS=*` o grupo de leitura tem de ir pelo
    **identificador** (o nome qualquer um escolhe). Se puser o nome

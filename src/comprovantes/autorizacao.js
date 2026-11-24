@@ -191,7 +191,12 @@ export function telefoneDeQuemMandou(msg) {
  * o lançamento de outra pessoa, por exemplo.
  */
 export function numeroNaLista(de) {
-  return AUTORIZADOS.has(String(de ?? '').replace(/\D/g, ''))
+  const d = String(de ?? '').replace(/\D/g, '')
+  if (AUTORIZADOS.has(d)) return true
+  // O mesmo celular, com ou sem o nono dígito: o WhatsApp entrega dos dois jeitos.
+  if (/^55\d{11}$/.test(d) && d[4] === '9') return AUTORIZADOS.has(d.slice(0, 4) + d.slice(5))
+  if (/^55\d{10}$/.test(d) && /[6-9]/.test(d[4])) return AUTORIZADOS.has(`${d.slice(0, 4)}9${d.slice(4)}`)
+  return false
 }
 
 /**

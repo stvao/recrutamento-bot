@@ -40,7 +40,7 @@ import {
 import { OBRAS_RESERVA, processarUmaVez, entregar, timersLegenda } from './processar.js'
 import { remetenteDaResposta } from './atraso.js'
 import { tentarCorrecao } from './correcao.js'
-import { receberDoGrupoDeLeitura, esperaRespostaEm } from './leitura.js'
+import { receberDoGrupoDeLeitura, esperaRespostaEm, conversaDoDestino } from './leitura.js'
 import { atendimento } from './saida.js'
 import * as pendentes from './pendentes.js'
 import * as memoria from './memoria.js'
@@ -91,6 +91,12 @@ const confirmacoesASair = new Map()   // id da mensagem recebida → { idComprov
 const VALIDADE_CONFIRMACAO_MS = 5 * 60 * 1000
 
 export async function tratar(msg) {
+  // O privado do dono, se ele for o destino das dúvidas, chega às vezes com o
+  // número escrito de outro jeito (sem o nono dígito). Daqui em diante vale
+  // o endereço como está no destino — é por ele que os comprovantes esperam.
+  const chat = conversaDoDestino(msg?.chat, msg?.ehGrupo)
+  if (chat !== msg?.chat) msg = { ...msg, chat }
+
   const contexto = { lancados: [] }
   const resposta = await atendimento.run(contexto, () => atender(msg))
 
@@ -142,7 +148,8 @@ export function respostaEnviada(idRecebida, idResposta) {
 export function esperaRespostaDe(msg) {
   // Só no privado, só de quem está na lista POR NÚMERO, e só enquanto há
   // pergunta do robô ali. O coringa do grupo não vale no privado.
-  return Boolean(msg?.chat) && !msg.ehGrupo && numeroNaLista(msg.de) && esperaRespostaEm(msg.chat)
+  if (!msg?.chat || msg.ehGrupo) return false
+  return numeroNaLista(msg.de) && esperaRespostaEm(conversaDoDestino(msg.chat, false))
 }
 
 async function atender(msg) {

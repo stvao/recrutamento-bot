@@ -57,6 +57,38 @@ export function destinoDaLeitura() {
   return destino && !ehGrupoDeLeitura(destino) ? destino : null
 }
 
+/**
+ * As formas de escrever um celular brasileiro: com e sem o nono dígito.
+ *
+ * O WhatsApp nem sempre entrega o número do jeito que foi configurado — o
+ * mesmo celular chega como 5511988880000 numa hora e 551188880000 na outra.
+ * Sem isto, a resposta do dono no privado não casaria com o destino
+ * configurado, e a pergunta ficaria sem resposta para sempre.
+ */
+function formasDoTelefone(numero) {
+  const d = String(numero ?? '').split('@')[0].replace(/\D/g, '')
+  if (!/^55\d{10,11}$/.test(d)) return []
+  const out = new Set([d])
+  if (d.length === 13 && d[4] === '9') out.add(d.slice(0, 4) + d.slice(5))
+  if (d.length === 12 && /[6-9]/.test(d[4])) out.add(`${d.slice(0, 4)}9${d.slice(4)}`)
+  return [...out]
+}
+
+/**
+ * O endereço de uma conversa PRIVADA, do jeito que está no destino.
+ *
+ * Se o destino é um número e esta conversa é com o mesmo celular (escrito de
+ * outro jeito), devolve o destino como configurado; senão, a própria
+ * conversa. Só para conversa privada — grupo não tem essa história.
+ */
+export function conversaDoDestino(chat, ehGrupo) {
+  if (ehGrupo || !chat) return chat
+  const destino = destinoDaLeitura()
+  if (!destino || destino.endsWith('@g.us')) return chat
+  const formas = formasDoTelefone(destino)
+  return formas.length && formas.some(f => formasDoTelefone(chat).includes(f)) ? destino : chat
+}
+
 /** Quem pagou, por padrão: a empresa. `perguntar` faz o robô perguntar, como no dia a dia. */
 const empresaPagaPorPadrao = () => String(process.env.GASTOS_LEITURA_PAGADOR ?? 'empresa').toLowerCase() !== 'perguntar'
 

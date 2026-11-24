@@ -243,6 +243,24 @@ const campoDe = (corpo, n) => new RegExp(`name="${n}"\r?\n\r?\n([^\r]*)`).exec(c
   ok('respondido, o privado volta a não ser assunto de comprovante', !esperaRespostaDe(noPrivado))
   ok('quem não está na lista por número não responde pelo privado', !esperaRespostaDe({ chat: DONO, de: '5511900000000', ehGrupo: false }))
 }
+{
+  // O WhatsApp entrega o número do dono SEM o nono dígito: tem de casar igual.
+  zerar()
+  process.env.GASTOS_LEITURA_DESTINO = DONO                // configurado com o 9: 5511988880000
+  const semNono = '551188880000'
+  await noGrupoDeLeitura('5511977771111', 'João', { comFoto: true, texto: 'cimento 80' })
+  ok('sem o nono dígito, ainda é reconhecido como o dono', esperaRespostaDe({ chat: semNono, de: semNono, ehGrupo: false }))
+  await noDestino(semNono, 'haia', null, { chat: semNono, ehGrupo: false })
+  ok('e a resposta lança', lancs().length === 1 && campoDe(lancs()[0].corpo, 'obra') === HAIA)
+}
+{
+  // Destino é o privado do dono: no privado de OUTRA pessoa da lista, nada muda.
+  zerar()
+  process.env.GASTOS_LEITURA_DESTINO = DONO
+  await noGrupoDeLeitura('5511977771111', 'João', { comFoto: true, texto: 'cimento 80' })
+  ok('a pergunta foi só para o dono', envios.length === 1 && envios[0].para === DONO)
+  ok('outra conversa privada não é tratada como resposta', !esperaRespostaDe({ chat: '5511966662222', de: '5511966662222', ehGrupo: false }))
+}
 
 // ── 8. Sem destino, não lê — e diz por quê ────────────────────────────────
 {
