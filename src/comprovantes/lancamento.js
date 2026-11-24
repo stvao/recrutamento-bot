@@ -42,20 +42,40 @@ import { CATEGORIAS } from './ia-visao.js'
  * realmente escrevem. Ninguém digita "MAO_DE_OBRA" — digita "diária",
  * "empreita", "pagamento".
  */
+//
+// A lista cresceu em 24/11/2026 com o que a equipe escreve DE VERDADE: as
+// 243 legendas do grupo antigo ficavam, 94 delas, sem tipo nenhum — "Vale
+// Rogério", "Pgto func.", "Condução", "Guia FGTS", "Concreto", "Gesso".
+//
+// A ORDEM das categorias importa: em empate, ganha a que vem antes. Por isso
+// TRANSPORTE vem antes de MAO_DE_OBRA — "vale transporte" é transporte, e não
+// o "vale" (adiantamento) do funcionário.
 const TERMOS = {
   COMBUSTIVEL: ['combustivel', 'gasolina', 'diesel', 'etanol', 'alcool', 'posto', 'arla', 'abastecimento'],
-  MATERIAL: ['material', 'materiais', 'cimento', 'areia', 'tijolo', 'tijolos', 'brita', 'tinta', 'madeira', 'ferro', 'eletrico', 'hidraulico'],
-  ALIMENTACAO: ['alimentacao', 'comida', 'almoco', 'marmita', 'refeicao', 'lanche', 'mercado', 'padaria', 'agua', 'cafe'],
-  FERRAMENTAS: ['ferramenta', 'ferramentas', 'equipamento', 'furadeira', 'serra', 'marreta'],
+  MATERIAL: ['material', 'materiais', 'cimento', 'areia', 'tijolo', 'tijolos', 'brita', 'tinta', 'madeira', 'ferro', 'eletrico', 'hidraulico',
+    'concreto', 'gesso', 'argamassa', 'ferragem', 'ferragens', 'vergalhao', 'fio', 'fios', 'fiacao', 'cabo', 'cabos', 'cano', 'canos',
+    'tubo', 'tubos', 'conexoes', 'prego', 'pregos', 'parafuso', 'parafusos', 'lona', 'trilho', 'impermeabilizante', 'impermeabilizantes',
+    'pedra', 'pedrisco', 'cal', 'telha', 'telhas', 'bloco', 'blocos', 'cadeado', 'cadeados', 'corrente', 'correntes', 'broxa', 'pincel',
+    'rolo', 'espacador', 'espacadores', 'piso', 'azulejo', 'rejunte', 'massa', 'manta', 'vidro', 'porta', 'janela', 'fechadura',
+    'pontalete', 'sarrafo', 'tabua', 'compensado', 'terra', 'aterro'],
+  ALIMENTACAO: ['alimentacao', 'comida', 'almoco', 'marmita', 'marmitas', 'refeicao', 'lanche', 'mercado', 'padaria', 'agua', 'cafe',
+    // "Mistura" é a carne/acompanhamento da marmita, na fala da obra.
+    'restaurante', 'mantimentos', 'janta', 'jantar', 'mistura'],
+  FERRAMENTAS: ['ferramenta', 'ferramentas', 'equipamento', 'furadeira', 'serra', 'marreta', 'maquina', 'esmerilhadeira', 'disco', 'camera', 'cameras'],
   EPI: ['epi', 'capacete', 'bota', 'botina', 'luva', 'luvas', 'oculos', 'cinto', 'uniforme', 'protetor'],
   LOCACAO: ['locacao', 'locacoes', 'aluguel', 'alugado', 'alugada', 'bomba', 'bombeamento',
     'betoneira', 'andaime', 'andaimes', 'escoramento', 'cacamba', 'guincho', 'gerador',
-    'container', 'compactador', 'placa vibratoria', 'bomba para concreto'],
-  TRANSPORTE: ['transporte', 'frete', 'pedagio', 'estacionamento', 'passagem', 'uber', 'onibus'],
-  MAO_DE_OBRA: ['mao de obra', 'maodeobra', 'diaria', 'diarias', 'empreita', 'empreiteiro', 'pagamento', 'servico', 'prestador'],
+    'container', 'compactador', 'placa vibratoria', 'bomba para concreto', 'banheiro quimico'],
+  TRANSPORTE: ['transporte', 'transp', 'conducao', 'vale transporte', 'frete', 'pedagio', 'pedagios', 'estacionamento', 'passagem',
+    'passagens', 'uber', 'onibus', 'ida e volta'],
+  MAO_DE_OBRA: ['mao de obra', 'maodeobra', 'diaria', 'diarias', 'empreita', 'empreiteiro', 'pagamento', 'servico', 'prestador',
+    'vale', 'pgto', 'pagto', 'salario', 'acerto', 'demissao', 'demitido', 'rescisao', 'bonificacao', 'adiantamento', 'funcionario',
+    'func', 'pedreiro', 'servente', 'encarregado', 'encarregada', 'ajudante', 'eletricista', 'pintor', 'carpinteiro', 'armador',
+    'descarregar', 'descarga'],
   HOSPEDAGEM: ['hospedagem', 'hotel', 'pousada', 'alojamento', 'estadia'],
   MANUTENCAO: ['manutencao', 'oficina', 'peca', 'pneu', 'revisao', 'conserto', 'mecanico'],
-  OUTRO: ['outro', 'outros', 'diverso', 'diversos', 'taxa', 'cartorio', 'licenca', 'multa'],
+  OUTRO: ['outro', 'outros', 'diverso', 'diversos', 'taxa', 'cartorio', 'licenca', 'multa', 'fgts', 'guia', 'inss', 'imposto', 'internet',
+    'telefone', 'energia', 'luz'],
 }
 
 const OPCOES_TIPO = Object.entries(TERMOS).map(([valor, termos]) => ({ valor, termos }))
@@ -247,10 +267,61 @@ function naoEhValor(texto, achado) {
  * Vocabulário fechado de dez categorias, então distância de edição acerta
  * mais que um modelo e responde na hora.
  */
+/** Palavras que dizem "pagamento" sem dizer de quê. */
+const GENERICAS_DE_PAGAMENTO = new Set(['pgto', 'pagto', 'pagamento', 'vale', 'acerto', 'adiantamento', 'func', 'funcionario'])
+
 export function acharTipo(pedaco) {
   if (!pedaco?.trim()) return null
-  const achado = melhorMatch(pedaco, OPCOES_TIPO)
-  return achado && CATEGORIAS.includes(achado) ? achado : null
+
+  /*
+    Primeiro, a palavra EXATA (ou o plural dela). É o caso normal, e não
+    depende de tolerância nenhuma: "vale", "pgto", "concreto".
+
+    A tolerância a erro de escrita vinha primeiro e errava feio em palavra
+    curta: "nota" ficava a uma letra de "bota" e toda nota fiscal virava EPI;
+    "guia" de "agua", e a guia do FGTS virava alimentação.
+  */
+  const palavras = norm(pedaco).split(' ').filter(Boolean)
+  const pedacos = [...palavras]
+  for (let i = 0; i < palavras.length - 1; i++) pedacos.push(`${palavras[i]} ${palavras[i + 1]}`)
+  for (let i = 0; i < palavras.length - 2; i++) pedacos.push(`${palavras[i]} ${palavras[i + 1]} ${palavras[i + 2]}`)
+  const comPlural = new Set(pedacos.flatMap(p => (p.endsWith('s') ? [p, p.slice(0, -1)] : [p])))
+  // A expressão mais longa ganha ("vale transporte" antes de "vale"); em
+  // empate, a ordem das categorias.
+  //
+  // Palavra GENÉRICA de pagamento ("pgto", "pagamento", "vale") perde para
+  // qualquer outra: "Pgto hotel" é hospedagem, "Pgto material" é material.
+  // Sozinha, ela diz mão de obra — é o que "pgto" quer dizer na obra.
+  //
+  // Empatadas duas específicas, ganha a que vem PRIMEIRO na frase: é o
+  // assunto, e o resto é complemento. "Bombeamento de concreto" é locação
+  // (o serviço), e não material.
+  const frase = ` ${palavras.join(' ')} `
+  const posicao = (termo) => {
+    const i = frase.indexOf(` ${termo} `)
+    return i >= 0 ? i : frase.indexOf(` ${termo}s `)
+  }
+  let exato = null
+  for (const { valor, termos } of OPCOES_TIPO) {
+    for (const t of termos) {
+      const termo = norm(t)
+      if (!comPlural.has(termo)) continue
+      const peso = (GENERICAS_DE_PAGAMENTO.has(termo) ? 0 : 10) + termo.split(' ').length
+      const pos = posicao(termo)
+      if (!exato || peso > exato.peso || (peso === exato.peso && pos >= 0 && (exato.pos < 0 || pos < exato.pos))) exato = { valor, peso, pos }
+    }
+  }
+  if (exato) return CATEGORIAS.includes(exato.valor) ? exato.valor : null
+
+  // Depois, erro de escrita — só em palavra de 6 letras ou mais e com a
+  // mesma primeira letra ("materal", "combustivl"). Abaixo disso, uma letra
+  // trocada já é outra palavra.
+  const longas = palavras.filter(p => p.length >= 6)
+  if (!longas.length) return null
+  const achado = melhorMatch(longas.join(' '), OPCOES_TIPO.map(o => ({ ...o, termos: o.termos.filter(t => norm(t).length >= 6) })))
+  if (!achado || !CATEGORIAS.includes(achado)) return null
+  const termoDoAchado = OPCOES_TIPO.find(o => o.valor === achado).termos.map(norm)
+  return longas.some(p => termoDoAchado.some(t => t[0] === p[0] && distancia(p, t) <= 2)) ? achado : null
 }
 
 /**
@@ -309,7 +380,7 @@ export function acharNaFrase(texto, conhecidos, { tolerante = true } = {}) {
 
         if (alvo.limpo === janela) {
           erro = 0
-        } else if (tolerante) {
+        } else if (tolerante && podeSerErroDeEscrita(janela, alvo.limpo)) {
           const d = distancia(janela, alvo.limpo)
           if (d <= toleranciaDe(alvo.limpo)) erro = d
         }
@@ -332,6 +403,30 @@ export function acharNaFrase(texto, conhecidos, { tolerante = true } = {}) {
     ...todas.slice(MAX_PALAVRAS_BUSCA),
   ].join(' ').trim()
   return { achado: melhor.alvo, resto }
+}
+
+/**
+ * Esta diferença pode ser erro de escrita, ou já é outra palavra?
+ *
+ * A distância de edição sozinha confundia palavras que só se parecem: "guia"
+ * (do FGTS) a uma letra de "aguia" (a escola Águia de Haia), "brita" a uma
+ * letra de "brito". Duas regras simples separam o erro de digitação da
+ * palavra diferente:
+ *
+ *  - a primeira letra é a mesma. Quem digita com pressa erra no meio e no
+ *    fim; trocar ou esquecer a primeira letra quase sempre é outra palavra;
+ *  - a palavra escrita não é, ela mesma, uma palavra conhecida (material,
+ *    tipo de gasto, nome de gente). "brita" é brita — não um "brito" mal
+ *    escrito.
+ */
+function podeSerErroDeEscrita(escrito, alvo) {
+  if (!escrito || !alvo || escrito[0] !== alvo[0]) return false
+  return !escrito.split(' ').some(p => p !== alvo && (ehPalavraDeCompra(p) || NOMES_DE_PESSOA.has(p)))
+}
+
+/** Uma palavra que descreve compra ou tipo de gasto ("brita", "vale", "guia"). */
+function ehPalavraDeCompra(p) {
+  return TERMO_EXATO.has(p) || TODOS_OS_CLASSIFICADORES.some(c => c.termo === p)
 }
 
 /**
@@ -401,18 +496,78 @@ export function ehVocabularioConhecido(palavra) {
     TERMO_EXATO.has(x) || TODOS_OS_CLASSIFICADORES.some(c => c.termo === x))
 }
 
+/**
+ * Nomes e sobrenomes de gente, comuns o bastante para aparecerem numa
+ * legenda como nome de PESSOA.
+ *
+ * Escola tem nome de gente ("EE Oswaldo Luiz Sanches Toschi", "EE Dr
+ * Francisco Pereira da Rocha"), e essas palavras viravam apelido da obra. Só
+ * que a legenda "Vale Luiz" fala do funcionário Luiz — e o robô lançava o
+ * vale na escola Oswaldo LUIZ, sem perguntar nada. "Pereira" (sobrenome)
+ * ainda brigava com "Pereiras" (a cidade de outra obra).
+ *
+ * Essas palavras saem dos apelidos. A obra continua achável pelo resto do
+ * nome ("toschi", "tsuya") e pela cidade; e, se a pessoa escrever só o nome
+ * de gente, o robô PERGUNTA — perguntar custa uma mensagem, lançar na obra
+ * errada custa o fechamento do mês.
+ */
+const NOMES_DE_PESSOA = new Set([
+  'jose', 'joao', 'antonio', 'francisco', 'carlos', 'paulo', 'pedro', 'lucas', 'luiz', 'luis', 'marcos', 'luciano', 'gabriel',
+  'rafael', 'daniel', 'marcelo', 'bruno', 'eduardo', 'felipe', 'rodrigo', 'manoel', 'manuel', 'mateus', 'matheus', 'andre',
+  'fernando', 'fabio', 'leonardo', 'gustavo', 'guilherme', 'jorge', 'sergio', 'roberto', 'ricardo', 'mario', 'oswaldo',
+  'osvaldo', 'sebastiao', 'benedito', 'raimundo', 'geraldo', 'julio', 'cesar', 'thiago', 'tiago', 'rogerio', 'edmar',
+  'wilson', 'william', 'yuri', 'elton', 'natanael', 'ygor', 'igor', 'joyce', 'ariel', 'cleuber', 'adriano', 'alexandre',
+  'maria', 'ana', 'francisca', 'antonia', 'adriana', 'juliana', 'marcia', 'fernanda', 'patricia', 'aline', 'sandra',
+  'camila', 'amanda', 'bruna', 'jessica', 'leticia', 'julia', 'luciana', 'vanessa', 'mariana', 'eduarda', 'aparecida',
+  'silva', 'santos', 'oliveira', 'souza', 'sousa', 'rodrigues', 'ferreira', 'alves', 'pereira', 'lima', 'gomes', 'costa',
+  'ribeiro', 'martins', 'carvalho', 'almeida', 'lopes', 'soares', 'fernandes', 'vieira', 'barbosa', 'rocha', 'dias',
+  'nascimento', 'andrade', 'moreira', 'nunes', 'marques', 'machado', 'mendes', 'freitas', 'cardoso', 'ramos', 'goncalves',
+  'santana', 'teixeira', 'sanches', 'flor', 'galindo',
+])
+
+/**
+ * A CIDADE da obra — que é como a equipe a chama ("Material Bastos",
+ * "Marmitas Pereiras").
+ *
+ * O sistema manda o campo `municipio` quando tem; senão, a cidade é tirada
+ * do fim do endereço ("…, Bastos - SP", "… Praia Grande/SP"). O endereço
+ * inteiro entrava na busca antes, com a rua junto — e "brita" achava a rua
+ * "Benedito Brito" da obra de Praia Grande. Rua não é como ninguém chama
+ * obra nenhuma.
+ *
+ * Sem dar para achar a cidade, devolve o endereço inteiro: melhor do que
+ * perder o jeito de achar a obra. As travas de `acharNaFrase` e a lista de
+ * nomes de gente continuam valendo nele.
+ */
+export function cidadeDe(o) {
+  if (!o || typeof o === 'string') return ''
+  if (o.municipio) return String(o.municipio)
+  const end = String(o.endereco ?? '').replace(/\b\d{5}-?\d{3}\b/g, ' ').replace(/\bcep\b/gi, ' ').replace(/[\s,;.–-]+$/, '').trim()
+  if (!end) return ''
+  // "<cidade> - SP", "<cidade>/SP", "<cidade>, SP" — a ÚLTIMA ocorrência.
+  const comUf = [...end.matchAll(/([A-Za-zÀ-ÿ' .]+?)\s*(?:-|\/|,|–)\s*(?:SP|RJ|MG|PR|SC|RS|MS|MT|GO|DF|BA|ES|PE|CE|SE|AL|PB|RN|PI|MA|PA|AM|AP|RR|RO|AC|TO)\b\.?\s*$/g)].at(-1)
+  if (comUf) {
+    // "Rua X, 100 - Centro, Bastos - SP": o pedaço antes do UF pode trazer o
+    // bairro junto; a cidade é o último trecho depois de vírgula ou traço.
+    const pedaco = comUf[1].split(/,|\s-\s|–/).map(s => s.trim()).filter(Boolean).at(-1) ?? ''
+    if (pedaco && !/\d/.test(pedaco)) return pedaco
+  }
+  return end
+}
+
 export function apelidosDe(obras) {
   const donasDe = new Map()   // palavra -> [obras que a contêm]
 
   for (const o of obras) {
-    // Aceita tanto "Nome da obra" quanto { nome, endereco } — o endereço
-    // entra na busca porque ninguém chama a obra pelo nome cadastrado: para
-    // quem trabalha nela, ela é "a de Bastos", e a cidade não aparece em
+    // Aceita tanto "Nome da obra" quanto { nome, endereco, municipio } — a
+    // cidade entra na busca porque ninguém chama a obra pelo nome cadastrado:
+    // para quem trabalha nela, ela é "a de Bastos", e a cidade não aparece em
     // nome nenhum.
     const nome = typeof o === 'string' ? o : o.nome
-    const texto = typeof o === 'string' ? o : `${o.nome} ${o.endereco ?? ''}`
+    const texto = typeof o === 'string' ? o : `${o.nome} ${cidadeDe(o)}`
 
-    const palavras = new Set(norm(texto).split(' ').filter(p => p.length >= 3 && !GENERICAS.has(p)))
+    const palavras = new Set(norm(texto).split(' ')
+      .filter(p => p.length >= 3 && !GENERICAS.has(p) && !NOMES_DE_PESSOA.has(p) && !ehPalavraDeCompra(p)))
     for (const p of palavras) {
       const donas = donasDe.get(p) ?? []
       if (!donas.includes(nome)) donas.push(nome)

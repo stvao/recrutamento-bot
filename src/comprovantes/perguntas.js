@@ -4,7 +4,7 @@
  *
  * Parte do módulo de comprovantes (ver `entrada.js` para a visão geral).
  */
-import { nomesDe, pagadoresQueServem } from './lancamento.js'
+import { nomesDe, pagadoresQueServem, cidadeDe } from './lancamento.js'
 import { moeda } from './formato.js'
 
 /**
@@ -199,13 +199,33 @@ export function perguntar(pendente, falta, obras) {
   pendente.ultimaPergunta = pergunta
   linhas.push(pergunta)
 
+  /*
+    A lista é NUMERADA, e cada obra vem com a cidade.
+
+    Antes saía "(EE PROFA TSUYA OHNO KIMURA · EE OSWALDO LUIZ SANCHES
+    TOSCHI · …)" numa linha só: ninguém sabia que dava para responder "2", e
+    o nome oficial da escola não diz que ela é a de Praia Grande — que é como
+    a equipe a chama.
+  */
+  const comCidade = (nome) => {
+    const o = (obras ?? []).find(x => (typeof x === 'string' ? x : x?.nome) === nome)
+    const cidade = cidadeDe(o)
+    return cidade && cidade.length <= 40 ? `${nome} — ${cidade}` : nome
+  }
+
   if (candidatos?.length) {
-    candidatos.forEach((o, i) => linhas.push(`${i + 1}) ${o}`))
+    candidatos.forEach((o, i) => linhas.push(`${i + 1}) ${comCidade(o)}`))
     if (falta.includes('valor')) linhas.push('E qual foi o *valor*?')
   }
 
   if (!candidatos?.length && falta.includes('obra') && nomes.length && nomes.length <= 12) {
-    linhas.push(`(${nomes.join(' · ')})`)
+    nomes.forEach((o, i) => linhas.push(`${i + 1}) ${comCidade(o)}`))
+  }
+
+  if (candidatos?.length || (falta.includes('obra') && nomes.length && nomes.length <= 12)) {
+    linhas.push(falta.includes('valor')
+      ? '_(responde o número e o valor, tipo "2 150" — ou escreve a obra)_'
+      : '_(responde o número — ou escreve a obra ou a cidade)_')
   }
 
   // Guarda as opções numeradas: responder "1" é o jeito mais rápido, e é o

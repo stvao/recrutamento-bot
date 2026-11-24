@@ -40,9 +40,35 @@ sem aprovação humana.
 | `pendentes.js` | Comprovantes esperando resposta, em disco (`dados/pendentes/`). Calcula a impressão digital (sha256) de cada arquivo. |
 | `resumo-diario.js` | O fechamento do dia no grupo (desligado por padrão). |
 
-Os testes ficam em `tests/`, com os demais: `teste-gastos.js`,
+Os testes ficam em `tests/`, com os demais: `teste-gastos.js`, `teste-legendas-reais.js`,
 `teste-conversa-gastos.js`, `teste-conversa-pagador.js`, `teste-duplicata.js`, `teste-data-comprovante.js`, `teste-confirmar-valor.js`, `teste-atraso.js`, `teste-quem-mandou.js`, `teste-correcao.js`, `teste-habito.js`, `teste-a-pagar.js`, `teste-leitor-conta.js`, `teste-grupo-leitura.js`,
 `teste-lancamento.js`, `teste-obras.js`, `teste-pendentes.js`.
+
+## Como ele lê a legenda
+
+Medido em 24/11/2026 contra as 243 legendas reais do grupo antigo — é assim
+que a equipe escreve: a **cidade** ("Material Bastos", "Marmitas Pereiras"),
+a **pessoa** ("Vale Rogério") e o **tipo** em poucas palavras.
+
+- **Obra pela cidade.** De cada obra contam o que é só dela no nome
+  ("toschi", "tsuya") e a **cidade** — o campo `municipio` do sistema, quando
+  vier, ou o fim do endereço ("…, Bastos - SP"). A rua e o bairro não contam:
+  "brita" achava a rua "Benedito Brito".
+- **Nome de gente não é obra.** Escola tem nome de gente ("Oswaldo Luiz",
+  "Francisco Pereira"), e "Vale Luiz" ia para a escola. Nomes e sobrenomes
+  comuns não valem como apelido; se a legenda só traz a pessoa, ele pergunta.
+- **Erro de digitação**, só com a mesma primeira letra, e nunca quando a
+  palavra escrita já é outra conhecida: "tsuia" é a Tsuya, mas "guia" (do
+  FGTS) não é "Águia".
+- **Cidade com duas obras** (Bastos): pergunta só entre as duas.
+- **Tipo** pela palavra exata, com o vocabulário da obra: "vale", "pgto",
+  "demissão" (mão de obra), "condução", "vale transporte" (transporte),
+  "FGTS", "guia", "internet" (outro), "concreto", "gesso", "ferragem"
+  (material), "marmita", "mistura", "restaurante" (alimentação). Palavra
+  genérica de pagamento perde para a específica ("Pgto hotel" é hospedagem);
+  entre duas específicas, vale a primeira da frase.
+- **A pergunta da obra** vem numerada e com a cidade de cada uma; dá para
+  responder o número ("2"), o número e o valor ("2 150"), a obra ou a cidade.
 
 ## Comprovante repetido
 

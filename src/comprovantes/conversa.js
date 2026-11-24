@@ -303,6 +303,26 @@ function aplicarResposta(p, texto) {
     return processarUmaVez(p)
   }
 
+  /*
+    O número da obra E o resto, numa mensagem só: "2 150", "1 - 80,00".
+
+    É como se responde a "Só faltou a obra e o valor" com a lista numerada
+    na tela. Lido como texto corrido, "2 150" virava dois números sem obra,
+    e a mesma pergunta voltava.
+  */
+  const numeroEResto = /^(\d{1,2})\s*[),.;:–-]?\s+(\S.*)$/.exec(texto.trim())
+  if (numeroEResto && p.opcoes?.length) {
+    const i = Number(numeroEResto[1]) - 1
+    if (i >= 0 && i < p.opcoes.length) {
+      p.obraEscolhida = p.opcoes[i]
+      p.respostas.push(numeroEResto[2].trim())
+      p.jaPerguntou = false
+      p.perguntadoEm = null
+      pendentes.atualizar(p)
+      return processarUmaVez(p)
+    }
+  }
+
   if (/^\d{1,2}$/.test(so) && p.opcoes?.length) {
     const i = Number(so) - 1
     if (i >= 0 && i < p.opcoes.length) {
