@@ -31,7 +31,8 @@ import { CATEGORIAS, modelosDeVisao } from './ia-visao.js'
 import { acharObras, ratearEntreTodas, nomesDe, cidadeDe } from './lancamento.js'
 import { norm } from '../texto.js'
 
-const CHAVE = process.env.GEMINI_API_KEY || ''
+// A mesma chave da leitura da imagem: a própria dos comprovantes, se houver.
+const CHAVE = process.env.GASTOS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ''
 // Sem endereço próprio, usa o da leitura da imagem quando há um (é o mesmo
 // serviço) — e o do Google, quando não há.
 const ENDPOINT_FIXO = process.env.IA_FRASE_ENDPOINT || process.env.IA_VISAO_ENDPOINT || null

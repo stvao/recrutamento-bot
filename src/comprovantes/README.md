@@ -364,7 +364,7 @@ não vai duas vezes para a IA.
 
 | Variável | Padrão | Para quê |
 |---|---|---|
-| `GASTOS_IA_FRASE` | `on` (com `GEMINI_API_KEY`) | `off` desliga |
+| `GASTOS_IA_FRASE` | `on` (com chave do Gemini) | `off` desliga |
 | `IA_FRASE_ENDPOINT` | o do Gemini | Outro endereço (os testes usam um de mentira) |
 | `IA_FRASE_PRAZO_MS` | `20000` | Quanto esperar a IA (ms); passou, segue sem ela |
 
@@ -624,6 +624,12 @@ não a extensão) e arquivo acima de 20 MB.
 
 Variáveis `GASTOS_*`, `OBRAS_*` e `IA_VISAO_*`, lidas uma vez no import.
 Os dados ficam em `dados/` (relativo a onde o robô roda, não a esta pasta).
+
+**Chave do Gemini.** `GASTOS_GEMINI_API_KEY` é a chave só dos comprovantes
+(leitura da imagem e da frase). Crie-a num **projeto do Google separado** e
+com faturamento ativo: o limite de uso é por projeto, e dividido com o chat do
+RH os comprovantes ficavam sem leitura (HTTP 429) nos dias cheios. Sem ela,
+vale a `GEMINI_API_KEY` de sempre.
 
 ## Contrato com o Obras
 

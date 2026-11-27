@@ -14,11 +14,12 @@
  * alguém confere. O `confianca` existe para a mensagem de volta avisar
  * quando vale olhar com mais atenção.
  *
- * Usa a mesma chave do Gemini que a Maria Vitória já usa. Uma configuração
- * a menos para dar errado, e o plano gratuito cobre folgado o volume de
- * comprovante de uma construtora.
+ * Chave própria dos comprovantes (GASTOS_GEMINI_API_KEY), num projeto do
+ * Google separado: o limite de uso é por PROJETO, e dividido com o chat do RH
+ * os comprovantes ficavam sem leitura (HTTP 429) nos dias cheios — decisão do
+ * dono, 27/11/2026. Sem ela, usa a mesma da Maria Vitória (GEMINI_API_KEY).
  */
-const CHAVE = process.env.GEMINI_API_KEY || ''
+const CHAVE = process.env.GASTOS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ''
 
 /**
  * Modelos de visão, em ordem de preferência.
