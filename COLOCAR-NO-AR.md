@@ -46,10 +46,15 @@ está no servidor, e os dois caminhos do passo 3 o pegam de lá sozinhos.
 
 # Passo 1 — Conectar no servidor
 
+O servidor é a instância **kaer-rh** do Lightsail (IP fixo 3.210.64.70, o mesmo
+de `kaer-rh.duckdns.org`). O antigo, 56.126.66.124, foi cancelado. A porta 22
+só abre para o IP da sua casa: se der *Connection timed out*, atualize a regra
+SSH na aba **Networking** da instância.
+
 No **PowerShell** do seu PC:
 
 ```powershell
-ssh -i "D:\Projetos-de-Codigos\Chaves de acesso\AWS RH\chave-rh.pem" ubuntu@56.126.66.124
+ssh -i "D:\Projetos-de-Codigos\Chaves de acesso\AWS RH\chave-rh.pem" ubuntu@3.210.64.70
 ```
 
 Deu erro de permissão na chave? Rode isto uma vez e tente de novo:
@@ -87,7 +92,7 @@ esse arquivo para o servidor e ajuste o que muda de lugar.
 **No PowerShell do seu PC** (numa janela nova, sem fechar a do servidor):
 
 ```powershell
-scp -i "D:\Projetos-de-Codigos\Chaves de acesso\AWS RH\chave-rh.pem" "D:\Projetos-de-Codigos\LexDocs VAdvocacia\recrutamento-bot\.env" ubuntu@56.126.66.124:~/recrutamento-bot/.env
+scp -i "D:\Projetos-de-Codigos\Chaves de acesso\AWS RH\chave-rh.pem" "D:\Projetos-de-Codigos\LexDocs VAdvocacia\recrutamento-bot\.env" ubuntu@3.210.64.70:~/recrutamento-bot/.env
 ```
 
 **De volta no servidor**, cole o bloco inteiro:
@@ -235,7 +240,7 @@ minutos o auto-deploy põe no ar.
 Para ver o que está acontecendo:
 
 ```powershell
-ssh -i "D:\Projetos-de-Codigos\Chaves de acesso\AWS RH\chave-rh.pem" ubuntu@56.126.66.124 "pm2 logs recrutamento-bot --lines 40 --nostream"
+ssh -i "D:\Projetos-de-Codigos\Chaves de acesso\AWS RH\chave-rh.pem" ubuntu@3.210.64.70 "pm2 logs recrutamento-bot --lines 40 --nostream"
 ```
 
 ## Se precisar reiniciar
