@@ -13,15 +13,20 @@
  *
  * ── O que isto NÃO faz ───────────────────────────────────────────────────
  *
- * Lançar sozinho. Nunca. Obra errada é o pior erro que o módulo pode cometer
- * — o total bate com o comprovante e ninguém percebe até fechar o mês —, e
- * hábito é estatística, não certeza: no dia em que o posto de sempre
- * abastecer o caminhão de outra obra, é a pessoa que sabe. O hábito só
- * encurta a pergunta; quem confirma é sempre gente.
+ * Lançar sozinho com hábito comum. Obra errada é o pior erro que o módulo
+ * pode cometer — o total bate com o comprovante e ninguém percebe até fechar
+ * o mês —, e hábito é estatística, não certeza: no dia em que o posto de
+ * sempre abastecer o caminhão de outra obra, é a pessoa que sabe. O hábito
+ * comum só encurta a pergunta.
+ *
+ * A exceção, decidida pelo dono em 24/11/2026: hábito MUITO forte (ver
+ * `habitoAutomatico`) lança direto — pendente, como todo gasto, e dizendo
+ * na confirmação que a obra veio do hábito e como corrigir.
  *
  * Tudo aqui é função pura. Quem guarda os lançamentos é `memoria.js`.
  */
 import { norm } from '../texto.js'
+import { CATEGORIAS } from './ia-visao.js'
 
 /** Quantos lançamentos do fornecedor, no mínimo, para haver hábito. */
 export const HABITO_MINIMO = Number(process.env.GASTOS_HABITO_MINIMO || 3)
@@ -135,7 +140,9 @@ export const HABITO_AUTO_PROPORCAO = Number(process.env.GASTOS_HABITO_AUTO_PROPO
  * antes. Com ele, entra também o que o robô acabou de lançar e a lista ainda
  * não mostra (ela é guardada por uns minutos) — reconhecido pela impressão
  * digital do arquivo, para não contar duas vezes. A categoria vem do sistema
- * quando ele manda; senão, da memória.
+ * quando ele manda uma que o lançamento aceita; senão, da memória. (As contas
+ * do financeiro usam uma lista maior — EMPREITEIRO, IMPOSTO… — que o /lancar
+ * recusaria.)
  *
  * Gasto rateado conta uma vez e não diz de qual obra o fornecedor "é": as
  * partes (mesmo arquivo, obras diferentes) ficam de fora. Rejeitado não conta.
@@ -151,7 +158,7 @@ export function eventosDoFornecedor(fornecedor, listaDoSistema, daMemoria = []) 
     .filter(l => l && l.obra && !/rejeit|recus|cancel/i.test(String(l.status ?? '')))
     .filter(l => !(l.arquivoHash && porArquivo.get(l.arquivoHash) > 1))
     .filter(l => mesmoFornecedor(fornecedor, fornecedorDe({ estabelecimento: l.fornecedor, cnpj: l.fornecedorCnpj })))
-    .map(l => ({ obra: l.obra, categoria: l.categoria ?? null, quando: Date.parse(`${String(l.data ?? '').slice(0, 10)}T12:00:00-03:00`) }))
+    .map(l => ({ obra: l.obra, categoria: CATEGORIAS.includes(l.categoria) ? l.categoria : null, quando: Date.parse(`${String(l.data ?? '').slice(0, 10)}T12:00:00-03:00`) }))
     .filter(e => Number.isFinite(e.quando))
 
   // Do robô, só o que tem impressão digital e ainda não está na lista: o

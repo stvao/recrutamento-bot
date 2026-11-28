@@ -201,6 +201,16 @@ const MADEIREIRA = { estabelecimento: 'APP MADEIREIRA EIRELI', valor: 965, confi
   ok('(2 no sistema, um deles o mesmo do robô: não chega a 3)', !p2.ditos.some(t => /como das outras vezes/.test(t)))
 }
 
+{
+  // As contas do financeiro trazem categorias que o /lancar recusaria.
+  const { eventosDoFornecedor } = await import('../src/comprovantes/habito.js')
+  const conta = (categoria, i) => ({ origem: 'conta', obra: FRANCISCO, valor: 10, data: diasAtras(i + 2), fornecedor: 'App Madeireira', fornecedorCnpj: '12345678000190', categoria, status: 'PAGO' })
+  const r = eventosDoFornecedor({ nome: 'app madeireira', cnpj: null }, [conta('EMPREITEIRO', 0), conta('IMPOSTO', 1), conta('MATERIAL', 2)], [])
+  ok('categoria fora da lista do lançamento (EMPREITEIRO, IMPOSTO) não entra no hábito', r.eventos.map(e => e.categoria).join(',') === ',,MATERIAL')
+  const porCnpj = eventosDoFornecedor({ nome: 'outro nome', cnpj: '12345678000190' }, [conta('MATERIAL', 0)], [])
+  ok('conta do financeiro com o mesmo CNPJ conta, mesmo com outro nome', porCnpj.eventos.length === 1)
+}
+
 // ══ 4. Hábito muito forte: lança direto ═══════════════════════════════════
 {
   const p = pessoa()
