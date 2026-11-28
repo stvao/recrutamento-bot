@@ -557,6 +557,32 @@ export function cidadeDe(o) {
   return end
 }
 
+/**
+ * As obras que ficam na cidade impressa no comprovante.
+ *
+ * O cupom do posto de Peruíbe quase sempre é da obra de Peruíbe. Quando a
+ * pessoa manda a foto sem dizer a obra, a cidade do papel é uma pista — e só
+ * pista: compra-se material numa cidade para a obra da cidade vizinha, e a
+ * sede de uma rede fica longe de tudo. Por isso quem chama PERGUNTA ("É da
+ * <obra>? O comprovante é de <cidade>."), e nunca lança por conta disso.
+ *
+ * Casa a cidade inteira, sem acento nem maiúscula, com ou sem a UF no fim
+ * ("PERUIBE - SP" é "Peruíbe"). Um pedaço não basta: "Praia" não é "Praia
+ * Grande". Obra sem cidade conhecida (endereço que não deu para entender)
+ * fica de fora.
+ */
+export function obrasDaCidade(cidade, obras) {
+  const limpa = norm(String(cidade ?? '').replace(/\s*[-/,(]\s*[A-Za-z]{2}\s*\)?\s*$/, ''))
+  if (limpa.length < 3) return []
+  return (obras ?? [])
+    .filter(o => {
+      const c = cidadeDe(o)
+      return c && c.length <= 40 && norm(c) === limpa
+    })
+    .map(o => o.nome)
+    .filter(Boolean)
+}
+
 export function apelidosDe(obras) {
   const donasDe = new Map()   // palavra -> [obras que a contêm]
 
@@ -993,6 +1019,8 @@ export function combinar(escrito, lido) {
     confiancaLeitura: lido?.confianca ?? null,
     estabelecimento: lido?.estabelecimento ?? null,
     documento: lido?.documento ?? null,
+    // A cidade impressa no comprovante: pista para a obra quando ninguém a escreveu.
+    cidade: lido?.cidade ?? null,
     // De quem é o comprovante, para reconhecer o fornecedor de novo (habito.js).
     cnpj: lido?.cnpj ?? null,
     // O que é o documento, se a imagem prova o pagamento, e quando vence —

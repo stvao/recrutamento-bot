@@ -103,6 +103,7 @@ const ESQUEMA = {
     estabelecimento: { type: 'string', description: 'Nome de quem RECEBEU o pagamento (posto, loja, pessoa). Vazio se nao conseguir ler.' },
     categoria: { type: 'string', enum: CATEGORIAS, description: 'A categoria do gasto.' },
     documento: { type: 'string', description: 'Numero do cupom, nota ou id da transacao, se aparecer. Vazio se nao.' },
+    cidade: { type: 'string', description: 'Cidade de quem RECEBEU o pagamento (o endereco da loja, do posto), so o nome da cidade, como esta IMPRESSA no documento. Vazio se nao aparecer. Nunca a cidade de quem pagou, nem deduzida do nome ou do DDD.' },
     cnpj: { type: 'string', description: 'CNPJ de quem RECEBEU o pagamento, so os 14 digitos, se aparecer inteiro e legivel. Vazio se nao aparecer, se estiver cortado ou se for CPF.' },
     formaPagamento: { type: 'string', description: 'Pix, cartao, dinheiro, boleto — como aparece no comprovante. Vazio se nao aparecer.' },
     tipoDocumento: { type: 'string', enum: TIPOS_DE_DOCUMENTO, description: 'O que e o documento: comprovante_pagamento (Pix, transferencia, recibo, comprovante de cartao), cupom_fiscal (cupom de loja, posto, mercado), nota_fiscal (NF-e, DANFE, nota de servico), boleto (boleto bancario ou fatura a pagar), orcamento_pedido (orcamento, cotacao, pedido de compra), outro.' },
@@ -111,7 +112,7 @@ const ESQUEMA = {
     confianca: { type: 'string', enum: ['alta', 'media', 'baixa'], description: 'Quao seguro voce esta do VALOR e da DATA. "baixa" se a foto esta ruim, cortada ou ilegivel.' },
     observacao: { type: 'string', description: 'So se algo estiver estranho (foto cortada, dois valores possiveis, ilegivel). Vazio se estiver tudo claro.' },
   },
-  required: ['valor', 'data', 'estabelecimento', 'categoria', 'documento', 'cnpj', 'formaPagamento', 'tipoDocumento', 'pagamentoComprovado', 'vencimento', 'confianca', 'observacao'],
+  required: ['valor', 'data', 'estabelecimento', 'categoria', 'documento', 'cidade', 'cnpj', 'formaPagamento', 'tipoDocumento', 'pagamentoComprovado', 'vencimento', 'confianca', 'observacao'],
 }
 
 const INSTRUCOES = `Você lê comprovantes de pagamento de uma construtora que reforma escolas
@@ -287,6 +288,9 @@ export function conferir(bruto) {
     estabelecimento: texto(bruto.estabelecimento),
     categoria,
     documento: texto(bruto.documento),
+    // Onde fica quem recebeu, quando o papel diz. Serve só de PISTA para a
+    // obra (ver `obrasDaCidade`, em lancamento.js) — nunca decide sozinha.
+    cidade: texto(bruto.cidade),
     // Só um CNPJ inteiro vale: 14 dígitos. Com um a menos já é outro número,
     // e é por ele que se reconhece o fornecedor da vez seguinte.
     cnpj: typeof bruto.cnpj === 'string' && bruto.cnpj.replace(/\D/g, '').length === 14 ? bruto.cnpj.replace(/\D/g, '') : null,

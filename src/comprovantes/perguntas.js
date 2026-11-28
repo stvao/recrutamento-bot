@@ -112,6 +112,25 @@ export function perguntarObraDoRh(pendente, dados, doRh, falta) {
   return linhas.join('\n')
 }
 
+/**
+ * "É da <obra>? O comprovante é de <cidade>." — quando falta a obra e a
+ * cidade impressa no comprovante é a de uma obra só. Resposta igual à do
+ * hábito: *sim* confirma, qualquer outra coisa segue o caminho de sempre.
+ */
+export function perguntarObraDaCidade(pendente, dados, obra, cidade, falta) {
+  const linhas = []
+  const sabido = [
+    dados.descricao, dados.tipo ? dados.tipo.replace(/_/g, ' ').toLowerCase() : null, moeda(dados.valor),
+  ].filter(Boolean)
+  if (sabido.length) linhas.push(`Anotei: ${sabido.join(' · ')}`)
+  const pergunta = `É da *${obra}*? O comprovante é de ${cidade}. Responde *sim* ou diz a obra.`
+  pendente.ultimaPergunta = pergunta
+  pendente.opcoes = null
+  linhas.push(pergunta)
+  if (falta.includes('valor')) linhas.push('E qual foi o *valor*?')
+  return linhas.join('\n')
+}
+
 /** "é isso mesmo" — as formas de confirmar o valor lido. */
 export const CONFIRMA_VALOR = /^\s*(sim|s|isso|isso mesmo|[eé] isso|[eé] isso mesmo|confirma|confirmo|confirmado|ok|okay|certo|correto|t[aá] certo|est[aá] certo|exato|exatamente|👍)\s*[!.]*\s*$/i
 
@@ -221,7 +240,7 @@ export function perguntar(pendente, falta, obras) {
   const doisValores = d?.valorAmbiguo?.length > 1 ? d.valorAmbiguo : null
 
   const pergunta = candidatos?.length
-    ? 'Aí tem mais de uma obra. É qual delas?'
+    ? (d?.candidatosDaCidade ? `O comprovante é de ${d.candidatosDaCidade}, que tem mais de uma obra. É qual delas?` : 'Aí tem mais de uma obra. É qual delas?')
     : doisValores
       ? `Vi dois valores aí (${doisValores.join(' e ')}). Qual é o do comprovante?`
       : falta.includes('obra') && falta.includes('valor')

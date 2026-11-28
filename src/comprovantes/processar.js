@@ -7,11 +7,11 @@
 import { lerComprovante } from './ia-visao.js'
 import { obrasDoSistema, pagadoresConhecidos, lancadosDoSistema } from './obras-client.js'
 import { enviarMensagem } from '../connectors.js'
-import { interpretar, combinar, acharValor, nomesDe, acharObra, temNomeDePessoa, nomesDePessoaNoTexto } from './lancamento.js'
+import { interpretar, combinar, acharValor, nomesDe, acharObra, temNomeDePessoa, nomesDePessoaNoTexto, obrasDaCidade } from './lancamento.js'
 import { quemE } from '../rh-client.js'
 import { entenderFrase, iaFraseLigada, CORRIGINDO } from './ia-frase.js'
 import { norm } from '../texto.js'
-import { perguntar, perguntarPagador, perguntarValorLido, perguntarObraDoHabito, perguntarObraDoRh, EMPRESA_NO_TEXTO } from './perguntas.js'
+import { perguntar, perguntarPagador, perguntarValorLido, perguntarObraDoHabito, perguntarObraDoRh, perguntarObraDaCidade, EMPRESA_NO_TEXTO } from './perguntas.js'
 import { fornecedorDe, habitoDe, eventosDoFornecedor, habitoAutomatico, HABITO_DIAS } from './habito.js'
 import { ehGrupoDeLeitura } from './autorizacao.js'
 import { lancar, paraCaixa, diaDoEnvio, dataDoGasto, mandarParaContasAPagar } from './saida.js'
@@ -132,6 +132,9 @@ async function obraPeloRh(pendente, dados, obras) {
   }
   return null
 }
+
+/** Sugerir a obra pela cidade impressa no comprovante? Ligado por padrão; GASTOS_CIDADE_COMPROVANTE=off desliga. */
+const cidadeLigada = () => String(process.env.GASTOS_CIDADE_COMPROVANTE ?? 'on').toLowerCase() !== 'off'
 
 /** Timers da espera pela legenda, por comprovante. Fora da ficha: não vão para o disco. */
 export const timersLegenda = new Map()
@@ -546,6 +549,39 @@ export async function processar(pendente, { ensaio = false } = {}) {
         desfecho: 'pergunta',
         pergunta: `${falta.join(' e ')} (pelo RH, ${doRh.nome} está em ${doRh.obra})`,
       }
+    }
+  }
+
+  /*
+    Falta a obra, ninguém escreveu nada que ajude, e o comprovante traz a
+    CIDADE de quem recebeu (decisão do dono, 28/11/2026): o cupom do posto
+    de Peruíbe quase sempre é da obra de Peruíbe.
+
+    Sugestão, nunca lançamento direto — compra-se numa cidade para a obra da
+    vizinha. Uma obra na cidade: "É da <obra>? O comprovante é de <cidade>."
+    Mais de uma (Bastos): a pergunta de sempre, só entre elas. Depois do
+    hábito e do RH, que sabem mais: o fornecedor de sempre e a pessoa citada
+    valem mais do que o endereço da loja. Uma vez por comprovante.
+  */
+  if (falta.includes('obra') && cidadeLigada() && dados.cidade && !dados.candidatos?.length
+    && !pendente.cidadePerguntada && !pendente.habitoPerguntado && (!pendente.jaPerguntou || ensaio)) {
+    const daCidade = obrasDaCidade(dados.cidade, obras)
+    if (daCidade.length === 1) {
+      pendente.cidadePerguntada = true
+      pendente.habitoPerguntado = true
+      pendente.esperandoHabito = daCidade[0]
+      pendente.jaPerguntou = true
+      return {
+        perguntando: true,
+        texto: perguntarObraDaCidade(pendente, dados, daCidade[0], dados.cidade, falta),
+        desfecho: 'pergunta',
+        pergunta: `${falta.join(' e ')} (pela cidade do comprovante, ${dados.cidade}, seria ${daCidade[0]})`,
+      }
+    }
+    if (daCidade.length > 1) {
+      pendente.cidadePerguntada = true
+      dados.candidatos = daCidade
+      dados.candidatosDaCidade = dados.cidade
     }
   }
 

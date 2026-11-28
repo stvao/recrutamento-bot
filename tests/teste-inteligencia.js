@@ -73,7 +73,7 @@ const srv = createServer((req, res) => {
         // Leitura da imagem: o arquivo de teste traz o que "está escrito nele".
         let leitura = {}
         try { leitura = JSON.parse(Buffer.from(partes[0].inline_data.data, 'base64').toString('utf8')).leitura ?? {} } catch { /* não é de teste */ }
-        return gemini({ valor: 0, data: '', estabelecimento: '', categoria: '', documento: '', cnpj: '', formaPagamento: '', tipoDocumento: 'comprovante_pagamento', pagamentoComprovado: true, vencimento: '', confianca: 'baixa', observacao: '', ...leitura })
+        return gemini({ valor: 0, data: '', estabelecimento: '', categoria: '', documento: '', cidade: '', cnpj: '', formaPagamento: '', tipoDocumento: 'comprovante_pagamento', pagamentoComprovado: true, vencimento: '', confianca: 'baixa', observacao: '', ...leitura })
       }
       const pedido = partes[0]?.text ?? ''
       iaFrase.push(pedido)
@@ -124,6 +124,7 @@ function pessoa({ manterMemoria = false } = {}) {
   lancadosNoSistema = []; pagadores = []; funcionarios = {}
   respostaDaIa = () => null
   delete process.env.GASTOS_HABITO_AUTO
+  delete process.env.GASTOS_CIDADE_COMPROVANTE
   const ditos = []
   let n = 0
   const enviarResposta = async (t) => { ditos.push(t); return { id: `bot-${++n}` } }
@@ -369,6 +370,53 @@ const MADEIREIRA = { estabelecimento: 'APP MADEIREIRA EIRELI', valor: 965, confi
   const semNada = pessoa()
   void semNada
   ok('semana sem nada: não manda, mas marca (não fica tentando)', (await talvezMandar(em(maisDias(7), '12:30'))) === null && memoria.relatorioDaSemana() === maisDias(7))
+}
+
+// ══ 6. A cidade impressa no comprovante ═══════════════════════════════════
+{
+  const { obrasDaCidade } = await import('../src/comprovantes/lancamento.js')
+  ok('cidade com uma obra, sem acento e com UF', obrasDaCidade('PERUIBE - SP', OBRAS).join() === FRANCISCO)
+  ok('cidade com duas obras devolve as duas', obrasDaCidade('Bastos', OBRAS).length === 2)
+  ok('pedaço da cidade não casa ("Praia" não é Praia Grande)', obrasDaCidade('Praia', OBRAS).length === 0)
+  ok('cidade sem obra, ou vazia: nada', obrasDaCidade('Tupã', OBRAS).length === 0 && obrasDaCidade('', OBRAS).length === 0 && obrasDaCidade(null, OBRAS).length === 0)
+  ok('obra com município no cadastro também casa', obrasDaCidade('Buritama/SP', OBRAS).join() === BURITAMA)
+
+  const POSTO = { estabelecimento: 'Auto Posto Litoral', valor: 200, confianca: 'alta', cidade: 'PERUIBE' }
+  const p = pessoa()
+  await p.foto('', cupom(POSTO)); await espera(30)
+  ok('sem legenda, comprovante de Peruíbe: sugere a obra de Peruíbe', p.ditos.some(t => t.includes(`É da *${FRANCISCO}*? O comprovante é de PERUIBE.`)))
+  ok('sem lançar sozinho', lancs().length === 0)
+  await p.diz('sim'); await espera(30)
+  ok('"sim" lança na obra da cidade', lancs().length === 1 && campoDe(lancs()[0].corpo, 'obra') === FRANCISCO)
+
+  const p2 = pessoa()
+  await p2.foto('', cupom(POSTO)); await espera(30)
+  await p2.diz('não, é da toschi'); await espera(30)
+  ok('recusada a sugestão da cidade, vale a obra que a pessoa disse', lancs().length === 1 && campoDe(lancs()[0].corpo, 'obra') === TOSCHI)
+
+  const p3 = pessoa()
+  await p3.foto('gasolina toschi', cupom(POSTO)); await espera(30)
+  ok('a pessoa escreveu a obra: a cidade do comprovante não se mete', lancs().length === 1 && campoDe(lancs()[0].corpo, 'obra') === TOSCHI && !p3.ditos.some(t => /O comprovante é de/.test(t)))
+
+  const p4 = pessoa()
+  await p4.foto('', cupom({ ...POSTO, cidade: 'Bastos' })); await espera(30)
+  ok('cidade com duas obras: pergunta só entre elas', p4.ditos.some(t => /O comprovante é de Bastos, que tem mais de uma obra/.test(t) && t.includes(TSUYA) && t.includes(HAIA) && !t.includes(FRANCISCO)))
+  await p4.diz('2'); await espera(30)
+  ok('e o número escolhe', lancs().length === 1 && [TSUYA, HAIA].includes(campoDe(lancs()[0].corpo, 'obra')))
+
+  const p5 = pessoa()
+  await p5.foto('', cupom({ ...POSTO, cidade: 'Tupã' })); await espera(30)
+  ok('cidade sem obra: a pergunta de sempre', p5.ditos.some(t => /De qual \*obra\*/.test(t)) && !p5.ditos.some(t => /O comprovante é de/.test(t)))
+
+  const p6 = pessoa()
+  lancadosNoSistema = historico('Auto Posto Litoral', TOSCHI, 3)
+  await p6.foto('', cupom(POSTO)); await espera(30)
+  ok('o hábito do fornecedor vale mais que a cidade', p6.ditos.some(t => t.includes(`É da *${TOSCHI}*, como das outras vezes?`)) && !p6.ditos.some(t => /O comprovante é de/.test(t)))
+
+  const p7 = pessoa()
+  process.env.GASTOS_CIDADE_COMPROVANTE = 'off'
+  await p7.foto('', cupom(POSTO)); await espera(30)
+  ok('com GASTOS_CIDADE_COMPROVANTE=off, não sugere', !p7.ditos.some(t => /O comprovante é de/.test(t)))
 }
 
 _limparPendentes()

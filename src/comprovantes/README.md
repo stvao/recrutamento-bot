@@ -340,6 +340,18 @@ candidato), e só se a obra do RH está aberta no sistema. Usa o mesmo
 `RH_API_URL`/`RH_API_TOKEN` do resto do robô; sem eles, a pergunta é a de
 sempre.
 
+## A cidade do comprovante
+
+Quando falta a obra e nem o hábito nem o RH ajudaram, vale a cidade
+IMPRESSA no comprovante (o endereço da loja, do posto), lida pela IA:
+
+> É da *<obra>*? O comprovante é de Peruíbe. Responde *sim* ou diz a obra.
+
+Se a cidade tem mais de uma obra (Bastos), a pergunta é só entre elas. É
+sempre sugestão, nunca lançamento direto: compra-se numa cidade para a obra
+da vizinha. Se a pessoa escreveu qualquer coisa que diga a obra, a cidade do
+papel não entra. `GASTOS_CIDADE_COMPROVANTE=off` desliga.
+
 ## A IA lendo a frase
 
 As regras leem bem "haia cimento 250", mas não entendem negação nem frases
