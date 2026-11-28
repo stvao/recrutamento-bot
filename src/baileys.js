@@ -71,12 +71,18 @@ function tempoDeDigitacao(texto) {
 /**
  * Os grupos onde o robô tem o que fazer.
  *
- * Só o dos comprovantes. Estar num grupo e ficar calado é o padrão; a
- * exceção é explícita e vem da mesma variável que o módulo de gastos usa,
+ * Só os dos comprovantes. Estar num grupo e ficar calado é o padrão; a
+ * exceção é explícita e vem das mesmas variáveis que o módulo de gastos usa,
  * para não haver duas listas divergindo.
+ *
+ * Os grupos SÓ DE LEITURA (GASTOS_GRUPOS_LEITURA) entram também: o robô não
+ * fala neles, mas tem de OUVIR. Ficavam de fora, e a mensagem do grupo da
+ * equipe era descartada aqui, antes de chegar ao módulo — que nunca dizia o
+ * identificador do grupo, porque nunca via mensagem nenhuma dele.
  */
 const GRUPOS_ATENDIDOS = new Set(
-  (process.env.GASTOS_GRUPOS || '').split(',').map(g => g.trim()).filter(Boolean),
+  [process.env.GASTOS_GRUPOS, process.env.GASTOS_GRUPOS_LEITURA]
+    .flatMap(v => (v || '').split(',')).map(g => g.trim()).filter(Boolean),
 )
 
 
@@ -168,7 +174,7 @@ async function carregarGrupos() {
         .find(([jid, nome]) => jid === alvo || normalizar(nome) === normalizar(alvo))
       console.log(achado
         ? `[whatsapp]  grupo "${achado[1]}" encontrado (${achado[0]})`
-        : `[whatsapp]  NÃO achei nenhum grupo chamado "${alvo}" — confira o nome em GASTOS_GRUPOS`)
+        : `[whatsapp]  NÃO achei nenhum grupo chamado "${alvo}" — confira o nome em GASTOS_GRUPOS ou GASTOS_GRUPOS_LEITURA`)
     }
   } catch (e) {
     console.warn('[whatsapp] não consegui listar os grupos:', e.message)
