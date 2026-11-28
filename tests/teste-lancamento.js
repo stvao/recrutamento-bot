@@ -44,6 +44,12 @@ ok('"1.40" (ponto decimal) continua 1,40', acharValor('bala 1.40').valor === 1.4
 
 // Um único valor com cara de dinheiro vence o número que vem depois dele.
 ok('"150,00, 2 dias" é 150, não 2', acharValor('haia, diaria pedreiro 150,00, 2 dias').valor === 150)
+// Vistos no grupo da equipe (24/11/2026): lançariam R$ 1,00.
+ok('"1 diária" é quantidade, não valor', acharValor('Pagamento marceneiro 1 diária').valor === null)
+ok('"(1 semana)" é quantidade, não valor', acharValor('Material de (1 semana) elétrica Praia Grande').valor === null)
+ok('"3 diárias" sem preço: sem valor', acharValor('3 diárias pedreiro').valor === null)
+ok('…mas "1 semana 300" é 300', acharValor('Vale 1 semana 300').valor === 300)
+ok('…e "diaria 150" continua 150', acharValor('diaria 150').valor === 150)
 ok('"350,00 nota 4521" é 350, não 4521', acharValor('haia cimento 350,00 nota 4521').valor === 350)
 ok('"25,00 x 4" é 25, não 4', acharValor('haia marmita 25,00 x 4').valor === 25)
 ok('o número que sobra fica na descrição', acharValor('haia cimento 350,00 nota 4521').resto.includes('4521'))

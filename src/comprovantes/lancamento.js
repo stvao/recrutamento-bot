@@ -245,8 +245,9 @@ export function acharData(texto, agora = new Date()) {
  * Número que aparece na legenda mas não é o valor do gasto.
  *
  * Nota fiscal, placa, quilometragem, dia, hora — e quantidade com unidade
- * ("2 dias", "20 sacos"). Só para número SEM cara de dinheiro: "R$ 25,00 x 4"
- * continua sendo 25.
+ * ("2 dias", "20 sacos", "1 diária", "1 semana"). Só para número SEM cara de
+ * dinheiro: "R$ 25,00 x 4" continua sendo 25. ("Pagamento marceneiro 1 diária"
+ * lançaria R$ 1,00 — visto no grupo da equipe em 24/11/2026.)
  */
 function naoEhValor(texto, achado) {
   const bruto = achado[1]
@@ -256,7 +257,7 @@ function naoEhValor(texto, achado) {
   if (/(?:\bnf|\bnota(?:\s+fiscal)?|\bcupom|\bdoc(?:umento)?|\bplaca|\bkm|\bdia|\bdias|\bas|\bàs|\bx|n[º°o]\.?)\s*[:#.nº°]*\s*$/i.test(antes)) return true
   // Unidade seguida de OUTRO número é rótulo desse outro ("180 dia 25/09",
   // "200 km 45230"), e não a unidade deste.
-  if (/^\s*(?:h|hs|hrs?|horas?|km|dias?|sacos?|un|und|unidades?|p[çc]s?|pe[çc]as?|kg|l|litros?|m|m2|m3|metros?|x)\b(?!\s*\d)/i.test(depois)) return true
+  if (/^\s*(?:h|hs|hrs?|horas?|km|dias?|di[aá]rias?|semanas?|quinzenas?|m[eê]s|meses|vezes|parcelas?|sacos?|un|und|unidades?|p[çc]s?|pe[çc]as?|kg|l|litros?|m|m2|m3|metros?|x)\b(?!\s*\d)/i.test(depois)) return true
   return false
 }
 
